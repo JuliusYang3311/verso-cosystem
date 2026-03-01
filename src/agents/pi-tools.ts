@@ -12,7 +12,6 @@ import type { SandboxContext } from "./sandbox.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
 import { logWarn } from "../logger.js";
 import { getMemorySearchManager } from "../memory/search-manager.js";
-import { createOrchestratorTriggerTool } from "../orchestration/orchestrator-trigger-tool.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
@@ -404,21 +403,8 @@ export function createOpenClawCodingTools(options?: {
     }),
   ];
 
-  // Orchestrator trigger tool (for main agent to submit orchestration requests)
-  // Note: The orchestrate tool itself is NOT registered here - it's only provided
-  // to the Orchestrator Agent running inside the daemon.
-  const orchAgentEntry = options?.config?.agents?.list?.find((a) => a.id === agentId);
-  const orchConfig = orchAgentEntry?.orchestration;
-  const orchEnabled = orchConfig?.enabled ?? true;
-  if (orchEnabled && !isSubagentSessionKey(options?.sessionKey)) {
-    // Only add orchestrator trigger tool to main sessions, not subagents
-    tools.push(
-      createOrchestratorTriggerTool({
-        agentId: agentId ?? "main",
-        config: options?.config,
-      }),
-    );
-  }
+  // Note: orchestrator trigger tool is registered in verso-tools.ts, not here
+  // The orchestrate tool itself is only provided to the Orchestrator Agent in the daemon
 
   // Security: treat unknown/undefined as unauthorized (opt-in, not opt-out)
   const senderIsOwner = options?.senderIsOwner === true;
