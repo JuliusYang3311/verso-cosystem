@@ -236,16 +236,16 @@ async function runOrchestrationTask(
     const { createAgentSession, codingTools, SessionManager } =
       await import("@mariozechner/pi-coding-agent");
 
-    const orchestratorTools = [
-      orchestrateTool,
-      ...codingTools,
-      ...(webSearchTool ? [webSearchTool] : []),
-    ];
+    // Use customTools parameter instead of tools to add orchestrate tool
+    // tools parameter replaces built-in tools, customTools adds to them
+    const customToolsList = [orchestrateTool, ...(webSearchTool ? [webSearchTool] : [])];
 
     // Multi-line logging BEFORE
     logger.info(`Tools BEFORE createAgentSession (orchId: ${orchId})`);
-    logger.info(`  count: ${orchestratorTools.length}`);
-    logger.info(`  names: ${orchestratorTools.map((t) => t.name).join(", ")}`);
+    logger.info(`  codingTools count: ${codingTools.length}`);
+    logger.info(`  codingTools names: ${codingTools.map((t) => t.name).join(", ")}`);
+    logger.info(`  customTools count: ${customToolsList.length}`);
+    logger.info(`  customTools names: ${customToolsList.map((t) => t.name).join(", ")}`);
 
     const created = await createAgentSession({
       cwd: missionDir,
@@ -253,7 +253,7 @@ async function runOrchestrationTask(
       authStorage,
       modelRegistry,
       model,
-      tools: orchestratorTools, // Provide orchestrate tool + coding tools + web search
+      customTools: customToolsList, // Add orchestrate + web_search as custom tools
       sessionManager: SessionManager.inMemory(missionDir),
     });
 
@@ -279,10 +279,10 @@ async function runOrchestrationTask(
     logger.info(`  count: ${sessionTools.length}`);
     logger.info(`  names: ${sessionToolNames.join(", ")}`);
 
-    // Find missing tools
-    const missingTools = orchestratorTools
+    // Find missing custom tools
+    const missingTools = customToolsList
       .filter(
-        (t) =>
+        (t: { name: string }) =>
           !sessionTools.some(
             (st: unknown) =>
               typeof st === "object" &&
@@ -291,7 +291,7 @@ async function runOrchestrationTask(
               (st as { name: string }).name === t.name,
           ),
       )
-      .map((t) => t.name);
+      .map((t: { name: string }) => t.name);
 
     if (missingTools.length > 0) {
       logger.error(`CRITICAL: Tools missing after session creation! (orchId: ${orchId})`);
