@@ -199,53 +199,18 @@ async function runOrchestrationTask(
       verifyCmd: opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
     });
 
-    // Verify orchestrate tool structure
-    logger.info("Orchestrate tool created", {
-      orchId,
-      hasName: !!orchestrateTool.name,
-      name: orchestrateTool.name,
-      hasLabel: !!orchestrateTool.label,
-      hasDescription: !!orchestrateTool.description,
-      hasParameters: !!orchestrateTool.parameters,
-      hasExecute: typeof orchestrateTool.execute === "function",
-      toolKeys: Object.keys(orchestrateTool),
-    });
-
     // Create web search tool for orchestrator
-    logger.info("Creating web search tool", { orchId });
     const { createWebSearchTool } = await import("../agents/tools/web-search.js");
     const { loadConfig } = await import("../config/config.js");
     const config = loadConfig();
     const webSearchTool = createWebSearchTool({ config, sandboxed: false });
-    logger.info("Web search tool created", { orchId, hasWebSearch: !!webSearchTool });
-
-    // Verify web search tool structure if it exists
-    if (webSearchTool) {
-      logger.info("Web search tool structure", {
-        orchId,
-        hasName: !!webSearchTool.name,
-        name: webSearchTool.name,
-        hasLabel: !!webSearchTool.label,
-        hasExecute: typeof webSearchTool.execute === "function",
-        toolKeys: Object.keys(webSearchTool),
-      });
-    }
 
     // Create in-memory orchestrator agent session
     logger.info("Creating orchestrator agent session", { orchId });
-    const { createAgentSession, codingTools, SessionManager } =
-      await import("@mariozechner/pi-coding-agent");
+    const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
 
-    // Use customTools parameter instead of tools to add orchestrate tool
-    // tools parameter replaces built-in tools, customTools adds to them
+    // Use customTools parameter to add orchestrate + web_search tools
     const customToolsList = [orchestrateTool, ...(webSearchTool ? [webSearchTool] : [])];
-
-    // Multi-line logging BEFORE
-    logger.info(`Tools BEFORE createAgentSession (orchId: ${orchId})`);
-    logger.info(`  codingTools count: ${codingTools.length}`);
-    logger.info(`  codingTools names: ${codingTools.map((t) => t.name).join(", ")}`);
-    logger.info(`  customTools count: ${customToolsList.length}`);
-    logger.info(`  customTools names: ${customToolsList.map((t) => t.name).join(", ")}`);
 
     const created = await createAgentSession({
       cwd: missionDir,
@@ -253,38 +218,21 @@ async function runOrchestrationTask(
       authStorage,
       modelRegistry,
       model,
-      customTools: customToolsList, // Add orchestrate + web_search as custom tools
+      customTools: customToolsList,
       sessionManager: SessionManager.inMemory(missionDir),
     });
 
     const session = created.session;
     logger.info("Orchestrator agent session created", { orchId });
 
-    // Verify tools are actually available in the session using getActiveToolNames()
+    // Verify tools are registered
     const sessionToolNames = session.getActiveToolNames();
-    const hasOrchestrateTool = sessionToolNames.includes("orchestrate");
-
-    // Multi-line logging AFTER
-    logger.info(`Tools AFTER createAgentSession (orchId: ${orchId})`);
-    logger.info(`  count: ${sessionToolNames.length}`);
-    logger.info(`  names: ${sessionToolNames.join(", ")}`);
-
-    // Find missing custom tools
     const missingTools = customToolsList
       .filter((t: { name: string }) => !sessionToolNames.includes(t.name))
       .map((t: { name: string }) => t.name);
 
     if (missingTools.length > 0) {
-      logger.error(`CRITICAL: Tools missing after session creation! (orchId: ${orchId})`);
-      logger.error(`  missingCount: ${missingTools.length}`);
-      logger.error(`  missingNames: ${missingTools.join(", ")}`);
-    }
-
-    if (!hasOrchestrateTool) {
-      logger.error("Orchestrate tool NOT found in session!", {
-        orchId,
-        availableTools: sessionToolNames,
-      });
+      throw new Error(`Critical: Tools missing after session creation: ${missingTools.join(", ")}`);
     }
 
     const orchestratorMessage = `${buildOrchestratorSystemPrompt()}
