@@ -676,3 +676,123 @@ export type LogEntry = {
   message?: string | null;
   meta?: Record<string, unknown> | null;
 };
+
+// Orchestration types
+export type OrchestrationStatus =
+  | "planning"
+  | "dispatching"
+  | "running"
+  | "acceptance"
+  | "fixing"
+  | "completed"
+  | "failed";
+
+export type TaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+export type OrchestrationSubtask = {
+  id: string;
+  title: string;
+  description: string;
+  acceptanceCriteria: string[];
+  status: TaskStatus;
+  workerSessionKey?: string;
+  runId?: string;
+  dependsOn?: string[];
+  resultSummary?: string;
+  error?: string;
+  retryCount: number;
+  createdAtMs: number;
+  startedAtMs?: number;
+  completedAtMs?: number;
+};
+
+export type OrchestrationPlan = {
+  summary: string;
+  subtasks: OrchestrationSubtask[];
+  verifyCmd?: string;
+};
+
+export type AcceptanceVerdict = {
+  subtaskId: string;
+  passed: boolean;
+  reason: string;
+};
+
+export type AcceptanceResult = {
+  passed: boolean;
+  verdicts: AcceptanceVerdict[];
+  summary: string;
+  testedAtMs: number;
+};
+
+export type FixTask = {
+  id: string;
+  sourceSubtaskId: string;
+  description: string;
+  status: TaskStatus;
+  workerSessionKey?: string;
+  runId?: string;
+  error?: string;
+  createdAtMs: number;
+  completedAtMs?: number;
+};
+
+export type Orchestration = {
+  id: string;
+  userPrompt: string;
+  status: OrchestrationStatus;
+  orchestratorSessionKey: string;
+  agentId: string;
+  workspaceDir: string;
+  sourceWorkspaceDir: string;
+  plan?: OrchestrationPlan;
+  fixTasks: FixTask[];
+  acceptanceResults: AcceptanceResult[];
+  maxFixCycles: number;
+  currentFixCycle: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+  completedAtMs?: number;
+  error?: string;
+};
+
+export type OrchestrationListItem = {
+  id: string;
+  userPrompt: string;
+  status: OrchestrationStatus;
+  subtaskCount: number;
+  fixCycle: number;
+  maxFixCycles: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+  completedAtMs?: number;
+};
+
+export type OrchestrationEvent =
+  | {
+      type: "orchestration.started";
+      orchestrationId: string;
+      userPrompt: string;
+    }
+  | {
+      type: "orchestration.completed";
+      orchestrationId: string;
+      outputPath: string;
+      summary: string;
+    }
+  | {
+      type: "orchestration.failed";
+      orchestrationId: string;
+      error: string;
+    }
+  | {
+      type: "orchestration.updated";
+      orchestrationId: string;
+      status: OrchestrationStatus;
+    }
+  | {
+      type: "orchestration.subtask";
+      orchestrationId: string;
+      subtaskId: string;
+      status: TaskStatus;
+    };

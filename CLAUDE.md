@@ -341,15 +341,19 @@ src/orchestration/
 - ✅ Tool description in `system-prompt.ts`
 - ✅ System prompt guidance on when to use orchestration
 - ✅ Event handler for completion notifications (via chat.inject)
-- 📋 System prompt guidance on when to use orchestration
-- 📋 Event handler for completion notifications
 
-#### 📋 Phase 9: UI (Future)
+#### ✅ Phase 9: UI
 
-- Orchestration board (kanban view)
-- Worker panels (live streaming)
-- Task cards, acceptance results
-- Orchestration sidebar
+- ✅ Orchestration board (kanban view) - `ui/src/ui/views/orchestration-board.ts`
+- ✅ Worker panels (live streaming) - `ui/src/ui/views/worker-panel.ts`
+- ✅ Task cards - `ui/src/ui/components/task-card.ts`
+- ✅ Acceptance results panel - `ui/src/ui/components/acceptance-panel.ts`
+- ✅ Orchestration sidebar - `ui/src/ui/components/orchestration-sidebar.ts`
+- ✅ Orchestration layout - `ui/src/ui/layouts/orchestration-layout.ts`
+- ✅ Controller - `ui/src/ui/controllers/orchestration.ts`
+- ✅ Styles - `ui/src/styles/orchestration.css`
+- ✅ Navigation integration - Added "orchestration" tab
+- ✅ Event handling - Real-time updates via gateway events
 
 ### Key Patterns Reused
 
