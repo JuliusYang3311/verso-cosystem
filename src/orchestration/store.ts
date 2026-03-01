@@ -8,6 +8,11 @@ import { resolveStateDir } from "../config/paths.js";
 // --- Paths ---
 
 function orchestrationsDir(): string {
+  // Allow test override via VERSO_ORCHESTRATION_STORE_DIR
+  const override = process.env.VERSO_ORCHESTRATION_STORE_DIR;
+  if (override) {
+    return path.join(override, "orchestrations");
+  }
   return path.join(resolveStateDir(), "orchestrations");
 }
 

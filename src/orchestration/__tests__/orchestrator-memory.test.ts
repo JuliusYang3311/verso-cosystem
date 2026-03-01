@@ -59,16 +59,15 @@ describe("Orchestrator Memory", () => {
       }
     });
 
-    it("should handle initialization errors gracefully", async () => {
+    it("should throw error for invalid workspace path", async () => {
       // Use invalid workspace to trigger error
-      const context = await initOrchestrationMemory({
-        orchId: "test-error",
-        sourceWorkspaceDir: "/invalid/path/that/does/not/exist",
-        agentId: "main",
-      });
-
-      // Should still return context with memoryDir, but memoryManager might be null
-      expect(context.memoryDir).toBeDefined();
+      await expect(
+        initOrchestrationMemory({
+          orchId: "test-error",
+          sourceWorkspaceDir: "/invalid/path/that/does/not/exist",
+          agentId: "main",
+        }),
+      ).rejects.toThrow();
     });
   });
 

@@ -100,6 +100,7 @@ describe("Orchestration Store", () => {
 
   describe("listOrchestrations", () => {
     it("should list all orchestrations", async () => {
+      const now = Date.now();
       const orch1: Orchestration = {
         id: "test-1",
         userPrompt: "Task 1",
@@ -112,8 +113,8 @@ describe("Orchestration Store", () => {
         acceptanceResults: [],
         maxFixCycles: 3,
         currentFixCycle: 0,
-        createdAtMs: Date.now() - 2000,
-        updatedAtMs: Date.now() - 2000,
+        createdAtMs: now - 2000,
+        updatedAtMs: now - 2000,
       };
 
       const orch2: Orchestration = {
@@ -128,16 +129,18 @@ describe("Orchestration Store", () => {
         acceptanceResults: [],
         maxFixCycles: 3,
         currentFixCycle: 0,
-        createdAtMs: Date.now() - 1000,
-        updatedAtMs: Date.now() - 1000,
+        createdAtMs: now - 1000,
+        updatedAtMs: now - 1000,
       };
 
       await saveOrchestration(orch1);
+      // Add small delay to ensure different updatedAtMs timestamps
+      await new Promise((resolve) => setTimeout(resolve, 10));
       await saveOrchestration(orch2);
 
       const list = await listOrchestrations();
       expect(list.length).toBe(2);
-      // Should be sorted by updatedAtMs descending
+      // Should be sorted by updatedAtMs descending (test-2 saved last)
       expect(list[0].id).toBe("test-2");
       expect(list[1].id).toBe("test-1");
     });
