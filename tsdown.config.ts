@@ -57,6 +57,13 @@ export default defineConfig([
     platform: "node",
   },
   {
+    entry: ["src/orchestration/daemon-entry.ts"],
+    outDir: "dist/orchestration",
+    env,
+    fixedExtension: false,
+    platform: "node",
+  },
+  {
     entry: [
       "skills/novel-writer/ts/write-chapter.ts",
       "skills/novel-writer/ts/context.ts",
