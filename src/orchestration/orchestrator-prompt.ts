@@ -11,6 +11,8 @@ Use the \`orchestrate\` tool when:
 - The task involves building a new project or application from scratch
 - The task involves 3+ distinct components that can be worked on independently
 - The task requires parallel independent work (e.g., "create frontend, backend, and database schema")
+- The task involves research/analysis with multiple independent topics (e.g., "analyze US stocks: tech sector, finance sector, healthcare sector")
+- The task involves generating comprehensive reports with multiple sections that can be researched in parallel
 - The user explicitly requests multi-agent execution or parallel work
 - The task would take significantly longer if done sequentially
 
@@ -18,14 +20,21 @@ Do NOT use orchestration for:
 - Simple, focused tasks (single file changes, bug fixes in one area)
 - Tasks that are inherently sequential (each step depends on the previous)
 - Quick questions or explanations
+- Single-topic research or analysis
 
 ### Important: Empty Workspace
 
 The mission workspace starts EMPTY. Workers build the project from scratch. This is ideal for:
 - Creating new applications or tools
-- Generating reports or documentation
+- Generating reports or documentation (each worker can research and write their section)
 - Building prototypes or demos
+- Conducting multi-topic research (each worker researches a different topic)
 - Any task that produces new artifacts
+
+For analysis/research tasks:
+- Each worker can use web_search to gather information
+- Workers write their findings to separate files (e.g., tech_sector.md, finance_sector.md)
+- Final output is a collection of research documents or a consolidated report
 
 ### Orchestration Workflow
 
@@ -36,13 +45,16 @@ When you decide to orchestrate, follow this AUTOMATED workflow:
    - A detailed description of what the worker should create/build
    - Specific acceptance criteria (testable, unambiguous)
    - Dependencies on other subtasks (if any)
-   - **IMPORTANT**: Specify \`verifyCmd\` based on project language (should include lint):
-     - Node.js/TypeScript: "npm run lint && npm test"
-     - Python: "flake8 && pytest" or "ruff check && pytest"
-     - Rust: "cargo clippy && cargo test"
-     - Go: "golangci-lint run && go test ./..."
-     - C++: "clang-tidy src/*.cpp && make test"
-     - Java: "mvn checkstyle:check && mvn test"
+   - **IMPORTANT**: Specify \`verifyCmd\` based on project type:
+     - **Code projects** (should include lint + test):
+       - Node.js/TypeScript: "npm run lint && npm test"
+       - Python: "flake8 && pytest" or "ruff check && pytest"
+       - Rust: "cargo clippy && cargo test"
+       - Go: "golangci-lint run && go test ./..."
+       - C++: "clang-tidy src/*.cpp && make test"
+       - Java: "mvn checkstyle:check && mvn test"
+     - **Analysis/Research/Documentation tasks**: Leave \`verifyCmd\` empty ("") — acceptance will be evaluated purely by LLM checking the acceptance criteria
+     - **Data processing**: Custom validation script (e.g., "python validate_data.py")
 
 2. **Dispatch workers** — IMMEDIATELY after create-plan, call \`orchestrate\` with action \`dispatch\`. This runs all ready subtasks in parallel. Dispatch blocks until all workers complete. If there are dependencies, you may need to call dispatch multiple times as tasks complete.
 
