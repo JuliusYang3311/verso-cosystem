@@ -1,6 +1,8 @@
 import type { VersoConfig } from "../config/config.js";
 import type { GatewayMessageChannel } from "../utils/message-channel.js";
 import type { AnyAgentTool } from "./tools/common.js";
+import { createOrchestrateTool } from "../orchestration/orchestrator-tools.js";
+import { ORCHESTRATION_DEFAULTS } from "../orchestration/types.js";
 import { resolvePluginTools } from "../plugins/tools.js";
 import { resolveSessionAgentId } from "./agent-scope.js";
 import { createAgentsListTool } from "./tools/agents-list-tool.js";
@@ -171,6 +173,27 @@ export function createVersoTools(options?: {
     if (services.includes("slides")) {
       tools.push(slidesCreatePresentation);
     }
+  }
+
+  // Orchestration tool — multi-agent task decomposition
+  const agentId = resolveSessionAgentId({
+    sessionKey: options?.agentSessionKey,
+    config: options?.config,
+  });
+  const orchConfig = options?.config?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
+  const orchEnabled = orchConfig?.enabled ?? ORCHESTRATION_DEFAULTS.enabled;
+
+  if (orchEnabled && options?.agentSessionKey && options?.workspaceDir) {
+    tools.push(
+      createOrchestrateTool({
+        agentSessionKey: options.agentSessionKey,
+        agentId: agentId ?? "main",
+        workspaceDir: options.workspaceDir,
+        maxWorkers: orchConfig?.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers,
+        maxFixCycles: orchConfig?.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
+        verifyCmd: orchConfig?.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
+      }),
+    );
   }
 
   const pluginTools = resolvePluginTools({

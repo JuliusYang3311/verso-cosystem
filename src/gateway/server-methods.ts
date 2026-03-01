@@ -14,6 +14,7 @@ import { healthHandlers } from "./server-methods/health.js";
 import { logsHandlers } from "./server-methods/logs.js";
 import { modelsHandlers } from "./server-methods/models.js";
 import { nodeHandlers } from "./server-methods/nodes.js";
+import { orchestrationHandlers } from "./server-methods/orchestration.js";
 import { sendHandlers } from "./server-methods/send.js";
 import { sessionsHandlers } from "./server-methods/sessions.js";
 import { skillsHandlers } from "./server-methods/skills.js";
@@ -76,6 +77,8 @@ const READ_METHODS = new Set([
   "world.getBrief",
   "world.getSignals",
   "world.search",
+  "orchestration.list",
+  "orchestration.get",
 ]);
 const WRITE_METHODS = new Set([
   "send",
@@ -93,6 +96,10 @@ const WRITE_METHODS = new Set([
   "chat.abort",
   "browser.request",
   "world.refresh",
+  "orchestration.create",
+  "orchestration.abort",
+  "orchestration.retry",
+  "orchestration.delete",
 ]);
 
 function authorizeGatewayMethod(method: string, client: GatewayRequestOptions["client"]) {
@@ -194,6 +201,7 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
   ...agentsHandlers,
   ...browserHandlers,
   ...worldHandlers,
+  ...orchestrationHandlers,
 };
 
 export async function handleGatewayRequest(

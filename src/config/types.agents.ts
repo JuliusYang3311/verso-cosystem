@@ -73,6 +73,13 @@ export type AgentConfig = {
     prune?: SandboxPruneSettings;
   };
   tools?: AgentToolsConfig;
+  /** Multi-agent orchestration settings. */
+  orchestration?: {
+    enabled?: boolean;
+    maxWorkers?: number;
+    maxFixCycles?: number;
+    verifyCmd?: string;
+  };
 };
 
 export type AgentsConfig = {

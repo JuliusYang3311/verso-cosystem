@@ -314,6 +314,16 @@ export class VersoApp extends LitElement {
   @state() logsMaxBytes = 250_000;
   @state() logsAtBottom = true;
 
+  // Orchestration state
+  @state() orchLoading = false;
+  @state() orchList: import("./controllers/orchestration.ts").OrchestrationListItem[] = [];
+  @state() orchError: string | null = null;
+  @state() orchDetail: import("./controllers/orchestration.ts").OrchestrationDetail | null = null;
+  @state() orchDetailLoading = false;
+  @state() orchActiveId: string | null = null;
+  @state() orchSelectedSubtaskId: string | null = null;
+  @state() orchBusy = false;
+
   client: GatewayBrowserClient | null = null;
   private chatScrollFrame: number | null = null;
   private chatScrollTimeout: number | null = null;

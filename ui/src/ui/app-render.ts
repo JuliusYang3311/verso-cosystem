@@ -62,6 +62,14 @@ const debouncedLoadUsage = (state: UsageState) => {
   }
   usageDateDebounceTimeout = window.setTimeout(() => void loadUsage(state), 400);
 };
+import {
+  loadOrchestrations,
+  loadOrchestrationDetail,
+  abortOrchestration,
+  retryOrchestration,
+  deleteOrchestration,
+} from "./controllers/orchestration.ts";
+import { renderOrchestrationLayout } from "./layouts/orchestration-layout.ts";
 import { renderAgents } from "./views/agents.ts";
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
@@ -236,6 +244,35 @@ export function renderApp(state: AppViewState) {
                 },
                 onConnect: () => state.connect(),
                 onRefresh: () => state.loadOverview(),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "orchestration"
+            ? renderOrchestrationLayout({
+                orchestrations: state.orchList,
+                activeId: state.orchActiveId,
+                detail: state.orchDetail,
+                detailLoading: state.orchDetailLoading,
+                listLoading: state.orchLoading,
+                selectedSubtaskId: state.orchSelectedSubtaskId,
+                busy: state.orchBusy,
+                error: state.orchError,
+                onSelectOrchestration: (id) => {
+                  state.orchActiveId = id;
+                  state.orchSelectedSubtaskId = null;
+                  void loadOrchestrationDetail(state, id);
+                },
+                onSelectSubtask: (id) => {
+                  state.orchSelectedSubtaskId = id;
+                },
+                onRefreshList: () => void loadOrchestrations(state),
+                onRefreshDetail: (id) => void loadOrchestrationDetail(state, id),
+                onAbort: (id) => void abortOrchestration(state, id),
+                onRetry: (id) => void retryOrchestration(state, id),
+                onDelete: (id) => void deleteOrchestration(state, id),
+                onBackToChat: () => state.setTab("chat"),
               })
             : nothing
         }

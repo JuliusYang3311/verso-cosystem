@@ -12,6 +12,8 @@ import type { SandboxContext } from "./sandbox.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
 import { logWarn } from "../logger.js";
 import { getMemorySearchManager } from "../memory/search-manager.js";
+import { createOrchestrateTool } from "../orchestration/orchestrator-tools.js";
+import { ORCHESTRATION_DEFAULTS } from "../orchestration/types.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
@@ -402,6 +404,24 @@ export function createOpenClawCodingTools(options?: {
           : undefined,
     }),
   ];
+
+  // Orchestration tool — multi-agent task decomposition
+  const orchAgentEntry = options?.config?.agents?.list?.find((a) => a.id === agentId);
+  const orchConfig = orchAgentEntry?.orchestration;
+  const orchEnabled = orchConfig?.enabled ?? ORCHESTRATION_DEFAULTS.enabled;
+  if (orchEnabled && options?.sessionKey && options?.workspaceDir) {
+    tools.push(
+      createOrchestrateTool({
+        agentSessionKey: options.sessionKey,
+        agentId: agentId ?? "main",
+        workspaceDir: options.workspaceDir,
+        maxWorkers: orchConfig?.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers,
+        maxFixCycles: orchConfig?.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
+        verifyCmd: orchConfig?.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
+      }),
+    );
+  }
+
   // Security: treat unknown/undefined as unauthorized (opt-in, not opt-out)
   const senderIsOwner = options?.senderIsOwner === true;
   const toolsByAuthorization = applyOwnerOnlyToolPolicy(tools, senderIsOwner);

@@ -25,6 +25,7 @@ import {
   removeExecApproval,
 } from "./controllers/exec-approval.ts";
 import { loadNodes } from "./controllers/nodes.ts";
+import { loadOrchestrations, loadOrchestrationDetail } from "./controllers/orchestration.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { GatewayBrowserClient } from "./gateway.ts";
 
@@ -229,6 +230,20 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
 
   if (evt.event === "cron" && host.tab === "cron") {
     void loadCron(host as unknown as Parameters<typeof loadCron>[0]);
+  }
+
+  if (
+    (evt.event === "orchestration.updated" || evt.event === "orchestration.subtask") &&
+    host.tab === "orchestration"
+  ) {
+    void loadOrchestrations(host as unknown as Parameters<typeof loadOrchestrations>[0]);
+    const activeId = (host as unknown as { orchActiveId: string | null }).orchActiveId;
+    if (activeId) {
+      void loadOrchestrationDetail(
+        host as unknown as Parameters<typeof loadOrchestrationDetail>[0],
+        activeId,
+      );
+    }
   }
 
   if (evt.event === "device.pair.requested" || evt.event === "device.pair.resolved") {

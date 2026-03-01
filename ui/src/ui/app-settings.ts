@@ -19,6 +19,7 @@ import { loadDevices } from "./controllers/devices.ts";
 import { loadExecApprovals } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
+import { loadOrchestrations } from "./controllers/orchestration.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
@@ -184,6 +185,9 @@ export function setTheme(host: SettingsHost, next: ThemeMode, context?: ThemeTra
 export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "overview") {
     await loadOverview(host);
+  }
+  if (host.tab === "orchestration") {
+    await loadOrchestrations(host as unknown as Parameters<typeof loadOrchestrations>[0]);
   }
   if (host.tab === "channels") {
     await loadChannelsTab(host);
