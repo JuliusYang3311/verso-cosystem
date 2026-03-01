@@ -219,16 +219,30 @@ async function runOrchestrationTask(
     const webSearchTool = createWebSearchTool({ config, sandboxed: false });
     logger.info("Web search tool created", { orchId, hasWebSearch: !!webSearchTool });
 
+    // Verify web search tool structure if it exists
+    if (webSearchTool) {
+      logger.info("Web search tool structure", {
+        orchId,
+        hasName: !!webSearchTool.name,
+        name: webSearchTool.name,
+        hasLabel: !!webSearchTool.label,
+        hasExecute: typeof webSearchTool.execute === "function",
+        toolKeys: Object.keys(webSearchTool),
+      });
+    }
+
     // Create in-memory orchestrator agent session
     logger.info("Creating orchestrator agent session", { orchId });
     const { createAgentSession, codingTools, SessionManager } =
       await import("@mariozechner/pi-coding-agent");
 
-    const orchestratorTools = [
-      orchestrateTool,
-      ...codingTools,
-      ...(webSearchTool ? [webSearchTool] : []),
-    ];
+    // TEMPORARY: Use working version without web search to isolate the problem
+    const orchestratorTools = [orchestrateTool, ...codingTools];
+    // const orchestratorTools = [
+    //   orchestrateTool,
+    //   ...codingTools,
+    //   ...(webSearchTool ? [webSearchTool] : []),
+    // ];
 
     logger.info("Creating agent session with tools", {
       orchId,
