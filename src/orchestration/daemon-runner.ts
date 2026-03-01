@@ -239,6 +239,14 @@ async function runOrchestrationTask(
 
     // Verify tools are actually available in the session
     const sessionTools = (session as unknown as { tools?: unknown[] }).tools || [];
+    const orchestrateToolInSession = sessionTools.find(
+      (t: unknown) =>
+        typeof t === "object" &&
+        t !== null &&
+        "name" in t &&
+        (t as { name: string }).name === "orchestrate",
+    );
+
     logger.info("Session tools verification", {
       orchId,
       sessionToolCount: sessionTools.length,
@@ -247,14 +255,25 @@ async function runOrchestrationTask(
           ? (t as { name: string }).name
           : "unnamed",
       ),
-      hasOrchestrateToolInSession: sessionTools.some(
-        (t: unknown) =>
-          typeof t === "object" &&
-          t !== null &&
-          "name" in t &&
-          (t as { name: string }).name === "orchestrate",
-      ),
+      hasOrchestrateToolInSession: !!orchestrateToolInSession,
     });
+
+    // Log the full orchestrate tool definition
+    if (orchestrateToolInSession) {
+      logger.info("Orchestrate tool definition", {
+        orchId,
+        toolDefinition: JSON.stringify(orchestrateToolInSession, null, 2),
+      });
+    } else {
+      logger.error("Orchestrate tool NOT found in session!", {
+        orchId,
+        availableTools: sessionTools.map((t: unknown) =>
+          typeof t === "object" && t !== null && "name" in t
+            ? (t as { name: string }).name
+            : "unnamed",
+        ),
+      });
+    }
 
     const orchestratorMessage = `${buildOrchestratorSystemPrompt()}
 
@@ -382,6 +401,7 @@ Start now by calling orchestrate with action "create-plan".`;
       ) {
         logger.warn("Agent did not call tools on first attempt, retrying with prefill", {
           orchId,
+          firstAttemptResponse: result.slice(0, 1000), // Log what agent said instead
         });
 
         // Add a follow-up message that forces tool usage
@@ -401,6 +421,7 @@ Start now by calling orchestrate with action "create-plan".`;
         orchId,
         resultLength: result.length,
         resultPreview: result.slice(0, 500),
+        fullResponse: result, // Log FULL response to see what agent is saying
         messageCount: messages.length,
         lastMessageRole: lastMessage?.role,
         hasToolCalls: !!(
