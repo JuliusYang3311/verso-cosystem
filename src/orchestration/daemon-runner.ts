@@ -174,20 +174,21 @@ async function runOrchestrationTask(
     // - run-acceptance (verify results)
     // - create-fix-tasks + dispatch (if needed)
     // - complete (copy to output)
-    // - dispatch (spawn workers)
-    // - run-acceptance (verify results)
-    // - create-fix-tasks + dispatch (if needed)
-    // - complete (copy to output)
+
+    logger.info("Initializing orchestrator agent", { orchId });
 
     const { buildOrchestratorSystemPrompt } = await import("./orchestrator-prompt.js");
     const { createOrchestrateTool } = await import("./orchestrator-tools.js");
     const { resolveAgentModel } = await import("./model-resolver.js");
     const { resolveOpenClawAgentDir } = await import("../agents/agent-paths.js");
 
+    logger.info("Resolving agent model", { orchId });
     const { model, authStorage, modelRegistry } = await resolveAgentModel();
     const agentDir = resolveOpenClawAgentDir();
+    logger.info("Agent model resolved", { orchId, modelId: model.id, agentDir });
 
     // Create orchestrate tool
+    logger.info("Creating orchestrate tool", { orchId });
     const orchestrateTool = createOrchestrateTool({
       agentSessionKey: opts.agentSessionKey,
       agentId: opts.agentId,
@@ -199,12 +200,15 @@ async function runOrchestrationTask(
     });
 
     // Create web search tool for orchestrator
+    logger.info("Creating web search tool", { orchId });
     const { createWebSearchTool } = await import("../agents/tools/web-search.js");
     const { loadConfig } = await import("../config/config.js");
     const config = loadConfig();
     const webSearchTool = createWebSearchTool({ config, sandboxed: false });
+    logger.info("Web search tool created", { orchId, hasWebSearch: !!webSearchTool });
 
     // Create in-memory orchestrator agent session
+    logger.info("Creating orchestrator agent session", { orchId });
     const { createAgentSession, codingTools, SessionManager } =
       await import("@mariozechner/pi-coding-agent");
 
@@ -213,6 +217,12 @@ async function runOrchestrationTask(
       ...codingTools,
       ...(webSearchTool ? [webSearchTool] : []),
     ];
+
+    logger.info("Creating agent session with tools", {
+      orchId,
+      toolCount: orchestratorTools.length,
+      toolNames: orchestratorTools.map((t) => t.name),
+    });
 
     const created = await createAgentSession({
       cwd: missionDir,
@@ -225,6 +235,7 @@ async function runOrchestrationTask(
     });
 
     const session = created.session;
+    logger.info("Orchestrator agent session created", { orchId });
 
     const orchestratorMessage = `${buildOrchestratorSystemPrompt()}
 
@@ -243,6 +254,8 @@ Execute the entire workflow automatically.`;
 
     let result = "";
     try {
+      logger.info("Starting orchestrator agent prompt execution", { orchId });
+
       // Dynamic context loading (copied from main agent's attempt.ts)
       const { buildDynamicContext, loadContextParams } =
         await import("../agents/dynamic-context.js");
@@ -317,10 +330,27 @@ Execute the entire workflow automatically.`;
         thresholdUsed: dynamicResult.thresholdUsed.toFixed(2),
       });
 
+      logger.info("Sending prompt to orchestrator agent", {
+        orchId,
+        promptLength: orchestratorMessage.length,
+      });
+
       await session.prompt(orchestratorMessage);
       result = session.getLastAssistantText?.() ?? "";
-      logger.info("Orchestrator agent completed", { orchId, result: result.slice(0, 200) });
+      logger.info("Orchestrator agent completed successfully", {
+        orchId,
+        resultLength: result.length,
+        resultPreview: result.slice(0, 200),
+      });
+    } catch (promptErr) {
+      logger.error("Orchestrator agent prompt execution failed", {
+        orchId,
+        error: promptErr instanceof Error ? promptErr.message : String(promptErr),
+        stack: promptErr instanceof Error ? promptErr.stack : undefined,
+      });
+      throw promptErr; // Re-throw to be caught by outer catch block
     } finally {
+      logger.info("Disposing orchestrator agent session", { orchId });
       session.dispose();
     }
 
@@ -362,16 +392,27 @@ Execute the entire workflow automatically.`;
       });
     }
   } catch (err) {
-    logger.error("Orchestration failed", { orchId, error: String(err) });
+    // Capture detailed error information
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorStack = err instanceof Error ? err.stack : undefined;
+
+    logger.error("Orchestration failed with exception", {
+      orchId,
+      error: errorMessage,
+      stack: errorStack,
+    });
 
     // Ensure orchestration is marked as failed
     try {
       const orch = await loadOrchestration(orchId);
-      if (orch && orch.status !== "failed") {
+      if (orch) {
         orch.status = "failed";
-        orch.error = err instanceof Error ? err.message : String(err);
+        orch.error = errorStack || errorMessage; // Save full stack trace
         orch.completedAtMs = Date.now();
         await saveOrchestration(orch);
+        logger.info("Saved failed orchestration state", { orchId });
+      } else {
+        logger.error("Cannot save failed state: orchestration not found", { orchId });
       }
     } catch (saveErr) {
       logger.error("Failed to save error state", { orchId, error: String(saveErr) });
@@ -382,14 +423,18 @@ Execute the entire workflow automatically.`;
       await broadcastOrchestrationEvent({
         type: "orchestration.failed",
         orchestrationId: orchId,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage, // Use concise message for notification
       });
+      logger.info("Broadcasted failure event", { orchId });
     } catch (broadcastErr) {
       logger.error("Failed to broadcast failure event", {
         orchId,
         error: String(broadcastErr),
       });
     }
+
+    // Return early to avoid duplicate processing in the status check below
+    return;
   } finally {
     // 8. Cleanup resources
     try {
