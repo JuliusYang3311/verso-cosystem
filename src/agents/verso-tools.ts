@@ -1,8 +1,7 @@
 import type { VersoConfig } from "../config/config.js";
 import type { GatewayMessageChannel } from "../utils/message-channel.js";
 import type { AnyAgentTool } from "./tools/common.js";
-import { createOrchestrateTool } from "../orchestration/orchestrator-tools.js";
-import { ORCHESTRATION_DEFAULTS } from "../orchestration/types.js";
+import { createOrchestratorTriggerTool } from "../orchestration/orchestrator-trigger-tool.js";
 import { resolvePluginTools } from "../plugins/tools.js";
 import { resolveSessionAgentId } from "./agent-scope.js";
 import { createAgentsListTool } from "./tools/agents-list-tool.js";
@@ -175,23 +174,19 @@ export function createVersoTools(options?: {
     }
   }
 
-  // Orchestration tool — multi-agent task decomposition
+  // Orchestrator trigger tool — submit tasks to orchestrator daemon
   const agentId = resolveSessionAgentId({
     sessionKey: options?.agentSessionKey,
     config: options?.config,
   });
   const orchConfig = options?.config?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
-  const orchEnabled = orchConfig?.enabled ?? ORCHESTRATION_DEFAULTS.enabled;
+  const orchEnabled = orchConfig?.enabled ?? true;
 
-  if (orchEnabled && options?.agentSessionKey && options?.workspaceDir) {
+  if (orchEnabled) {
     tools.push(
-      createOrchestrateTool({
-        agentSessionKey: options.agentSessionKey,
+      createOrchestratorTriggerTool({
         agentId: agentId ?? "main",
-        workspaceDir: options.workspaceDir,
-        maxWorkers: orchConfig?.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers,
-        maxFixCycles: orchConfig?.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
-        verifyCmd: orchConfig?.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
+        config: options?.config,
       }),
     );
   }

@@ -1,0 +1,187 @@
+// src/orchestration/orchestrator.ts — Orchestrator daemon management
+//
+// Start/stop/status functions for the orchestrator daemon.
+// Similar to src/agents/evolver.ts
+
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import type { VersoConfig } from "../config/types.js";
+import { resolveStateDir } from "../config/paths.js";
+import { enqueueOrchestration } from "./daemon-runner.js";
+
+type OrchestratorStartResult = {
+  started: boolean;
+  pid?: number;
+  logPath: string;
+  error?: string;
+};
+
+type OrchestratorStopResult = {
+  stopped: boolean;
+  pid?: number;
+};
+
+type OrchestratorStatus = {
+  running: boolean;
+  pid?: number;
+  logPath: string;
+  queuePath: string;
+};
+
+const LOG_FILENAME = "orchestrator-daemon.log";
+const PID_FILENAME = "orchestrator-daemon.pid";
+
+function ensureLogsDir(): string {
+  const stateDir = resolveStateDir();
+  const logsDir = path.join(stateDir, "logs");
+  fs.mkdirSync(logsDir, { recursive: true });
+  return logsDir;
+}
+
+function resolveLogPaths(): { logPath: string; pidPath: string; queuePath: string } {
+  const logsDir = ensureLogsDir();
+  const stateDir = resolveStateDir();
+  return {
+    logPath: path.join(logsDir, LOG_FILENAME),
+    pidPath: path.join(logsDir, PID_FILENAME),
+    queuePath: path.join(stateDir, "orchestrator-queue.json"),
+  };
+}
+
+function readPid(pidPath: string): number | null {
+  try {
+    const raw = fs.readFileSync(pidPath, "utf-8").trim();
+    if (!raw) {
+      return null;
+    }
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveWorkspace(cfg?: VersoConfig): string {
+  return (
+    cfg?.agents?.defaults?.workspace?.trim() || process.env.OPENCLAW_WORKSPACE || process.cwd()
+  );
+}
+
+export type OrchestratorDaemonOptions = {
+  cfg?: VersoConfig;
+  agentId?: string;
+};
+
+/**
+ * Start the orchestrator daemon in the background.
+ * The daemon will process queued orchestration requests.
+ */
+export async function startOrchestratorDaemon(
+  opts?: OrchestratorDaemonOptions,
+): Promise<OrchestratorStartResult> {
+  const cfg = opts?.cfg;
+  const { logPath, pidPath } = resolveLogPaths();
+  const existingPid = readPid(pidPath);
+  if (existingPid && isPidAlive(existingPid)) {
+    return { started: false, pid: existingPid, logPath };
+  }
+
+  const workspace = resolveWorkspace(cfg);
+  const agentId = opts?.agentId ?? "main";
+  const agentSessionKey = `agent:${agentId}`;
+
+  // Get orchestration config
+  const orchConfig = cfg?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
+  const maxWorkers = orchConfig?.maxWorkers ?? 4;
+  const maxFixCycles = orchConfig?.maxFixCycles ?? 3;
+  const maxOrchestrations = orchConfig?.maxOrchestrations ?? 2;
+  const verifyCmd = orchConfig?.verifyCmd ?? "";
+
+  const scriptPath = path.join(process.cwd(), "dist", "orchestration", "daemon-entry.js");
+  const child = spawn(process.execPath, [scriptPath], {
+    detached: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      ORCHESTRATOR_WORKSPACE: workspace,
+      ORCHESTRATOR_AGENT_ID: agentId,
+      ORCHESTRATOR_SESSION_KEY: agentSessionKey,
+      ORCHESTRATOR_MAX_WORKERS: String(maxWorkers),
+      ORCHESTRATOR_MAX_FIX_CYCLES: String(maxFixCycles),
+      ORCHESTRATOR_MAX_ORCHESTRATIONS: String(maxOrchestrations),
+      ORCHESTRATOR_VERIFY_CMD: verifyCmd,
+    },
+  });
+  child.unref();
+  fs.writeFileSync(pidPath, String(child.pid));
+  return { started: true, pid: child.pid, logPath };
+}
+
+/**
+ * Stop the orchestrator daemon.
+ */
+export async function stopOrchestratorDaemon(): Promise<OrchestratorStopResult> {
+  const { pidPath } = resolveLogPaths();
+  const pid = readPid(pidPath);
+  if (!pid) {
+    return { stopped: false };
+  }
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // ignore
+  }
+  try {
+    fs.unlinkSync(pidPath);
+  } catch {
+    // ignore
+  }
+  return { stopped: true, pid };
+}
+
+/**
+ * Get the status of the orchestrator daemon.
+ */
+export async function getOrchestratorStatus(): Promise<OrchestratorStatus> {
+  const { logPath, pidPath, queuePath } = resolveLogPaths();
+  const pid = readPid(pidPath);
+  const running = pid ? isPidAlive(pid) : false;
+  return { running, pid: running ? (pid ?? undefined) : undefined, logPath, queuePath };
+}
+
+/**
+ * Submit an orchestration request.
+ * If the daemon is not running, it will be started automatically.
+ */
+export async function submitOrchestration(
+  userPrompt: string,
+  opts?: OrchestratorDaemonOptions,
+): Promise<{ orchestrationId: string; daemonStarted: boolean }> {
+  // Check if daemon is running
+  const status = await getOrchestratorStatus();
+  let daemonStarted = false;
+
+  if (!status.running) {
+    // Start the daemon
+    const startResult = await startOrchestratorDaemon(opts);
+    if (!startResult.started && !startResult.pid) {
+      throw new Error("Failed to start orchestrator daemon");
+    }
+    daemonStarted = true;
+  }
+
+  // Enqueue the orchestration request
+  const orchestrationId = enqueueOrchestration(userPrompt);
+
+  return { orchestrationId, daemonStarted };
+}

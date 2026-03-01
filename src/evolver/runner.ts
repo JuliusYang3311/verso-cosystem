@@ -360,7 +360,8 @@ function autoCommitChanges(workspace: string): void {
  */
 export async function runDaemonLoop(options: EvolverRunOptions): Promise<never> {
   const workspace = getWorkspaceRoot(options.workspace);
-  const verifyCmd = options.verifyCmd ?? "pnpm lint && pnpm build && pnpm vitest run";
+  const verifyCmd =
+    options.verifyCmd ?? "npx tsc --noEmit && pnpm build && pnpm lint && pnpm vitest run";
   const rollbackEnabled = options.rollbackEnabled ?? true;
   const cleanEnabled = options.cleanEnabled ?? true;
   const reviewMode = options.review ?? false;

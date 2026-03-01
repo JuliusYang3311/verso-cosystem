@@ -32,11 +32,12 @@ ${criteriaList}
 
 ### Important Guidelines
 
+- **Empty workspace** — the mission workspace starts EMPTY. You are building the project from scratch. Create all necessary files, directories, and configurations.
 - **Work in the mission workspace** — all your changes must be made inside \`${missionWorkspaceDir}\`. This is an isolated workspace for this orchestration task. Do NOT modify files outside this directory.
 - **Stay focused** — only work on what is described above. Do not modify files outside your assigned scope.
-- **Other workers** — other worker agents are working on different subtasks in the same mission workspace concurrently. Focus strictly on your assigned scope to avoid conflicts.
+- **Other workers** — other worker agents may be working on different subtasks in the same mission workspace concurrently. Focus strictly on your assigned scope to avoid conflicts.
 - **Be thorough** — ensure all acceptance criteria are met before finishing.
-- **Signal completion clearly** — when done, summarize what you changed and confirm each acceptance criterion is met.
+- **Signal completion clearly** — when done, summarize what you created/changed and confirm each acceptance criterion is met.
 - **If blocked** — if you cannot complete the task due to missing dependencies or unclear requirements, explain what is blocking you clearly.
 `;
 }

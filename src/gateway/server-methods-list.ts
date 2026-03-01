@@ -94,6 +94,7 @@ const BASE_METHODS = [
   "orchestration.abort",
   "orchestration.retry",
   "orchestration.delete",
+  "orchestration.broadcast",
 ];
 
 export function listGatewayMethods(): string[] {
@@ -120,6 +121,9 @@ export const GATEWAY_EVENTS = [
   "voicewake.changed",
   "exec.approval.requested",
   "exec.approval.resolved",
+  "orchestration.started",
+  "orchestration.completed",
+  "orchestration.failed",
   "orchestration.updated",
   "orchestration.subtask",
 ];

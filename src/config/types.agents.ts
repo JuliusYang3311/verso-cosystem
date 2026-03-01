@@ -78,6 +78,7 @@ export type AgentConfig = {
     enabled?: boolean;
     maxWorkers?: number;
     maxFixCycles?: number;
+    maxOrchestrations?: number;
     verifyCmd?: string;
   };
 };

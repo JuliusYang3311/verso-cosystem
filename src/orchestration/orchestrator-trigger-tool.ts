@@ -1,0 +1,103 @@
+// src/orchestration/orchestrator-trigger-tool.ts — Tool for triggering orchestration
+//
+// This tool allows the main agent to submit orchestration requests.
+// The orchestrator daemon will process the request in the background.
+
+import { Type } from "@sinclair/typebox";
+import type { AnyAgentTool } from "../agents/tools/common.js";
+import type { VersoConfig } from "../config/types.js";
+import { jsonResult, readStringParam } from "../agents/tools/common.js";
+import { submitOrchestration, getOrchestratorStatus } from "./orchestrator.js";
+
+const OrchestratorTriggerSchema = Type.Object({
+  action: Type.Union([Type.Literal("submit"), Type.Literal("status")]),
+  userPrompt: Type.Optional(
+    Type.String({ description: "The user's task description (for submit action)" }),
+  ),
+});
+
+export type OrchestratorTriggerToolOptions = {
+  agentId: string;
+  config?: VersoConfig;
+};
+
+/**
+ * Create the orchestrator trigger tool for the main agent.
+ * This tool allows the agent to submit orchestration requests to the background daemon.
+ */
+export function createOrchestratorTriggerTool(opts: OrchestratorTriggerToolOptions): AnyAgentTool {
+  return {
+    label: "Orchestrator",
+    name: "orchestrator",
+    description: `Submit complex tasks to the orchestrator daemon for multi-agent parallel execution.
+
+ACTIONS:
+- submit: Submit a new orchestration request. The daemon will decompose the task, dispatch workers, run acceptance tests, and handle fix loops automatically. Requires: userPrompt.
+- status: Check if the orchestrator daemon is running.
+
+WHEN TO USE:
+Use orchestration for complex tasks that involve:
+- Building a new project or application from scratch
+- 3+ distinct components that can be worked on independently
+- Parallel independent work (e.g., "create frontend, backend, and database schema")
+- Tasks that would take significantly longer if done sequentially
+
+DO NOT USE for:
+- Simple, focused tasks (single file changes, bug fixes)
+- Tasks that are inherently sequential
+- Quick questions or explanations
+- Research or analysis tasks
+
+WORKFLOW:
+1. Call orchestrator with action "submit" and the user's task description
+2. The daemon will process the request in the background
+3. Results will be written to an output directory when complete
+4. You can check orchestration status via the orchestration.get gateway method`,
+    parameters: OrchestratorTriggerSchema,
+    async execute(_toolCallId: string, params: Record<string, unknown>) {
+      const action = readStringParam(params, "action", { required: true });
+
+      switch (action) {
+        case "submit": {
+          const userPrompt = readStringParam(params, "userPrompt", { required: true });
+          try {
+            const result = await submitOrchestration(userPrompt, {
+              cfg: opts.config,
+              agentId: opts.agentId,
+            });
+            return jsonResult({
+              success: true,
+              orchestrationId: result.orchestrationId,
+              daemonStarted: result.daemonStarted,
+              message: result.daemonStarted
+                ? `Orchestration submitted (ID: ${result.orchestrationId}). Daemon started in background.`
+                : `Orchestration submitted (ID: ${result.orchestrationId}). Daemon is processing the request.`,
+            });
+          } catch (err) {
+            return jsonResult({
+              success: false,
+              error: String(err),
+              message: `Failed to submit orchestration: ${String(err)}`,
+            });
+          }
+        }
+
+        case "status": {
+          const status = await getOrchestratorStatus();
+          return jsonResult({
+            running: status.running,
+            pid: status.pid,
+            logPath: status.logPath,
+            queuePath: status.queuePath,
+            message: status.running
+              ? `Orchestrator daemon is running (PID: ${status.pid})`
+              : "Orchestrator daemon is not running",
+          });
+        }
+
+        default:
+          return jsonResult({ error: `Unknown action: ${action}` });
+      }
+    },
+  };
+}

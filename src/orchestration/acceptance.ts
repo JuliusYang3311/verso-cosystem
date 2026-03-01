@@ -27,43 +27,46 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
   const subtasks = orchestration.plan?.subtasks ?? [];
   const verdicts: AcceptanceVerdict[] = [];
 
-  // Step 1: Run mechanical verify command
+  // Step 1: Run mechanical verify command (optional - skip if empty)
   let verifyPassed = true;
   let verifyOutput = "";
-  try {
-    const output = execSync(verifyCmd, {
-      cwd: workspaceDir,
-      timeout: 300_000, // 5 min
-      stdio: "pipe",
-      encoding: "utf-8",
-      shell: "/bin/bash",
-    });
-    verifyOutput = typeof output === "string" ? output.slice(-2000) : "";
-  } catch (err: unknown) {
-    verifyPassed = false;
-    const execErr = err as { stdout?: string; stderr?: string; message?: string };
-    verifyOutput =
-      [execErr.stdout?.slice(-1000), execErr.stderr?.slice(-1000)].filter(Boolean).join("\n") ||
-      String(execErr.message ?? err);
-  }
 
-  if (!verifyPassed) {
-    // All subtasks fail if the verify command fails
-    for (const subtask of subtasks) {
-      if (subtask.status === "completed") {
-        verdicts.push({
-          subtaskId: subtask.id,
-          passed: false,
-          reason: `Verify command failed:\n${verifyOutput.slice(0, 500)}`,
-        });
-      }
+  if (verifyCmd && verifyCmd.trim()) {
+    try {
+      const output = execSync(verifyCmd, {
+        cwd: workspaceDir,
+        timeout: 300_000, // 5 min
+        stdio: "pipe",
+        encoding: "utf-8",
+        shell: "/bin/bash",
+      });
+      verifyOutput = typeof output === "string" ? output.slice(-2000) : "";
+    } catch (err: unknown) {
+      verifyPassed = false;
+      const execErr = err as { stdout?: string; stderr?: string; message?: string };
+      verifyOutput =
+        [execErr.stdout?.slice(-1000), execErr.stderr?.slice(-1000)].filter(Boolean).join("\n") ||
+        String(execErr.message ?? err);
     }
-    return {
-      passed: false,
-      verdicts,
-      summary: `Verify command failed: ${verifyCmd}\n${verifyOutput.slice(0, 500)}`,
-      testedAtMs: Date.now(),
-    };
+
+    if (!verifyPassed) {
+      // All subtasks fail if the verify command fails
+      for (const subtask of subtasks) {
+        if (subtask.status === "completed") {
+          verdicts.push({
+            subtaskId: subtask.id,
+            passed: false,
+            reason: `Verify command failed:\n${verifyOutput.slice(0, 500)}`,
+          });
+        }
+      }
+      return {
+        passed: false,
+        verdicts,
+        summary: `Verify command failed: ${verifyCmd}\n${verifyOutput.slice(0, 500)}`,
+        testedAtMs: Date.now(),
+      };
+    }
   }
 
   // Step 2: LLM-based acceptance criteria evaluation per subtask

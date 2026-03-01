@@ -8,7 +8,7 @@ import {
   saveOrchestration,
   loadOrchestration,
   initMissionWorkspace,
-  mergeMissionWorkspace,
+  copyMissionToOutput,
   cleanupMissionWorkspace,
 } from "./store.js";
 import {
@@ -58,7 +58,16 @@ const OrchestrateToolSchema = Type.Object({
   summary: Type.Optional(Type.String()),
   userPrompt: Type.Optional(Type.String()),
   verifyCmd: Type.Optional(
-    Type.String({ description: "Custom verify command (default: tsc + lint + test)" }),
+    Type.String({
+      description:
+        "Project verification command (for create-plan or run-acceptance). Should include lint for code quality. Examples: 'npm run lint && npm test', 'pnpm lint && pnpm build && vitest run', 'pytest && flake8'",
+    }),
+  ),
+  outputDir: Type.Optional(
+    Type.String({
+      description:
+        "Output directory for completed work (relative to source workspace, e.g., './my-app' or '../projects/tool'). If not specified, creates ./.verso-output/<orchestrationId>/",
+    }),
   ),
 });
 
@@ -78,16 +87,33 @@ export function createOrchestrateTool(opts: OrchestrateToolOptions): AnyAgentToo
     name: "orchestrate",
     description: `Multi-agent orchestration tool. Decompose complex tasks into parallel subtasks executed by in-memory worker agents.
 
+IMPORTANT: Mission workspace starts EMPTY. Workers build the project from scratch. Results are copied to outputDir when complete.
+
 ACTIONS:
-- create-plan: Create an orchestration plan with subtasks and acceptance criteria. Requires: planSummary, subtasks array, userPrompt.
+- create-plan: Create an orchestration plan with subtasks and acceptance criteria. Requires: planSummary, subtasks array, userPrompt. Optional: verifyCmd (project verification command, should include lint, e.g., "npm run lint && npm test").
 - dispatch: Run all ready subtasks via in-memory worker pool. Blocks until all workers complete. Requires: orchestrationId.
 - check-status: Check status of all subtasks. Requires: orchestrationId.
-- run-acceptance: Run acceptance tests on completed subtasks. Requires: orchestrationId. Optional: verifyCmd.
+- run-acceptance: Run acceptance tests on completed subtasks. Requires: orchestrationId. Optional: verifyCmd (overrides plan's verifyCmd if specified).
 - create-fix-tasks: Create fix tasks for failed acceptance criteria. Requires: orchestrationId, fixes array.
-- complete: Mark orchestration as completed and merge results. Requires: orchestrationId. Optional: summary.
+- complete: Copy results to output directory. Requires: orchestrationId. Optional: outputDir (relative path like "./my-app"), summary. If outputDir not specified, creates ./.verso-output/<orchestrationId>/
 - abort: Cancel orchestration. Requires: orchestrationId.
 
-WORKFLOW: create-plan → dispatch → run-acceptance → complete (or create-fix-tasks → dispatch → ...)`,
+WORKFLOW: create-plan → dispatch → run-acceptance → complete (or create-fix-tasks → dispatch → ...)
+
+VERIFY COMMAND: Specify at create-plan time for the project type. Should include lint for code quality:
+- Node.js/TypeScript: "npm run lint && npm test" or "pnpm lint && pnpm build && vitest run"
+- Python: "flake8 && pytest" or "ruff check && pytest"
+- Rust: "cargo clippy && cargo test"
+- Go: "golangci-lint run && go test ./..."
+- C++: "clang-tidy src/*.cpp && make test"
+- Java: "mvn checkstyle:check && mvn test"
+- No verification: "" (empty string, LLM-only evaluation)
+
+OUTPUT DIRECTORY: Results are copied to this directory in the source workspace:
+- Not specified: creates ./.verso-output/<orchestrationId>/ in source workspace
+- Relative path: "./my-app" creates /path/to/workspace/my-app/
+- Relative path: "../projects/tool" creates /path/to/projects/tool/
+- Absolute path: "/Users/username/Projects/my-app"`,
     parameters: OrchestrateToolSchema,
     async execute(_toolCallId: string, params: Record<string, unknown>) {
       const action = readStringParam(params, "action", { required: true });
@@ -119,6 +145,7 @@ WORKFLOW: create-plan → dispatch → run-acceptance → complete (or create-fi
 async function handleCreatePlan(params: Record<string, unknown>, opts: OrchestrateToolOptions) {
   const planSummary = readStringParam(params, "planSummary", { required: true });
   const userPrompt = readStringParam(params, "userPrompt", { required: true });
+  const verifyCmd = readStringParam(params, "verifyCmd"); // Optional, determined by orchestrator
   const rawSubtasks = params.subtasks;
 
   if (!Array.isArray(rawSubtasks) || rawSubtasks.length === 0) {
@@ -151,7 +178,7 @@ async function handleCreatePlan(params: Record<string, unknown>, opts: Orchestra
     });
   });
 
-  orch.plan = { summary: planSummary, subtasks };
+  orch.plan = { summary: planSummary, subtasks, verifyCmd };
   orch.status = "dispatching";
   await saveOrchestration(orch);
 
@@ -160,6 +187,7 @@ async function handleCreatePlan(params: Record<string, unknown>, opts: Orchestra
     missionWorkspace: missionDir,
     status: orch.status,
     subtaskCount: subtasks.length,
+    verifyCmd: verifyCmd || "(none - LLM-only evaluation)",
     subtasks: subtasks.map((s) => ({ id: s.id, title: s.title, status: s.status })),
     message: `Plan created with ${subtasks.length} subtasks. Mission workspace: ${missionDir}. Call dispatch to start workers.`,
   });
@@ -272,8 +300,7 @@ async function handleCheckStatus(params: Record<string, unknown>) {
 
 async function handleRunAcceptance(params: Record<string, unknown>, opts: OrchestrateToolOptions) {
   const orchId = readStringParam(params, "orchestrationId", { required: true });
-  const verifyCmd =
-    readStringParam(params, "verifyCmd") ?? opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd;
+  const verifyCmdOverride = readStringParam(params, "verifyCmd"); // Optional override
   const orch = await loadOrchestration(orchId);
   if (!orch) {
     return jsonResult({ error: `Orchestration ${orchId} not found` });
@@ -281,6 +308,10 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
   if (!orch.plan) {
     return jsonResult({ error: "No plan found" });
   }
+
+  // Use override if provided, otherwise use plan's verifyCmd, otherwise use default
+  const verifyCmd =
+    verifyCmdOverride ?? orch.plan.verifyCmd ?? opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd;
 
   orch.status = "acceptance";
   await saveOrchestration(orch);
@@ -318,8 +349,9 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
     verdicts: result.verdicts,
     currentFixCycle: orch.currentFixCycle,
     maxFixCycles: orch.maxFixCycles,
+    verifyCmd: verifyCmd || "(none)",
     message: result.passed
-      ? "All acceptance tests passed. Call complete to merge results."
+      ? "All acceptance tests passed. Call complete to copy results to output directory."
       : orch.status === "failed"
         ? `Acceptance failed after ${orch.maxFixCycles} fix cycles. Orchestration marked as failed.`
         : `Acceptance failed. ${result.verdicts.filter((v) => !v.passed).length} subtasks need fixes. Call create-fix-tasks.`,
@@ -363,12 +395,17 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
 async function handleComplete(params: Record<string, unknown>) {
   const orchId = readStringParam(params, "orchestrationId", { required: true });
   const summary = readStringParam(params, "summary");
+  const outputDir = readStringParam(params, "outputDir");
   const orch = await loadOrchestration(orchId);
   if (!orch) {
     return jsonResult({ error: `Orchestration ${orchId} not found` });
   }
 
-  const mergeResult = await mergeMissionWorkspace(orch.sourceWorkspaceDir, orchId);
+  // Default outputDir: create directory named after orchestration ID in source workspace
+  const finalOutputDir = outputDir || `./.verso-output/${orchId}`;
+
+  // Copy to output directory
+  const copyResult = await copyMissionToOutput(orch.sourceWorkspaceDir, orchId, finalOutputDir);
 
   orch.status = "completed";
   orch.completedAtMs = Date.now();
@@ -377,7 +414,7 @@ async function handleComplete(params: Record<string, unknown>) {
   }
   await saveOrchestration(orch);
 
-  if (mergeResult.merged) {
+  if (copyResult.copied) {
     await cleanupMissionWorkspace(orch.sourceWorkspaceDir, orchId);
   }
 
@@ -386,14 +423,15 @@ async function handleComplete(params: Record<string, unknown>) {
   return jsonResult({
     orchestrationId: orchId,
     status: "completed",
-    merged: mergeResult.merged,
-    mergeError: mergeResult.error,
+    success: copyResult.copied,
+    outputPath: copyResult.resolvedPath,
+    error: copyResult.error,
     summary:
       summary ?? `Orchestration completed. ${orch.plan?.subtasks.length ?? 0} subtasks executed.`,
     subtasks: subtaskSummaries,
-    message: mergeResult.merged
-      ? "Orchestration completed and changes merged back to workspace."
-      : `Orchestration completed but merge failed: ${mergeResult.error}. Mission workspace preserved at ${orch.workspaceDir}.`,
+    message: copyResult.copied
+      ? `Orchestration completed. Results copied to ${copyResult.resolvedPath}.`
+      : `Orchestration completed but copy failed: ${copyResult.error}. Mission workspace preserved at ${orch.workspaceDir}.`,
   });
 }
 

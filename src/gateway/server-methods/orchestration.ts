@@ -143,4 +143,16 @@ export const orchestrationHandlers: GatewayRequestHandlers = {
     const deleted = await deleteOrchestration(id);
     respond(true, { deleted });
   },
+
+  "orchestration.broadcast": async ({ params, respond, context }) => {
+    const event = typeof params.event === "string" ? params.event : "";
+    const payload = params.payload;
+    if (!event) {
+      respond(false, undefined, { code: "INVALID_REQUEST", message: "event required" });
+      return;
+    }
+    // Broadcast orchestration event to all connected clients
+    context.broadcast(event, payload);
+    respond(true, { broadcasted: true });
+  },
 };

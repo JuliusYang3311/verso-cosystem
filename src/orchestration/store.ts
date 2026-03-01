@@ -27,9 +27,8 @@ export function resolveMissionWorkspace(sourceWorkspaceDir: string, orchId: stri
 // --- Mission Workspace ---
 
 /**
- * Create the mission workspace by copying/linking essential files from the source workspace.
- * Uses a shallow approach: creates the directory and initializes a git worktree if in a git repo,
- * otherwise copies the workspace.
+ * Create an empty mission workspace for orchestration.
+ * Workers build the project from scratch in this isolated directory.
  */
 export async function initMissionWorkspace(
   sourceWorkspaceDir: string,
@@ -41,32 +40,14 @@ export async function initMissionWorkspace(
     return missionDir;
   }
 
+  // Create empty mission workspace
   fs.mkdirSync(missionDir, { recursive: true });
-
-  // Check if source is a git repo
-  const gitDir = path.join(sourceWorkspaceDir, ".git");
-  if (fs.existsSync(gitDir)) {
-    // Use git worktree for efficient isolation
-    const { execSync } = await import("node:child_process");
-    const branchName = `verso-mission-${orchId}`;
-    try {
-      execSync(`git worktree add "${missionDir}" -b "${branchName}" HEAD`, {
-        cwd: sourceWorkspaceDir,
-        stdio: "pipe",
-      });
-    } catch {
-      // Worktree failed (maybe branch exists), fall back to direct copy
-      await copyWorkspace(sourceWorkspaceDir, missionDir);
-    }
-  } else {
-    await copyWorkspace(sourceWorkspaceDir, missionDir);
-  }
 
   return missionDir;
 }
 
 /**
- * Clean up a mission workspace. Removes the git worktree if applicable, then the directory.
+ * Clean up a mission workspace by removing the directory.
  */
 export async function cleanupMissionWorkspace(
   sourceWorkspaceDir: string,
@@ -77,76 +58,42 @@ export async function cleanupMissionWorkspace(
     return;
   }
 
-  const gitDir = path.join(sourceWorkspaceDir, ".git");
-  if (fs.existsSync(gitDir)) {
-    const { execSync } = await import("node:child_process");
-    try {
-      execSync(`git worktree remove "${missionDir}" --force`, {
-        cwd: sourceWorkspaceDir,
-        stdio: "pipe",
-      });
-      // Also delete the branch
-      const branchName = `verso-mission-${orchId}`;
-      try {
-        execSync(`git branch -D "${branchName}"`, { cwd: sourceWorkspaceDir, stdio: "pipe" });
-      } catch {
-        // branch may not exist
-      }
-      return;
-    } catch {
-      // worktree removal failed, fall through to rm
-    }
-  }
-
   fs.rmSync(missionDir, { recursive: true, force: true });
 }
 
 /**
- * Merge changes from mission workspace back to source workspace.
- * For git worktrees, this merges the mission branch into the current branch.
- * For plain copies, this copies changed files back.
+ * Copy mission workspace to output directory in source workspace.
+ * Output directory is always relative to source workspace.
+ * This is the primary way to extract results from orchestration.
  */
-export async function mergeMissionWorkspace(
+export async function copyMissionToOutput(
   sourceWorkspaceDir: string,
   orchId: string,
-): Promise<{ merged: boolean; error?: string }> {
+  outputDir: string,
+): Promise<{ copied: boolean; resolvedPath?: string; error?: string }> {
   const missionDir = resolveMissionWorkspace(sourceWorkspaceDir, orchId);
   if (!fs.existsSync(missionDir)) {
-    return { merged: false, error: "Mission workspace not found" };
+    return { copied: false, error: "Mission workspace not found" };
   }
 
-  const gitDir = path.join(sourceWorkspaceDir, ".git");
-  if (fs.existsSync(gitDir)) {
-    const { execSync } = await import("node:child_process");
-    const branchName = `verso-mission-${orchId}`;
-    try {
-      // Commit any uncommitted changes in the mission workspace
-      try {
-        execSync(
-          `git add -A && git diff --cached --quiet || git commit -m "verso-mission: ${orchId} completed"`,
-          {
-            cwd: missionDir,
-            stdio: "pipe",
-            shell: "/bin/bash",
-          },
-        );
-      } catch {
-        // nothing to commit
-      }
-      // Merge mission branch into current branch
-      execSync(`git merge "${branchName}" --no-edit`, {
-        cwd: sourceWorkspaceDir,
-        stdio: "pipe",
-      });
-      return { merged: true };
-    } catch (err) {
-      return { merged: false, error: `Merge failed: ${String(err)}` };
+  // Resolve relative paths from source workspace
+  const resolvedOutputDir = path.isAbsolute(outputDir)
+    ? outputDir
+    : path.resolve(sourceWorkspaceDir, outputDir);
+
+  try {
+    // Create output directory if it doesn't exist
+    if (!fs.existsSync(resolvedOutputDir)) {
+      fs.mkdirSync(resolvedOutputDir, { recursive: true });
     }
-  }
 
-  // Non-git: copy changed files back
-  await copyWorkspace(missionDir, sourceWorkspaceDir);
-  return { merged: true };
+    // Copy mission workspace contents to output directory
+    await copyWorkspace(missionDir, resolvedOutputDir);
+
+    return { copied: true, resolvedPath: resolvedOutputDir };
+  } catch (err) {
+    return { copied: false, error: `Copy failed: ${String(err)}` };
+  }
 }
 
 // --- Orchestration CRUD ---
@@ -218,17 +165,11 @@ export async function deleteOrchestration(id: string): Promise<boolean> {
 
 async function copyWorkspace(src: string, dest: string): Promise<void> {
   const { execSync } = await import("node:child_process");
-  // Use rsync for efficient copy, excluding heavy directories
+  // Use rsync for efficient copy
   try {
-    execSync(
-      `rsync -a --exclude=node_modules --exclude=.git --exclude=dist --exclude=.verso-missions "${src}/" "${dest}/"`,
-      { stdio: "pipe" },
-    );
+    execSync(`rsync -a "${src}/" "${dest}/"`, { stdio: "pipe" });
   } catch {
     // rsync not available, fall back to cp
-    execSync(
-      `cp -R "${src}/." "${dest}/" 2>/dev/null; rm -rf "${dest}/node_modules" "${dest}/.git" "${dest}/dist" "${dest}/.verso-missions"`,
-      { stdio: "pipe", shell: "/bin/bash" },
-    );
+    execSync(`cp -R "${src}/." "${dest}/"`, { stdio: "pipe", shell: "/bin/bash" });
   }
 }

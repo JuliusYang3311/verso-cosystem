@@ -56,6 +56,7 @@ export type FixTask = {
 export type OrchestrationPlan = {
   summary: string;
   subtasks: Subtask[];
+  verifyCmd?: string; // Project-specific verify command, determined at plan creation
 };
 
 export type Orchestration = {
@@ -92,7 +93,7 @@ export const ORCHESTRATION_DEFAULTS: Required<OrchestrationConfig> = {
   maxWorkers: 4,
   maxFixCycles: 3,
   maxOrchestrations: 2,
-  verifyCmd: "tsc --noEmit && pnpm lint && vitest run",
+  verifyCmd: "", // Empty = skip mechanical verification, rely on LLM acceptance criteria only
 };
 
 export function createOrchestration(params: {

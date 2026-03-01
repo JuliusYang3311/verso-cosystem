@@ -132,12 +132,14 @@ async function runWorkerTask(params: {
   subtask: Subtask;
   orchestrationId: string;
   missionWorkspaceDir: string;
+  memoryDir?: string; // Shared memory directory
   timeoutMs?: number;
 }): Promise<WorkerResult> {
   const {
     subtask,
     orchestrationId,
     missionWorkspaceDir,
+    memoryDir,
     timeoutMs = DEFAULT_WORKER_TIMEOUT_MS,
   } = params;
   const t0 = Date.now();
@@ -146,7 +148,17 @@ async function runWorkerTask(params: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let session: any = null;
 
+  // Save original env to restore later
+  const originalMemoryDir = process.env.MEMORY_DIR;
+  const originalVersoMemoryDir = process.env.VERSO_MEMORY_DIR;
+
   try {
+    // Set shared memory env vars if provided
+    if (memoryDir) {
+      process.env.MEMORY_DIR = memoryDir;
+      process.env.VERSO_MEMORY_DIR = memoryDir;
+    }
+
     // 1. Create tmpdir sandbox
     const { createTmpdirSandbox } = await import("../evolver/gep/sandbox-runner.js");
     const sandbox = createTmpdirSandbox(missionWorkspaceDir);
@@ -281,6 +293,18 @@ async function runWorkerTask(params: {
       const { cleanupTmpdir } = await import("../evolver/gep/sandbox-runner.js");
       cleanupTmpdir(sandboxDir);
     }
+
+    // Restore original memory env vars
+    if (originalMemoryDir !== undefined) {
+      process.env.MEMORY_DIR = originalMemoryDir;
+    } else {
+      delete process.env.MEMORY_DIR;
+    }
+    if (originalVersoMemoryDir !== undefined) {
+      process.env.VERSO_MEMORY_DIR = originalVersoMemoryDir;
+    } else {
+      delete process.env.VERSO_MEMORY_DIR;
+    }
   }
 }
 
@@ -319,9 +343,10 @@ export async function runWorkerPool(params: {
   orchestration: Orchestration;
   maxWorkers: number;
   maxOrchestrations: number;
+  memoryDir?: string; // Shared memory directory
   timeoutMs?: number;
 }): Promise<WorkerResult[]> {
-  const { orchestration: orch, maxWorkers, maxOrchestrations, timeoutMs } = params;
+  const { orchestration: orch, maxWorkers, maxOrchestrations, memoryDir, timeoutMs } = params;
 
   if (!orch.plan) {
     throw new Error("No plan found");
@@ -359,6 +384,7 @@ export async function runWorkerPool(params: {
           subtask: task,
           orchestrationId: orch.id,
           missionWorkspaceDir: orch.workspaceDir,
+          memoryDir, // Pass shared memory dir
           timeoutMs,
         });
 
