@@ -2,7 +2,6 @@
 
 import { execSync } from "node:child_process";
 import type { AcceptanceResult, AcceptanceVerdict, Orchestration } from "./types.js";
-import { runAgentStep } from "../agents/tools/agent-step.js";
 
 export type AcceptanceTestParams = {
   orchestration: Orchestration;
@@ -17,13 +16,7 @@ export type AcceptanceTestParams = {
  * then LLM-based evaluation of each subtask's acceptance criteria.
  */
 export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<AcceptanceResult> {
-  const {
-    orchestration,
-    workspaceDir,
-    verifyCmd,
-    agentId,
-    agentSessionKey: _agentSessionKey,
-  } = params;
+  const { orchestration, workspaceDir, verifyCmd } = params;
   const subtasks = orchestration.plan?.subtasks ?? [];
   const verdicts: AcceptanceVerdict[] = [];
 
@@ -70,6 +63,14 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
   }
 
   // Step 2: LLM-based acceptance criteria evaluation per subtask
+  // Use in-memory session for evaluation (like workers do)
+  const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
+  const { resolveAgentModel } = await import("./model-resolver.js");
+  const { resolveOpenClawAgentDir } = await import("../agents/agent-paths.js");
+
+  const { model, authStorage, modelRegistry } = await resolveAgentModel();
+  const agentDir = resolveOpenClawAgentDir();
+
   for (const subtask of subtasks) {
     if (subtask.status !== "completed") {
       verdicts.push({
@@ -82,7 +83,6 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
 
     const criteriaText = subtask.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
 
-    const evalSessionKey = `agent:${agentId}:orch:${orchestration.id}:eval:${subtask.id}`;
     const evalPrompt = `You are an acceptance test evaluator. Evaluate whether the following subtask's acceptance criteria have been met.
 
 Subtask: ${subtask.title}
@@ -94,7 +94,7 @@ ${criteriaText}
 Worker's result summary:
 ${subtask.resultSummary ?? "(no summary available)"}
 
-Examine the workspace at ${workspaceDir} to verify the criteria. For each criterion, state PASS or FAIL with a brief reason.
+Examine the workspace to verify the criteria. For each criterion, state PASS or FAIL with a brief reason.
 
 Respond with a JSON object:
 {
@@ -103,13 +103,34 @@ Respond with a JSON object:
 }`;
 
     try {
-      const evalResult = await runAgentStep({
-        sessionKey: evalSessionKey,
-        message: evalPrompt,
-        extraSystemPrompt:
-          "You are a code reviewer evaluating acceptance criteria. Be strict but fair. Respond only with the requested JSON.",
-        timeoutMs: 60_000,
+      // Create in-memory session for evaluation
+      const created = await createAgentSession({
+        cwd: workspaceDir,
+        agentDir,
+        authStorage,
+        modelRegistry,
+        model,
+        sessionManager: SessionManager.inMemory(workspaceDir),
       });
+
+      const session = created.session;
+
+      // Run evaluation
+      await session.sendUserMessage(evalPrompt);
+
+      // Get response
+      const history = await session.getHistory();
+      const lastMessage = history.messages[history.messages.length - 1];
+      const evalResult =
+        lastMessage?.role === "assistant"
+          ? lastMessage.content
+              .filter((c: { type: string; text?: string }) => c.type === "text")
+              .map((c: { text?: string }) => c.text)
+              .join("")
+          : "";
+
+      // Dispose session
+      session.dispose();
 
       if (evalResult) {
         // Try to parse JSON from the response
