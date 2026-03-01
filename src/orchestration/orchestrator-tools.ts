@@ -4,6 +4,7 @@ import { Type } from "@sinclair/typebox";
 import crypto from "node:crypto";
 import { stringEnum } from "../agents/schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "../agents/tools/common.js";
+import { broadcastOrchestrationEvent, buildOrchestrationSnapshot } from "./events.js";
 import {
   saveOrchestration,
   loadOrchestration,
@@ -182,6 +183,12 @@ async function handleCreatePlan(params: Record<string, unknown>, opts: Orchestra
   orch.status = "dispatching";
   await saveOrchestration(orch);
 
+  // Broadcast status update
+  await broadcastOrchestrationEvent({
+    type: "orchestration.updated",
+    payload: buildOrchestrationSnapshot(orch),
+  });
+
   return jsonResult({
     orchestrationId: orchId,
     missionWorkspace: missionDir,
@@ -217,6 +224,12 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
 
   orch.status = "running";
   await saveOrchestration(orch);
+
+  // Broadcast status update
+  await broadcastOrchestrationEvent({
+    type: "orchestration.updated",
+    payload: buildOrchestrationSnapshot(orch),
+  });
 
   const maxWorkers = opts.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers;
   const maxOrchestrations = opts.maxOrchestrations ?? ORCHESTRATION_DEFAULTS.maxOrchestrations;
@@ -316,6 +329,12 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
   orch.status = "acceptance";
   await saveOrchestration(orch);
 
+  // Broadcast status update
+  await broadcastOrchestrationEvent({
+    type: "orchestration.updated",
+    payload: buildOrchestrationSnapshot(orch),
+  });
+
   const { runAcceptanceTests } = await import("./acceptance.js");
   const result = await runAcceptanceTests({
     orchestration: orch,
@@ -340,6 +359,12 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
   }
 
   await saveOrchestration(orch);
+
+  // Broadcast status update
+  await broadcastOrchestrationEvent({
+    type: "orchestration.updated",
+    payload: buildOrchestrationSnapshot(orch),
+  });
 
   return jsonResult({
     orchestrationId: orchId,
@@ -384,6 +409,12 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
   orch.status = "dispatching";
   await saveOrchestration(orch);
 
+  // Broadcast status update
+  await broadcastOrchestrationEvent({
+    type: "orchestration.updated",
+    payload: buildOrchestrationSnapshot(orch),
+  });
+
   return jsonResult({
     orchestrationId: orchId,
     fixCycle: orch.currentFixCycle,
@@ -413,6 +444,12 @@ async function handleComplete(params: Record<string, unknown>) {
     orch.error = undefined;
   }
   await saveOrchestration(orch);
+
+  // Broadcast completion (note: daemon also broadcasts, but this ensures immediate update)
+  await broadcastOrchestrationEvent({
+    type: "orchestration.updated",
+    payload: buildOrchestrationSnapshot(orch),
+  });
 
   if (copyResult.copied) {
     await cleanupMissionWorkspace(orch.sourceWorkspaceDir, orchId);
@@ -459,6 +496,13 @@ async function handleAbort(params: Record<string, unknown>) {
   orch.status = "failed";
   orch.error = "Aborted by orchestrator";
   await saveOrchestration(orch);
+
+  // Broadcast abort event
+  await broadcastOrchestrationEvent({
+    type: "orchestration.failed",
+    orchestrationId: orchId,
+    error: "Aborted by orchestrator",
+  });
 
   // Clean up mission workspace — no point keeping it after abort
   await cleanupMissionWorkspace(orch.sourceWorkspaceDir, orchId);

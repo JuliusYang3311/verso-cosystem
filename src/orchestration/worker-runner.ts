@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Orchestration, Subtask } from "./types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { broadcastOrchestrationEvent } from "./events.js";
 import { resolveAgentModel } from "./model-resolver.js";
 import { saveOrchestration } from "./store.js";
 import { buildWorkerSystemPrompt } from "./worker-prompt.js";
@@ -379,6 +380,17 @@ export async function runWorkerPool(params: {
         task.startedAtMs = Date.now();
         await saveOrchestration(orch);
 
+        // Broadcast subtask started
+        await broadcastOrchestrationEvent({
+          type: "orchestration.subtask",
+          payload: {
+            orchestrationId: orch.id,
+            subtaskId: task.id,
+            status: task.status,
+            title: task.title,
+          },
+        });
+
         try {
           const result = await runWorkerTask({
             subtask: task,
@@ -394,6 +406,18 @@ export async function runWorkerPool(params: {
           task.error = result.error;
           await saveOrchestration(orch);
 
+          // Broadcast subtask completed/failed
+          await broadcastOrchestrationEvent({
+            type: "orchestration.subtask",
+            payload: {
+              orchestrationId: orch.id,
+              subtaskId: task.id,
+              status: task.status,
+              title: task.title,
+              error: task.error,
+            },
+          });
+
           results.push(result);
         } catch (err) {
           // Ensure task is marked as failed even if there's an unhandled exception
@@ -401,6 +425,18 @@ export async function runWorkerPool(params: {
           task.completedAtMs = Date.now();
           task.error = err instanceof Error ? err.message : String(err);
           await saveOrchestration(orch);
+
+          // Broadcast subtask failed
+          await broadcastOrchestrationEvent({
+            type: "orchestration.subtask",
+            payload: {
+              orchestrationId: orch.id,
+              subtaskId: task.id,
+              status: task.status,
+              title: task.title,
+              error: task.error,
+            },
+          });
 
           results.push({
             subtaskId: task.id,
