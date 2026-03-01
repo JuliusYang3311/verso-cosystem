@@ -242,21 +242,11 @@ async function runOrchestrationTask(
       ...(webSearchTool ? [webSearchTool] : []),
     ];
 
-    logger.info("Tools BEFORE passing to createAgentSession", {
+    // Simple logging BEFORE
+    logger.info("Tools BEFORE createAgentSession", {
       orchId,
-      toolCount: orchestratorTools.length,
-      toolNames: orchestratorTools.map((t) => t.name),
-      toolsJson: JSON.stringify(
-        orchestratorTools.map((t) => ({
-          name: t.name,
-          label: t.label,
-          hasDescription: !!t.description,
-          hasParameters: !!t.parameters,
-          hasExecute: typeof t.execute === "function",
-        })),
-        null,
-        2,
-      ),
+      count: orchestratorTools.length,
+      names: orchestratorTools.map((t) => t.name).join(", "),
     });
 
     const created = await createAgentSession({
@@ -282,40 +272,38 @@ async function runOrchestrationTask(
         (t as { name: string }).name === "orchestrate",
     );
 
-    logger.info("Tools AFTER session creation (comparison)", {
+    // Simple logging AFTER
+    const sessionToolNames = sessionTools.map((t: unknown) =>
+      typeof t === "object" && t !== null && "name" in t ? (t as { name: string }).name : "unnamed",
+    );
+
+    logger.info("Tools AFTER createAgentSession", {
       orchId,
-      toolsPassedIn: orchestratorTools.length,
-      toolsInSession: sessionTools.length,
-      passedInNames: orchestratorTools.map((t) => t.name),
-      sessionNames: sessionTools.map((t: unknown) =>
-        typeof t === "object" && t !== null && "name" in t
-          ? (t as { name: string }).name
-          : "unnamed",
-      ),
-      missingTools: orchestratorTools
-        .filter(
-          (t) =>
-            !sessionTools.some(
-              (st: unknown) =>
-                typeof st === "object" &&
-                st !== null &&
-                "name" in st &&
-                (st as { name: string }).name === t.name,
-            ),
-        )
-        .map((t) => t.name),
+      count: sessionTools.length,
+      names: sessionToolNames.join(", "),
     });
 
-    logger.info("Session tools verification", {
-      orchId,
-      sessionToolCount: sessionTools.length,
-      sessionToolNames: sessionTools.map((t: unknown) =>
-        typeof t === "object" && t !== null && "name" in t
-          ? (t as { name: string }).name
-          : "unnamed",
-      ),
-      hasOrchestrateToolInSession: !!orchestrateToolInSession,
-    });
+    // Find missing tools
+    const missingTools = orchestratorTools
+      .filter(
+        (t) =>
+          !sessionTools.some(
+            (st: unknown) =>
+              typeof st === "object" &&
+              st !== null &&
+              "name" in st &&
+              (st as { name: string }).name === t.name,
+          ),
+      )
+      .map((t) => t.name);
+
+    if (missingTools.length > 0) {
+      logger.error("CRITICAL: Tools missing after session creation!", {
+        orchId,
+        missingCount: missingTools.length,
+        missingNames: missingTools.join(", "),
+      });
+    }
 
     // Log the full orchestrate tool definition
     if (orchestrateToolInSession) {
