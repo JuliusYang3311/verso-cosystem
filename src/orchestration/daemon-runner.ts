@@ -131,6 +131,7 @@ async function runOrchestrationTask(
   logger.info("Starting orchestration", { orchId });
 
   let memoryContext: import("./orchestrator-memory.js").OrchestrationMemoryContext | null = null;
+  let agentDir: string | null = null;
 
   try {
     // 1. Initialize mission workspace (empty directory)
@@ -380,6 +381,22 @@ Execute the entire workflow automatically.`;
       }
     } catch (cleanupErr) {
       logger.error("Failed to cleanup memory", { orchId, error: String(cleanupErr) });
+    }
+
+    // Cleanup agent session directory
+    try {
+      if (agentDir) {
+        const agentSessionDir = path.join(agentDir, `orch-${orchId}-${opts.agentId}`);
+        if (fs.existsSync(agentSessionDir)) {
+          fs.rmSync(agentSessionDir, { recursive: true, force: true });
+          logger.info("Cleaned up agent session directory", { orchId, agentSessionDir });
+        }
+      }
+    } catch (cleanupErr) {
+      logger.error("Failed to cleanup agent session directory", {
+        orchId,
+        error: String(cleanupErr),
+      });
     }
 
     // Cleanup mission workspace if orchestration failed
