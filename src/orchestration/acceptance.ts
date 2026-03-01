@@ -94,7 +94,24 @@ ${criteriaText}
 Worker's result summary:
 ${subtask.resultSummary ?? "(no summary available)"}
 
-Examine the workspace to verify the criteria. For each criterion, state PASS or FAIL with a brief reason.
+IMPORTANT EVALUATION GUIDELINES:
+
+1. **Verify actual execution, not just file existence**:
+   - If criteria mentions "dependencies installed", check that node_modules directory exists and contains the packages
+   - If criteria mentions "script works", verify the script can actually run (check for syntax errors, missing dependencies)
+   - If criteria mentions "tests pass", verify test files exist AND are executable
+
+2. **Check for common issues**:
+   - For Node.js projects: verify node_modules exists if dependencies are required
+   - For Python projects: verify virtual environment or installed packages
+   - For configuration files: verify they are valid (not just that they exist)
+
+3. **Be strict but fair**:
+   - If a criterion says "X is installed", check that X is actually installed, not just listed in a config file
+   - If a criterion says "Y works", verify Y can actually execute
+   - If files are missing or incomplete, mark as FAIL
+
+Examine the workspace at ${workspaceDir} to verify the criteria. For each criterion, state PASS or FAIL with a brief reason.
 
 Respond with a JSON object:
 {
@@ -118,14 +135,14 @@ Respond with a JSON object:
       // Run evaluation
       await session.sendUserMessage(evalPrompt);
 
-      // Get response
-      const history = await session.getHistory();
-      const lastMessage = history.messages[history.messages.length - 1];
+      // Get response from messages
+      const messages = session.messages;
+      const lastMessage = messages[messages.length - 1];
       const evalResult =
         lastMessage?.role === "assistant"
           ? lastMessage.content
-              .filter((c: { type: string; text?: string }) => c.type === "text")
-              .map((c: { text?: string }) => c.text)
+              .filter((c) => c.type === "text")
+              .map((c) => ("text" in c ? c.text : ""))
               .join("")
           : "";
 

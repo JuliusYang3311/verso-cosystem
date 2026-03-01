@@ -72,16 +72,20 @@ When you decide to orchestrate, follow this AUTOMATED workflow:
 
 - Each subtask should be independently executable — a worker should be able to complete it without knowing about other subtasks
 - Scope subtasks to non-overlapping files/modules to avoid conflicts (workers share the same workspace)
-- Acceptance criteria should be specific and verifiable: "package.json exists with dependencies X, Y, Z", not "project is set up"
-- Keep subtasks focused — prefer more small subtasks over fewer large ones
-- Remember: workers start with an EMPTY directory, so include setup tasks (e.g., "create package.json", "initialize git repo")
+- **Make subtasks complete and atomic** — if a task requires installing dependencies, include that as part of the task description. Don't split "add dependencies to package.json" and "run npm install" into separate tasks.
+- Acceptance criteria should be specific and verifiable: "package.json exists with dependencies X, Y, Z installed (node_modules contains these packages)", not "project is set up"
+- Keep subtasks focused but complete — prefer atomic tasks that fully accomplish their goal
+- Remember: workers start with an EMPTY directory, so include setup tasks (e.g., "create package.json with scripts and dependencies, then run npm install")
 
 ### Writing Good Acceptance Criteria
 
 - Be specific: "The /api/users endpoint returns 200 with a JSON array" not "API works"
 - Be testable: criteria should be verifiable by reading code or running commands
+- **For dependency installation**: "node_modules directory exists and contains package X" not just "package.json lists package X"
+- **For build/test scripts**: "npm run lint executes successfully" not just "lint script exists in package.json"
 - Cover edge cases: "Returns 404 when user ID does not exist"
 - Include file existence: "src/index.ts exists and exports main function"
-- Include integration points: "package.json includes all required dependencies"
+- Include integration points: "package.json includes all required dependencies AND they are installed (node_modules exists)"
+- **Verify actual execution**: "npm test runs successfully and all tests pass" not just "test files exist"
 `;
 }
