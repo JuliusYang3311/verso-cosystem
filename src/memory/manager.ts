@@ -248,6 +248,15 @@ export class MemoryIndexManager implements MemorySearchManager {
     if (!settings) {
       return null;
     }
+    // Override store path so the SQLite DB lives inside the isolated workspace
+    // instead of the shared ~/.verso/memory/<agentId>.sqlite
+    const isolatedSettings = {
+      ...settings,
+      store: {
+        ...settings.store,
+        path: path.join(workspaceDir, "memory.sqlite"),
+      },
+    };
     const providerResult =
       params.providerResult ??
       (await createEmbeddingProvider({
@@ -266,7 +275,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       cfg,
       agentId,
       workspaceDir,
-      settings,
+      settings: isolatedSettings,
       providerResult,
     });
   }
