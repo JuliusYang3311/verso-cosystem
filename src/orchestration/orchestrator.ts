@@ -223,21 +223,56 @@ export async function submitOrchestration(
   userPrompt: string,
   opts?: OrchestratorDaemonOptions,
 ): Promise<{ orchestrationId: string; daemonStarted: boolean }> {
-  // Check if daemon is running
-  const status = await getOrchestratorStatus();
-  let daemonStarted = false;
+  const { lockPath } = resolveLogPaths();
 
-  if (!status.running) {
-    // Start the daemon
-    const startResult = await startOrchestratorDaemon(opts);
-    if (!startResult.started && !startResult.pid) {
-      throw new Error("Failed to start orchestrator daemon");
+  // Acquire lock to prevent race condition when checking/starting daemon
+  let lockFd: number;
+  try {
+    lockFd = fs.openSync(lockPath, "wx");
+  } catch {
+    // Lock exists, wait a bit and retry (another request is starting daemon)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Try again without lock - daemon should be running now
+    const status = await getOrchestratorStatus();
+    if (!status.running) {
+      // Still not running, try to acquire lock
+      try {
+        lockFd = fs.openSync(lockPath, "wx");
+      } catch {
+        throw new Error("Failed to acquire orchestration submit lock");
+      }
+    } else {
+      // Daemon is running, just enqueue
+      const orchestrationId = enqueueOrchestration(userPrompt);
+      return { orchestrationId, daemonStarted: false };
     }
-    daemonStarted = true;
   }
 
-  // Enqueue the orchestration request
-  const orchestrationId = enqueueOrchestration(userPrompt);
+  try {
+    // Check if daemon is running
+    const status = await getOrchestratorStatus();
+    let daemonStarted = false;
 
-  return { orchestrationId, daemonStarted };
+    if (!status.running) {
+      // Start the daemon
+      const startResult = await startOrchestratorDaemon(opts);
+      if (!startResult.started && !startResult.pid) {
+        throw new Error("Failed to start orchestrator daemon");
+      }
+      daemonStarted = true;
+    }
+
+    // Enqueue the orchestration request
+    const orchestrationId = enqueueOrchestration(userPrompt);
+
+    return { orchestrationId, daemonStarted };
+  } finally {
+    // Release lock
+    try {
+      fs.closeSync(lockFd);
+      fs.unlinkSync(lockPath);
+    } catch {
+      // ignore
+    }
+  }
 }
