@@ -185,13 +185,21 @@ async function runWorkerTask(params: {
     const { createAgentSession, codingTools, SessionManager } =
       await import("@mariozechner/pi-coding-agent");
 
+    // Create web search tool for workers
+    const { createWebSearchTool } = await import("../agents/tools/web-search.js");
+    const { loadConfig } = await import("../config/config.js");
+    const config = loadConfig();
+    const webSearchTool = createWebSearchTool({ config, sandboxed: false });
+
+    const workerTools = [...codingTools, ...(webSearchTool ? [webSearchTool] : [])];
+
     const created = await createAgentSession({
       cwd: sandboxDir,
       agentDir,
       authStorage,
       modelRegistry,
       model,
-      tools: codingTools,
+      tools: workerTools, // Provide coding tools + web search
       sessionManager: SessionManager.inMemory(sandboxDir),
     });
     session = created.session;
