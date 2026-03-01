@@ -213,16 +213,8 @@ async function copyWorkspace(src: string, dest: string): Promise<void> {
   // Use rsync for efficient copy
   try {
     execSync(`rsync -a "${src}/" "${dest}/"`, { stdio: "pipe" });
-  } catch (rsyncErr) {
+  } catch {
     // rsync not available, fall back to cp
-    try {
-      execSync(`cp -R "${src}/." "${dest}/"`, { stdio: "pipe", shell: "/bin/bash" });
-    } catch (cpErr) {
-      throw new Error(
-        `Failed to copy workspace: ${String(cpErr)}`,
-        { cause: rsyncErr },
-        { cause: cpErr },
-      );
-    }
+    execSync(`cp -R "${src}/." "${dest}/"`, { stdio: "pipe", shell: "/bin/bash" });
   }
 }

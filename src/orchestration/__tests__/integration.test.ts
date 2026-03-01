@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Orchestration } from "../types.js";
 import { initOrchestrationMemory, cleanupOrchestrationMemory } from "../orchestrator-memory.js";
 import {
