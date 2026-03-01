@@ -9,6 +9,7 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { broadcastOrchestrationEvent } from "./events.js";
 import { resolveAgentModel } from "./model-resolver.js";
 import { saveOrchestration } from "./store.js";
+import { isSubtaskReady } from "./types.js";
 import { buildWorkerSystemPrompt } from "./worker-prompt.js";
 
 const logger = createSubsystemLogger("orchestration-worker");
@@ -367,14 +368,27 @@ export async function runWorkerPool(params: {
     const subtasks = orch.plan.subtasks;
     const subtaskById = new Map(subtasks.map((s) => [s.id, s]));
 
-    // Build pending queue: only ready (pending + deps met) subtasks
-    const pending: string[] = subtasks.filter((s) => s.status === "pending").map((s) => s.id);
+    // Build initial pending queue: only ready (pending + deps met) subtasks
+    const pending: string[] = subtasks.filter((s) => isSubtaskReady(s, subtasks)).map((s) => s.id);
 
     const results: WorkerResult[] = [];
 
     const claimNext = (): Subtask | null => {
+      // First try to claim from existing pending queue
       const id = pending.shift();
-      return id ? (subtaskById.get(id) ?? null) : null;
+      if (id) {
+        return subtaskById.get(id) ?? null;
+      }
+
+      // If pending queue is empty, check if any new tasks became ready
+      const newlyReady = subtasks.filter((s) => isSubtaskReady(s, subtasks));
+      if (newlyReady.length > 0) {
+        pending.push(...newlyReady.map((s) => s.id));
+        const nextId = pending.shift();
+        return nextId ? (subtaskById.get(nextId) ?? null) : null;
+      }
+
+      return null;
     };
 
     const workerLoop = async (): Promise<void> => {
