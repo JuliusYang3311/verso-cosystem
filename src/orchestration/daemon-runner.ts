@@ -242,12 +242,10 @@ async function runOrchestrationTask(
       ...(webSearchTool ? [webSearchTool] : []),
     ];
 
-    // Simple logging BEFORE
-    logger.info("Tools BEFORE createAgentSession", {
-      orchId,
-      count: orchestratorTools.length,
-      names: orchestratorTools.map((t) => t.name).join(", "),
-    });
+    // Multi-line logging BEFORE
+    logger.info(`Tools BEFORE createAgentSession (orchId: ${orchId})`);
+    logger.info(`  count: ${orchestratorTools.length}`);
+    logger.info(`  names: ${orchestratorTools.map((t) => t.name).join(", ")}`);
 
     const created = await createAgentSession({
       cwd: missionDir,
@@ -272,16 +270,14 @@ async function runOrchestrationTask(
         (t as { name: string }).name === "orchestrate",
     );
 
-    // Simple logging AFTER
+    // Multi-line logging AFTER
     const sessionToolNames = sessionTools.map((t: unknown) =>
       typeof t === "object" && t !== null && "name" in t ? (t as { name: string }).name : "unnamed",
     );
 
-    logger.info("Tools AFTER createAgentSession", {
-      orchId,
-      count: sessionTools.length,
-      names: sessionToolNames.join(", "),
-    });
+    logger.info(`Tools AFTER createAgentSession (orchId: ${orchId})`);
+    logger.info(`  count: ${sessionTools.length}`);
+    logger.info(`  names: ${sessionToolNames.join(", ")}`);
 
     // Find missing tools
     const missingTools = orchestratorTools
@@ -298,11 +294,9 @@ async function runOrchestrationTask(
       .map((t) => t.name);
 
     if (missingTools.length > 0) {
-      logger.error("CRITICAL: Tools missing after session creation!", {
-        orchId,
-        missingCount: missingTools.length,
-        missingNames: missingTools.join(", "),
-      });
+      logger.error(`CRITICAL: Tools missing after session creation! (orchId: ${orchId})`);
+      logger.error(`  missingCount: ${missingTools.length}`);
+      logger.error(`  missingNames: ${missingTools.join(", ")}`);
     }
 
     // Log the full orchestrate tool definition
