@@ -238,12 +238,22 @@ async function runOrchestrationTask(
     logger.info("Orchestrator agent session created", { orchId });
 
     // Verify tools are actually available in the session
-    const sessionTools = (session as any).tools || [];
+    const sessionTools = (session as unknown as { tools?: unknown[] }).tools || [];
     logger.info("Session tools verification", {
       orchId,
       sessionToolCount: sessionTools.length,
-      sessionToolNames: sessionTools.map((t: any) => t.name || "unnamed"),
-      hasOrchestrateToolInSession: sessionTools.some((t: any) => t.name === "orchestrate"),
+      sessionToolNames: sessionTools.map((t: unknown) =>
+        typeof t === "object" && t !== null && "name" in t
+          ? (t as { name: string }).name
+          : "unnamed",
+      ),
+      hasOrchestrateToolInSession: sessionTools.some(
+        (t: unknown) =>
+          typeof t === "object" &&
+          t !== null &&
+          "name" in t &&
+          (t as { name: string }).name === "orchestrate",
+      ),
     });
 
     const orchestratorMessage = `${buildOrchestratorSystemPrompt()}
