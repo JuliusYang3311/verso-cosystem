@@ -356,23 +356,39 @@ Start now by calling orchestrate with action "create-plan".`;
           lastMessage &&
           "content" in lastMessage &&
           Array.isArray(lastMessage.content) &&
-          lastMessage.content.some((c: any) => c.type === "tool_use")
+          lastMessage.content.some(
+            (c: unknown) =>
+              typeof c === "object" &&
+              c !== null &&
+              "type" in c &&
+              (c as { type: string }).type === "tool_use",
+          )
         ),
       });
 
       // If there are tool calls, log them
       if (lastMessage && "content" in lastMessage && Array.isArray(lastMessage.content)) {
-        const toolCalls = lastMessage.content.filter((c: any) => c.type === "tool_use");
+        const toolCalls = lastMessage.content.filter(
+          (c: unknown) =>
+            typeof c === "object" &&
+            c !== null &&
+            "type" in c &&
+            (c as { type: string }).type === "tool_use",
+        );
         if (toolCalls.length > 0) {
           logger.info("Agent made tool calls", {
             orchId,
             toolCallCount: toolCalls.length,
-            toolNames: toolCalls.map((tc: any) => tc.name),
+            toolNames: toolCalls.map((tc: unknown) => (tc as { name: string }).name),
           });
         } else {
           logger.warn("Agent completed without making any tool calls", {
             orchId,
-            contentTypes: lastMessage.content.map((c: any) => c.type),
+            contentTypes: lastMessage.content.map((c: unknown) =>
+              typeof c === "object" && c !== null && "type" in c
+                ? (c as { type: string }).type
+                : "unknown",
+            ),
           });
         }
       }
