@@ -40,13 +40,15 @@ Use orchestration for complex tasks that involve:
 - Building a new project or application from scratch
 - 3+ distinct components that can be worked on independently
 - Parallel independent work (e.g., "create frontend, backend, and database schema")
+- Multi-topic research or analysis (e.g., "analyze US stocks across tech, finance, and healthcare sectors")
+- Comprehensive reports with multiple independent sections
 - Tasks that would take significantly longer if done sequentially
 
 DO NOT USE for:
 - Simple, focused tasks (single file changes, bug fixes)
 - Tasks that are inherently sequential
 - Quick questions or explanations
-- Research or analysis tasks
+- Single-topic research or simple analysis
 
 WORKFLOW:
 1. Call orchestrator with action "submit" and the user's task description
