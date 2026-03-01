@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "../config/config.js";
 import type { GatewayMessageChannel } from "../utils/message-channel.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
 import type { AnyAgentTool } from "./tools/common.js";
+import { createOrchestratorTriggerTool } from "../orchestration/orchestrator-trigger-tool.js";
 import { resolvePluginTools } from "../plugins/tools.js";
 import { resolveSessionAgentId } from "./agent-scope.js";
 import { createAgentsListTool } from "./tools/agents-list-tool.js";
@@ -98,6 +99,21 @@ export function createOpenClawTools(options?: {
         sandboxRoot: options?.sandboxRoot,
         requireExplicitTarget: options?.requireExplicitMessageTarget,
       });
+
+  // Orchestrator tool (for multi-agent orchestration)
+  const agentId = resolveSessionAgentId({
+    sessionKey: options?.agentSessionKey,
+    config: options?.config,
+  });
+  const orchConfig = options?.config?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
+  const orchEnabled = orchConfig?.enabled ?? true;
+  const orchestratorTool = orchEnabled
+    ? createOrchestratorTriggerTool({
+        agentId: agentId ?? "main",
+        config: options?.config,
+      })
+    : null;
+
   const tools: AnyAgentTool[] = [
     createBrowserTool({
       sandboxBridgeUrl: options?.sandboxBrowserBridgeUrl,
@@ -136,6 +152,7 @@ export function createOpenClawTools(options?: {
     ...(webFetchTool ? [webFetchTool] : []),
     ...(imageTool ? [imageTool] : []),
     ...(mcpTool ? [mcpTool] : []),
+    ...(orchestratorTool ? [orchestratorTool] : []),
   ];
 
   const pluginTools = resolvePluginTools({

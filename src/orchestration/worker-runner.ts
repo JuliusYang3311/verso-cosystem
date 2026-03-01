@@ -420,21 +420,37 @@ export async function runWorkerPool(params: {
         task.startedAtMs = Date.now();
         await saveOrchestration(orch);
 
-        const result = await runWorkerTask({
-          subtask: task,
-          orchestrationId: orch.id,
-          missionWorkspaceDir: orch.workspaceDir,
-          memoryDir, // Pass shared memory dir
-          timeoutMs,
-        });
+        try {
+          const result = await runWorkerTask({
+            subtask: task,
+            orchestrationId: orch.id,
+            missionWorkspaceDir: orch.workspaceDir,
+            memoryDir, // Pass shared memory dir
+            timeoutMs,
+          });
 
-        task.status = result.ok ? "completed" : "failed";
-        task.completedAtMs = Date.now();
-        task.resultSummary = result.resultSummary;
-        task.error = result.error;
-        await saveOrchestration(orch);
+          task.status = result.ok ? "completed" : "failed";
+          task.completedAtMs = Date.now();
+          task.resultSummary = result.resultSummary;
+          task.error = result.error;
+          await saveOrchestration(orch);
 
-        results.push(result);
+          results.push(result);
+        } catch (err) {
+          // Ensure task is marked as failed even if there's an unhandled exception
+          task.status = "failed";
+          task.completedAtMs = Date.now();
+          task.error = err instanceof Error ? err.message : String(err);
+          await saveOrchestration(orch);
+
+          results.push({
+            subtaskId: task.id,
+            ok: false,
+            resultSummary: "",
+            filesChanged: [],
+            error: task.error,
+          });
+        }
       }
     };
 

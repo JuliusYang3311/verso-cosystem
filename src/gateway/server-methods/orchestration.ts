@@ -6,6 +6,7 @@ import {
   loadOrchestration,
   deleteOrchestration,
   cleanupMissionWorkspace,
+  saveOrchestration,
 } from "../../orchestration/store.js";
 import { isOrchestrationTerminal } from "../../orchestration/types.js";
 
@@ -92,11 +93,41 @@ export const orchestrationHandlers: GatewayRequestHandlers = {
       });
       return;
     }
-    // The actual abort is handled by the orchestrator tool.
-    // Here we just mark it for the UI — the orchestrator agent will pick it up.
+
+    // Actually abort the orchestration by marking all pending/running tasks as cancelled
+    if (orch.plan) {
+      for (const subtask of orch.plan.subtasks) {
+        if (subtask.status === "pending" || subtask.status === "running") {
+          subtask.status = "cancelled";
+          subtask.completedAtMs = Date.now();
+          subtask.error = "Aborted by user";
+        }
+      }
+    }
+
+    for (const fix of orch.fixTasks) {
+      if (fix.status === "pending" || fix.status === "running") {
+        fix.status = "cancelled";
+        fix.completedAtMs = Date.now();
+        fix.error = "Aborted by user";
+      }
+    }
+
+    orch.status = "failed";
+    orch.error = "Aborted by user";
+    orch.completedAtMs = Date.now();
+    await saveOrchestration(orch);
+
+    // Clean up mission workspace
+    try {
+      await cleanupMissionWorkspace(orch.sourceWorkspaceDir, id);
+    } catch {
+      // best-effort cleanup
+    }
+
     respond(true, {
       id: orch.id,
-      message: "Abort signal sent. The orchestrator agent will cancel running workers.",
+      message: "Orchestration aborted. All running workers cancelled.",
     });
   },
 
