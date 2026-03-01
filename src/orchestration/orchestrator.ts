@@ -108,9 +108,13 @@ export async function startOrchestratorDaemon(
   const verifyCmd = orchConfig?.verifyCmd ?? "";
 
   const scriptPath = path.join(process.cwd(), "dist", "orchestration", "daemon-entry.js");
+
+  // Open log file for daemon output
+  const logFd = fs.openSync(logPath, "a");
+
   const child = spawn(process.execPath, [scriptPath], {
     detached: true,
-    stdio: "ignore",
+    stdio: ["ignore", logFd, logFd], // Redirect stdout and stderr to log file
     env: {
       ...process.env,
       ORCHESTRATOR_WORKSPACE: workspace,

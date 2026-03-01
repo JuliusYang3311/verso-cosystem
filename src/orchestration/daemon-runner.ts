@@ -479,12 +479,15 @@ Execute the entire workflow automatically.`;
 /**
  * Main daemon loop.
  * Continuously processes queued orchestration requests.
+ * Exits automatically after idle timeout when queue is empty.
  */
 export async function runOrchestratorDaemon(opts: OrchestratorDaemonOptions): Promise<void> {
   logger.info("Orchestrator daemon started", { workspaceDir: opts.workspaceDir });
 
   const maxConcurrent = opts.maxOrchestrations ?? ORCHESTRATION_DEFAULTS.maxOrchestrations;
   const runningTasks = new Set<Promise<void>>();
+  const IDLE_TIMEOUT_MS = 60000; // Exit after 60 seconds of inactivity
+  let lastActivityMs = Date.now();
 
   while (true) {
     try {
@@ -499,7 +502,16 @@ export async function runOrchestratorDaemon(opts: OrchestratorDaemonOptions): Pr
       if (queue.length === 0) {
         // No pending requests
         if (runningTasks.size === 0) {
-          // No running tasks either, sleep for a bit
+          // No running tasks either, check idle timeout
+          const idleMs = Date.now() - lastActivityMs;
+          if (idleMs >= IDLE_TIMEOUT_MS) {
+            logger.info("Daemon idle timeout reached, exiting gracefully", {
+              idleMs,
+              timeoutMs: IDLE_TIMEOUT_MS,
+            });
+            process.exit(0);
+          }
+          // Sleep for a bit before checking again
           await new Promise((resolve) => setTimeout(resolve, 5000));
         } else {
           // Wait for any running task to complete
@@ -509,6 +521,7 @@ export async function runOrchestratorDaemon(opts: OrchestratorDaemonOptions): Pr
       }
 
       // Process the first request
+      lastActivityMs = Date.now(); // Reset idle timer
       const request = queue.shift()!;
       saveQueue(queue);
 
