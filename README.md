@@ -1,17 +1,26 @@
 # Verso
 
-A self-evolving personal AI assistant platform with multi-channel messaging support.
+**A self-evolving personal AI assistant platform with multi-agent orchestration and multi-channel messaging support.**
 
-Verso enhances the personal AI agent experience by enabling **asynchronous tool execution**, **dynamic context retrieval**, and **self-evolving code optimization** — letting the AI assistant gradually adapt to each user's workflow over time.
+Verso is an advanced AI agent framework that goes beyond simple chat interfaces. It features **multi-agent orchestration** for complex task decomposition, **asynchronous tool execution**, **dynamic context retrieval with adaptive token budgeting**, and **self-evolving code optimization** — enabling the AI assistant to tackle ambitious projects and gradually adapt to each user's workflow over time.
 
-## Quick Start
+## 🌟 Key Highlights
+
+- **🎯 Multi-Agent Orchestration**: Automatically decomposes complex tasks into parallel subtasks, dispatches worker agents, runs acceptance tests, and iterates on failures
+- **⚡ Async Tool Execution**: Non-blocking tool calls with automatic agent resume
+- **🧠 Dynamic Context**: Token-budget allocation with vector retrieval and adaptive ratio tuning
+- **🔄 Self-Evolving**: Background daemon that optimizes code and hyperparameters based on usage signals
+- **💬 Multi-Channel**: Telegram, Discord, Slack, WhatsApp, Feishu support
+- **🔌 Extensible**: 32 extensions, 65+ skills, plugin system
+
+## 🚀 Quick Start
 
 ```bash
 # 1. Prerequisites: Node.js >= 22.12.0, pnpm 10.23.0
 node --version && pnpm --version
 
 # 2. Clone and install
-git clone https://github.com/JuliusYang3311/verso-agent.git verso
+git clone https://github.com/JuliusYang3311/verso-cosystem.git verso
 cd verso
 pnpm install
 
@@ -23,7 +32,12 @@ pnpm verso onboard
 
 # 5. Start the gateway (if not installed as service during onboard)
 pnpm verso gateway run
+
+# 6. Open Control UI and start chatting
+# Visit http://localhost:8080 (or your configured port)
 ```
+
+**That's it!** The onboarding wizard handles auth, channels, skills, and service installation.
 
 ## Step-by-Step Setup
 
@@ -239,6 +253,100 @@ See [docs/environment.md](docs/environment.md) for the full precedence chain.
 | **Slack**    | Create app at [api.slack.com](https://api.slack.com/apps), set `SLACK_BOT_TOKEN` + `SLACK_SIGNING_SECRET`      |
 | **Feishu**   | Create app at [Feishu Open Platform](https://open.feishu.cn), set `FEISHU_APP_ID` + `FEISHU_APP_SECRET`        |
 
+## 🎯 Multi-Agent Orchestration System
+
+Verso's orchestration system enables the AI to tackle complex, multi-step projects by automatically decomposing them into parallel subtasks executed by specialized worker agents.
+
+### How It Works
+
+```
+User: "Build a full-stack todo app with React frontend and Node.js backend"
+  │
+  ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Main Agent decides task requires orchestration              │
+│ Submits to Orchestrator daemon (runs in background)         │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Orchestrator Agent: Task Decomposition                      │
+│ • Creates empty mission workspace                           │
+│ • Decomposes into subtasks with acceptance criteria         │
+│ • Determines verification command (npm test, etc.)          │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Worker Pool: Parallel Execution                             │
+│ • Subtask 1: Setup React project (Worker 1)                 │
+│ • Subtask 2: Setup Node.js API (Worker 2)                   │
+│ • Subtask 3: Create database schema (Worker 3)              │
+│ • Subtask 4: Implement auth (Worker 4)                      │
+│ All workers share temporary memory for coordination         │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Acceptance Testing                                          │
+│ • Mechanical verification: runs npm test, npm build         │
+│ • LLM evaluation: checks acceptance criteria per subtask    │
+│ • Pass → Complete | Fail → Create fix tasks (max 3 cycles) │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Completion                                                  │
+│ • Copies result to output directory (.verso-output/)        │
+│ • Notifies main agent via gateway event                     │
+│ • Cleans up temporary resources                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Features
+
+- **Automatic Task Decomposition**: LLM-powered planning with dependency resolution
+- **Parallel Execution**: Up to 4 workers (configurable) running simultaneously
+- **Shared Memory**: Workers coordinate via temporary shared memory instance
+- **Acceptance Testing**: Two-stage verification (mechanical + LLM criteria evaluation)
+- **Auto-Fix Cycles**: Automatically retries failed subtasks up to 3 times
+- **Isolated Workspaces**: Each orchestration runs in isolated mission workspace
+- **Real-Time UI**: Live progress tracking via web dashboard
+- **Background Execution**: Doesn't block main agent or gateway sessions
+
+### Configuration
+
+```json5
+// ~/.verso/verso.json
+{
+  agents: {
+    list: [
+      {
+        id: "main",
+        orchestration: {
+          enabled: true,
+          maxWorkers: 4, // Parallel worker limit
+          maxFixCycles: 3, // Max retry cycles
+          maxOrchestrations: 2, // Concurrent orchestration limit
+          verifyCmd: "", // Default verification command
+        },
+      },
+    ],
+  },
+}
+```
+
+### When to Use Orchestration
+
+The main agent automatically decides when to use orchestration for:
+
+- Multi-file projects requiring coordination
+- Tasks with clear subtask boundaries
+- Projects needing parallel execution
+- Complex implementations with acceptance criteria
+
+You can also explicitly request it: "Use orchestration to build..."
+
 ## Key Features
 
 ### Asynchronous Tool Execution
@@ -251,26 +359,36 @@ Agent tool calls run asynchronously in the background. The agent continues respo
 
 ### Dynamic Context Retrieval
 
-Instead of feeding full conversation history into each LLM call, Verso dynamically selects what to include:
+Instead of feeding full conversation history into each LLM call, Verso dynamically selects what to include based on a token budget:
 
-- **Token-budget recent messages** — keeps recent messages based on budget, not fixed count
+- **Token-budget recent messages** — allocates tokens to recent messages based on adaptive ratio (not fixed count)
 - **Vector retrieval** — retrieves relevant older messages using similarity threshold with time-decay
-- **Adaptive ratio** — adjusts balance based on conversation pace and tool usage
-- All hyperparameters are tunable by the Evolver
+- **Adaptive ratio** — automatically adjusts balance based on conversation pace and tool usage
+- **Evolver-tuned** — all hyperparameters are continuously optimized by the Evolver daemon
+
+**Benefits**: Lower latency, reduced costs, better context relevance, scalable to long conversations.
 
 ### Self-Evolving Code (Evolver)
 
-The Evolver is a background daemon that automatically optimizes the agent:
+The Evolver is a background daemon that automatically optimizes the agent based on usage signals:
 
-- **Sandbox-first** — all code changes tested in isolation before deployment
-- **Automatic rollback** — failed changes reverted, recorded in `errors.jsonl`
-- **Signal-driven** — extracts signals from logs (slow responses, high token usage, user corrections)
-- **Hyperparameter tuning** — auto-adjusts context parameters based on feedback
+- **Signal extraction** — monitors logs for slow responses, high token usage, user corrections, errors
+- **Sandbox-first testing** — all code changes tested in isolation before deployment
+- **Automatic rollback** — failed changes reverted immediately, recorded in `errors.jsonl`
+- **Hyperparameter tuning** — auto-adjusts context parameters, token budgets, retrieval thresholds
+- **Gene Expression Programming** — uses GEP protocol for systematic code evolution
 
 Configure in `verso.json`:
 
 ```json5
-{ evolver: { review: true } } // require human review before deploy
+{
+  evolver: {
+    enabled: true,
+    review: true, // Require human review before deploy
+    interval: 3600000, // Check interval (1 hour)
+    sandbox: true, // Always test in sandbox first
+  },
+}
 ```
 
 Logs: `~/.verso/logs/evolver-daemon.log`
@@ -296,7 +414,16 @@ Logs: `~/.verso/logs/evolver-daemon.log`
 | `pnpm test`                 | Run test suite               |
 | `pnpm lint`                 | Lint check                   |
 
-## Architecture
+## 📊 Project Statistics
+
+- **Codebase**: ~50,000 lines of TypeScript (ESM)
+- **Test Coverage**: 998 test files, 6,768 tests
+- **Extensions**: 32 active extensions
+- **Skills**: 65+ skills (20 core, 45+ community)
+- **Supported Channels**: 5 (Telegram, Discord, Slack, WhatsApp, Feishu)
+- **LLM Providers**: 12+ (Anthropic, OpenAI, OpenRouter, Gemini, xAI, etc.)
+
+## 🏗️ Architecture
 
 ```
 User Message
@@ -319,19 +446,44 @@ User Message
 │  LLM → tool_use → execute → LLM → ...  │
 └────────────────┬────────────────────────┘
                  │
-                 ▼
-┌─────────────────────────────────────────┐
-│      Evolver (Background Daemon)        │
-│  Signals → mutation → sandbox → deploy  │
-└─────────────────────────────────────────┘
+        ┌────────┴────────┐
+        │                 │
+        ▼                 ▼
+┌──────────────┐  ┌──────────────────────┐
+│   Evolver    │  │   Orchestrator       │
+│  (Daemon)    │  │   (Daemon)           │
+│              │  │                      │
+│  Signals →   │  │  Task decomposition  │
+│  Mutation →  │  │  Worker dispatch     │
+│  Sandbox →   │  │  Acceptance testing  │
+│  Deploy      │  │  Auto-fix cycles     │
+└──────────────┘  └──────────────────────┘
 ```
 
-## Project Structure
+### Core Components
+
+- **Gateway**: WebSocket server for multi-channel communication
+- **Agent Runtime**: Async turn execution with tool orchestration
+- **Dynamic Context**: Token-budget allocation with vector retrieval
+- **Memory System**: sqlite-vec hybrid vector + BM25 search
+- **Evolver Daemon**: Background self-optimization engine
+- **Orchestrator Daemon**: Multi-agent task decomposition and execution
+- **Channel Plugins**: Telegram, Discord, Slack, WhatsApp, Feishu adapters
+- **Skill System**: 65+ installable skills with plugin architecture
+
+## 📁 Project Structure
 
 ```
 src/
   agents/          # Agent runtime, tools, dynamic context
   auto-reply/      # Message routing and dispatch
+  orchestration/   # Multi-agent orchestration system
+    ├── daemon-runner.ts      # Orchestrator daemon loop
+    ├── orchestrator-tools.ts # Orchestrate tool (task decomposition)
+    ├── worker-runner.ts      # Worker pool and parallel execution
+    ├── acceptance.ts         # Acceptance testing (verify + LLM eval)
+    ├── events.ts             # Gateway event broadcasting
+    └── store.ts              # JSON persistence, workspace management
   evolver/         # Self-evolution engine (GEP protocol)
     gep/           # Gene Expression Programming modules
     ops/           # Lifecycle and build verification
@@ -346,21 +498,26 @@ src/
   discord/         # Discord channel
   slack/           # Slack channel
   web/             # WhatsApp (Baileys) channel
+  feishu/          # Feishu (Lark) channel
   channels/        # Channel plugin system
 extensions/        # 32 active extensions
 skills/            # 65 skills (20 core)
+ui/                # Web Control UI (React)
 docs/              # Documentation
 ```
 
-## Tech Stack
+## 🛠️ Tech Stack
 
 - **Runtime**: Node.js >= 22.12.0
-- **Language**: TypeScript (ESM)
-- **Package Manager**: pnpm 10.23.0
+- **Language**: TypeScript 5.7+ (ESM, strict mode)
+- **Package Manager**: pnpm 10.23.0 (monorepo with workspaces)
 - **Core Framework**: @mariozechner/pi-agent-core 0.52.9
 - **Vector DB**: sqlite-vec (hybrid vector + BM25 search)
-- **Build**: tsdown (rolldown-based bundler)
-- **Testing**: Vitest (998 files, 6768 tests)
+- **Build**: tsdown (rolldown-based bundler, 10x faster than tsc)
+- **Testing**: Vitest (998 files, 6,768 tests, parallel execution)
+- **Linting**: oxlint (Rust-based, type-aware)
+- **UI**: React 18, Vite, TypeScript
+- **Channels**: node-telegram-bot-api, discord.js, @slack/bolt, @whiskeysockets/baileys, @larksuiteoapi/node-sdk
 
 ## Directory Layout After Setup
 
@@ -382,10 +539,104 @@ docs/              # Documentation
 └── skills/                 # Installed skills
 ```
 
-## Acknowledgments
+## 🧪 Development
 
-This project is derived from [OpenClaw/MoltBot](https://github.com/moltbot/moltbot), originally created by **Peter Steinberger**. The OpenClaw framework provided the foundational multi-channel AI gateway architecture upon which Verso's async execution, dynamic context, and self-evolution capabilities were built. We sincerely thank Peter Steinberger and all OpenClaw contributors for their excellent work.
+### Build
 
-## License
+```bash
+pnpm build          # tsdown build (all packages)
+pnpm build:watch    # Watch mode
+```
 
-MIT License. See [LICENSE](LICENSE) for details.
+### Testing
+
+```bash
+pnpm test           # Run all tests (parallel)
+pnpm test:watch     # Watch mode
+pnpm test:ui        # Vitest UI
+pnpm test:coverage  # Coverage report
+```
+
+### Linting & Type Checking
+
+```bash
+pnpm lint           # oxlint --type-aware
+pnpm lint:fix       # Auto-fix issues
+pnpm check          # tsgo + lint + format (full check)
+pnpm format         # Prettier
+```
+
+### Local Development
+
+```bash
+# Start gateway in dev mode
+pnpm verso gateway run
+
+# Start UI dev server
+cd ui && pnpm dev
+
+# Watch logs
+tail -f ~/.verso/logs/verso-$(date +%Y-%m-%d).log
+tail -f ~/.verso/logs/evolver-daemon.log
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes
+4. Run tests: `pnpm test`
+5. Run linting: `pnpm check`
+6. Commit: `git commit -m 'Add amazing feature'`
+7. Push: `git push origin feature/amazing-feature`
+8. Open a Pull Request
+
+## 📄 License
+
+Creative Commons Attribution-NonCommercial 4.0 International License
+
+Copyright (c) 2026 Julius Yang
+
+You are free to:
+
+- Share — copy and redistribute the material
+- Adapt — remix, transform, and build upon the material
+
+Under the following terms:
+
+- **Attribution** — You must give appropriate credit to Julius Yang
+- **NonCommercial** — You may NOT use the material for commercial purposes without explicit written permission from Julius Yang
+
+For commercial use inquiries, please contact Julius Yang.
+
+Original work derived from [OpenClaw/MoltBot](https://github.com/moltbot/moltbot) by Peter Steinberger.
+
+Full license: [LICENSE](LICENSE)
+
+## 🙏 Acknowledgments
+
+This project is derived from [OpenClaw/MoltBot](https://github.com/moltbot/moltbot), originally created by **Peter Steinberger**. The OpenClaw framework provided the foundational multi-channel AI gateway architecture upon which Verso's async execution, dynamic context, orchestration system, and self-evolution capabilities were built. We sincerely thank Peter Steinberger and all OpenClaw contributors for their excellent work.
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/JuliusYang3311/verso-cosystem/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/JuliusYang3311/verso-cosystem/discussions)
+- **Documentation**: [docs/](docs/)
+
+## 🗺️ Roadmap
+
+- [ ] Multi-modal support (image, audio, video)
+- [ ] Plugin marketplace
+- [ ] Cloud deployment templates
+- [ ] Mobile app (iOS/Android)
+- [ ] Advanced orchestration strategies (hierarchical, recursive)
+- [ ] Distributed worker pools
+- [ ] Real-time collaboration features
+
+---
+
+**Built with ❤️ by Julius Yang**

@@ -100,3 +100,21 @@ resume/
 skills/novel-writer/projects/
 skills/novel-writer/material/
 skills/novel-writer/style/
+
+# Large cache files (prevent accidental commits)
+**/*cache*/
+**/*.cache
+**/cache/
+.cache/
+.verso-missions/
+.verso-output/
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+**/*.log
+**/*.tmp
+**/*.temp
+**/tmp/
+**/temp/
