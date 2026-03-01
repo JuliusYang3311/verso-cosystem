@@ -99,22 +99,36 @@ export async function initOrchestrationMemory(params: {
 export async function cleanupOrchestrationMemory(
   memoryContext: OrchestrationMemoryContext,
 ): Promise<void> {
-  try {
-    // Close isolated memory manager (releases DB connections, watchers, etc.)
-    if (memoryContext.memoryManager) {
+  const errors: string[] = [];
+
+  // Close isolated memory manager (releases DB connections, watchers, etc.)
+  if (memoryContext.memoryManager) {
+    try {
       await memoryContext.memoryManager.close();
       logger.info("Closed isolated orchestration memory manager");
+    } catch (err) {
+      const errMsg = `Failed to close memory manager: ${String(err)}`;
+      logger.error(errMsg);
+      errors.push(errMsg);
     }
+  }
 
-    // Remove memory directory
-    if (fs.existsSync(memoryContext.memoryDir)) {
+  // Remove memory directory
+  if (memoryContext.memoryDir && fs.existsSync(memoryContext.memoryDir)) {
+    try {
       fs.rmSync(memoryContext.memoryDir, { recursive: true, force: true });
       logger.info("Removed orchestration memory directory", {
         memoryDir: memoryContext.memoryDir,
       });
+    } catch (err) {
+      const errMsg = `Failed to remove memory directory: ${String(err)}`;
+      logger.error(errMsg);
+      errors.push(errMsg);
     }
-  } catch (err) {
-    logger.error("Failed to cleanup orchestration memory", { error: String(err) });
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Cleanup errors: ${errors.join("; ")}`);
   }
 }
 

@@ -158,3 +158,7 @@ export function isSubtaskReady(subtask: Subtask, allSubtasks: Subtask[]): boolea
 export function isOrchestrationTerminal(status: OrchestrationStatus): boolean {
   return status === "completed" || status === "failed";
 }
+
+export function isTaskTerminal(status: TaskStatus): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}

@@ -30,20 +30,22 @@ export function resolveMissionWorkspace(sourceWorkspaceDir: string, orchId: stri
  * Create an empty mission workspace for orchestration.
  * Workers build the project from scratch in this isolated directory.
  */
+export function createMissionWorkspace(sourceWorkspaceDir: string, orchId: string): string {
+  const missionDir = resolveMissionWorkspace(sourceWorkspaceDir, orchId);
+  if (!fs.existsSync(missionDir)) {
+    fs.mkdirSync(missionDir, { recursive: true });
+  }
+  return missionDir;
+}
+
+/**
+ * Initialize mission workspace (async version for compatibility).
+ */
 export async function initMissionWorkspace(
   sourceWorkspaceDir: string,
   orchId: string,
 ): Promise<string> {
-  const missionDir = resolveMissionWorkspace(sourceWorkspaceDir, orchId);
-
-  if (fs.existsSync(missionDir)) {
-    return missionDir;
-  }
-
-  // Create empty mission workspace
-  fs.mkdirSync(missionDir, { recursive: true });
-
-  return missionDir;
+  return createMissionWorkspace(sourceWorkspaceDir, orchId);
 }
 
 /**
@@ -58,7 +60,13 @@ export async function cleanupMissionWorkspace(
     return;
   }
 
-  fs.rmSync(missionDir, { recursive: true, force: true });
+  try {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  } catch (err) {
+    throw new Error(`Failed to cleanup mission workspace ${orchId}: ${String(err)}`, {
+      cause: err,
+    });
+  }
 }
 
 /**
@@ -109,7 +117,19 @@ export async function saveOrchestration(orch: Orchestration): Promise<void> {
   ensureDir();
   orch.updatedAtMs = Date.now();
   const data = JSON.stringify(orch, null, 2);
-  fs.writeFileSync(orchestrationPath(orch.id), data, "utf-8");
+  const filePath = orchestrationPath(orch.id);
+  const tempPath = `${filePath}.tmp`;
+
+  try {
+    fs.writeFileSync(tempPath, data, "utf-8");
+    fs.renameSync(tempPath, filePath);
+  } catch (err) {
+    // Clean up temp file if it exists
+    if (fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+    throw new Error(`Failed to save orchestration ${orch.id}: ${String(err)}`, { cause: err });
+  }
 }
 
 export async function loadOrchestration(id: string): Promise<Orchestration | null> {
@@ -117,8 +137,20 @@ export async function loadOrchestration(id: string): Promise<Orchestration | nul
   if (!fs.existsSync(filePath)) {
     return null;
   }
-  const raw = fs.readFileSync(filePath, "utf-8");
-  return JSON.parse(raw) as Orchestration;
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    if (!raw.trim()) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    // Basic validation
+    if (!parsed.id || !parsed.status || !parsed.agentId) {
+      throw new Error("Invalid orchestration data");
+    }
+    return parsed as Orchestration;
+  } catch (err) {
+    throw new Error(`Failed to load orchestration ${id}: ${String(err)}`, { cause: err });
+  }
 }
 
 export async function listOrchestrations(): Promise<Orchestration[]> {
@@ -129,14 +161,21 @@ export async function listOrchestrations(): Promise<Orchestration[]> {
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
   const results: Orchestration[] = [];
   for (const file of files) {
-    const raw = fs.readFileSync(path.join(dir, file), "utf-8");
     try {
-      results.push(JSON.parse(raw) as Orchestration);
-    } catch {
-      // skip corrupt files
+      const raw = fs.readFileSync(path.join(dir, file), "utf-8");
+      if (!raw.trim()) {
+        continue;
+      }
+      const parsed = JSON.parse(raw);
+      if (parsed.id && parsed.status && parsed.agentId) {
+        results.push(parsed as Orchestration);
+      }
+    } catch (err) {
+      // Skip corrupt files, log warning
+      console.warn(`Skipping corrupt orchestration file: ${file}`, err);
     }
   }
-  return results.toSorted((a, b) => b.createdAtMs - a.createdAtMs);
+  return results.toSorted((a, b) => b.updatedAtMs - a.updatedAtMs);
 }
 
 export async function updateOrchestration(
@@ -165,11 +204,25 @@ export async function deleteOrchestration(id: string): Promise<boolean> {
 
 async function copyWorkspace(src: string, dest: string): Promise<void> {
   const { execSync } = await import("node:child_process");
+
+  // Validate paths
+  if (!fs.existsSync(src)) {
+    throw new Error(`Source directory does not exist: ${src}`);
+  }
+
   // Use rsync for efficient copy
   try {
     execSync(`rsync -a "${src}/" "${dest}/"`, { stdio: "pipe" });
-  } catch {
+  } catch (rsyncErr) {
     // rsync not available, fall back to cp
-    execSync(`cp -R "${src}/." "${dest}/"`, { stdio: "pipe", shell: "/bin/bash" });
+    try {
+      execSync(`cp -R "${src}/." "${dest}/"`, { stdio: "pipe", shell: "/bin/bash" });
+    } catch (cpErr) {
+      throw new Error(
+        `Failed to copy workspace: ${String(cpErr)}`,
+        { cause: rsyncErr },
+        { cause: cpErr },
+      );
+    }
   }
 }

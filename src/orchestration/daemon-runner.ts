@@ -49,8 +49,17 @@ function loadQueue(): OrchestrationRequest[] {
       return [];
     }
     const raw = fs.readFileSync(queuePath, "utf-8");
-    return JSON.parse(raw) as OrchestrationRequest[];
-  } catch {
+    if (!raw.trim()) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      logger.warn("Queue file is not an array, resetting", { queuePath });
+      return [];
+    }
+    return parsed as OrchestrationRequest[];
+  } catch (err) {
+    logger.error("Failed to load queue, resetting", { error: String(err) });
     return [];
   }
 }
@@ -58,9 +67,16 @@ function loadQueue(): OrchestrationRequest[] {
 function saveQueue(queue: OrchestrationRequest[]): void {
   try {
     const queuePath = resolveQueuePath();
-    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2));
+    const queueDir = path.dirname(queuePath);
+    if (!fs.existsSync(queueDir)) {
+      fs.mkdirSync(queueDir, { recursive: true });
+    }
+    const tempPath = `${queuePath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(queue, null, 2), "utf-8");
+    fs.renameSync(tempPath, queuePath);
   } catch (err) {
     logger.error("Failed to save queue", { error: String(err) });
+    throw err;
   }
 }
 
@@ -69,8 +85,26 @@ function saveQueue(queue: OrchestrationRequest[]): void {
  * The daemon will pick it up and execute it in the background.
  */
 export function enqueueOrchestration(userPrompt: string): string {
+  if (!userPrompt || userPrompt.trim().length === 0) {
+    throw new Error("User prompt cannot be empty");
+  }
+
   const orchId = crypto.randomUUID().slice(0, 8);
   const queue = loadQueue();
+
+  // Check for duplicate requests (same prompt within last 5 minutes)
+  const recentDuplicate = queue.find(
+    (req) => req.userPrompt === userPrompt && Date.now() - req.requestedAtMs < 5 * 60 * 1000,
+  );
+
+  if (recentDuplicate) {
+    logger.warn("Duplicate orchestration request detected", {
+      orchId: recentDuplicate.id,
+      userPrompt: userPrompt.slice(0, 100),
+    });
+    return recentDuplicate.id;
+  }
+
   queue.push({
     id: orchId,
     userPrompt,
@@ -200,40 +234,77 @@ Execute the entire workflow automatically.`;
         outputPath,
         summary: result ?? "Orchestration completed",
       });
-    } else {
+    } else if (orch.status === "failed") {
       await broadcastOrchestrationEvent({
         type: "orchestration.failed",
         orchestrationId: orchId,
         error: orch.error ?? "Orchestration failed",
       });
+    } else {
+      // Orchestration ended in unexpected state
+      logger.warn("Orchestration ended in unexpected state", {
+        orchId,
+        status: orch.status,
+      });
+      orch.status = "failed";
+      orch.error = `Orchestration ended in unexpected state: ${orch.status}`;
+      await saveOrchestration(orch);
+      await broadcastOrchestrationEvent({
+        type: "orchestration.failed",
+        orchestrationId: orchId,
+        error: orch.error,
+      });
     }
   } catch (err) {
     logger.error("Orchestration failed", { orchId, error: String(err) });
 
-    const orch = await loadOrchestration(orchId);
-    if (orch) {
-      orch.status = "failed";
-      orch.error = String(err);
-      await saveOrchestration(orch);
+    // Ensure orchestration is marked as failed
+    try {
+      const orch = await loadOrchestration(orchId);
+      if (orch && orch.status !== "failed") {
+        orch.status = "failed";
+        orch.error = err instanceof Error ? err.message : String(err);
+        orch.completedAtMs = Date.now();
+        await saveOrchestration(orch);
+      }
+    } catch (saveErr) {
+      logger.error("Failed to save error state", { orchId, error: String(saveErr) });
     }
 
-    await broadcastOrchestrationEvent({
-      type: "orchestration.failed",
-      orchestrationId: orchId,
-      error: String(err),
-    });
+    // Broadcast failure event
+    try {
+      await broadcastOrchestrationEvent({
+        type: "orchestration.failed",
+        orchestrationId: orchId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } catch (broadcastErr) {
+      logger.error("Failed to broadcast failure event", {
+        orchId,
+        error: String(broadcastErr),
+      });
+    }
   } finally {
     // 7. Cleanup resources
-    if (memoryContext) {
-      const { cleanupOrchestrationMemory } = await import("./orchestrator-memory.js");
-      await cleanupOrchestrationMemory(memoryContext);
+    try {
+      if (memoryContext) {
+        const { cleanupOrchestrationMemory } = await import("./orchestrator-memory.js");
+        await cleanupOrchestrationMemory(memoryContext);
+        logger.info("Cleaned up orchestration memory", { orchId });
+      }
+    } catch (cleanupErr) {
+      logger.error("Failed to cleanup memory", { orchId, error: String(cleanupErr) });
     }
 
     // Cleanup mission workspace if orchestration failed
-    const orch = await loadOrchestration(orchId);
-    if (orch && orch.status === "failed") {
-      await cleanupMissionWorkspace(opts.workspaceDir, orchId);
-      logger.info("Cleaned up failed orchestration workspace", { orchId });
+    try {
+      const orch = await loadOrchestration(orchId);
+      if (orch && orch.status === "failed") {
+        await cleanupMissionWorkspace(opts.workspaceDir, orchId);
+        logger.info("Cleaned up failed orchestration workspace", { orchId });
+      }
+    } catch (cleanupErr) {
+      logger.error("Failed to cleanup workspace", { orchId, error: String(cleanupErr) });
     }
   }
 }
@@ -245,13 +316,28 @@ Execute the entire workflow automatically.`;
 export async function runOrchestratorDaemon(opts: OrchestratorDaemonOptions): Promise<void> {
   logger.info("Orchestrator daemon started", { workspaceDir: opts.workspaceDir });
 
+  const maxConcurrent = opts.maxOrchestrations ?? ORCHESTRATION_DEFAULTS.maxOrchestrations;
+  const runningTasks = new Set<Promise<void>>();
+
   while (true) {
     try {
+      // Wait for running tasks to complete if at max capacity
+      if (runningTasks.size >= maxConcurrent) {
+        await Promise.race(runningTasks);
+        continue;
+      }
+
       const queue = loadQueue();
 
       if (queue.length === 0) {
-        // No pending requests, sleep for a bit
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // No pending requests
+        if (runningTasks.size === 0) {
+          // No running tasks either, sleep for a bit
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        } else {
+          // Wait for any running task to complete
+          await Promise.race(runningTasks);
+        }
         continue;
       }
 
@@ -259,7 +345,19 @@ export async function runOrchestratorDaemon(opts: OrchestratorDaemonOptions): Pr
       const request = queue.shift()!;
       saveQueue(queue);
 
-      await runOrchestrationTask(request, opts);
+      // Run task in background
+      const taskPromise = runOrchestrationTask(request, opts)
+        .catch((err) => {
+          logger.error("Task execution failed", {
+            orchId: request.id,
+            error: String(err),
+          });
+        })
+        .finally(() => {
+          runningTasks.delete(taskPromise);
+        });
+
+      runningTasks.add(taskPromise);
     } catch (err) {
       logger.error("Daemon loop error", { error: String(err) });
       // Sleep before retrying
