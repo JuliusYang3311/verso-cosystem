@@ -211,6 +211,80 @@ Execute the entire workflow automatically.`;
 
     let result = "";
     try {
+      // Dynamic context loading (copied from main agent's attempt.ts)
+      const { buildDynamicContext, loadContextParams } =
+        await import("../agents/dynamic-context.js");
+
+      // Extract search query from user prompt
+      const searchQuery = request.userPrompt.slice(0, 500);
+
+      // Retrieve chunks from shared memory manager (graceful fallback to empty on error)
+      let retrievedChunks: Parameters<typeof buildDynamicContext>[0]["retrievedChunks"] = [];
+      if (searchQuery && memoryContext?.memoryManager) {
+        try {
+          const searchResults = await memoryContext.memoryManager.search(searchQuery, {
+            maxResults: 20,
+            sessionKey: `agent:${opts.agentId}:orch:${orchId}`,
+          });
+          retrievedChunks = searchResults.map(
+            (r: {
+              snippet: string;
+              score: number;
+              path: string;
+              source: string;
+              startLine: number;
+              endLine: number;
+              timestamp?: number;
+              l0Abstract?: string;
+              l1Overview?: string;
+            }) => ({
+              snippet: r.snippet,
+              score: r.score,
+              path: r.path,
+              source: r.source,
+              startLine: r.startLine,
+              endLine: r.endLine,
+              timestamp: r.timestamp,
+              l0Abstract: r.l0Abstract,
+              l1Overview: r.l1Overview,
+            }),
+          );
+        } catch (retrievalErr) {
+          logger.debug("Memory retrieval failed (non-fatal)", { error: String(retrievalErr) });
+        }
+      }
+
+      // Load tunable context params (evolver-managed via context_params.json)
+      const contextParams = await loadContextParams();
+
+      // Estimate token counts (rough estimate: ~4 chars per token)
+      const systemPromptTokens = Math.ceil(orchestratorMessage.length / 4);
+      const contextLimit = model.contextWindow ?? 200000;
+      const reserveForReply = 8000;
+
+      // Get all messages from session (empty for first prompt)
+      const allMessages = session.messages ?? [];
+
+      // Apply dynamic context
+      const dynamicResult = buildDynamicContext({
+        allMessages,
+        retrievedChunks,
+        contextLimit,
+        systemPromptTokens,
+        reserveForReply,
+        compactionSummary: null,
+        params: contextParams,
+      });
+
+      logger.info("Dynamic context allocated", {
+        orchId,
+        recentTokens: dynamicResult.recentTokens,
+        retrievalTokens: dynamicResult.retrievalTokens,
+        totalTokens: dynamicResult.totalTokens,
+        recentRatioUsed: dynamicResult.recentRatioUsed.toFixed(2),
+        thresholdUsed: dynamicResult.thresholdUsed.toFixed(2),
+      });
+
       await session.prompt(orchestratorMessage);
       result = session.getLastAssistantText?.() ?? "";
       logger.info("Orchestrator agent completed", { orchId, result: result.slice(0, 200) });
