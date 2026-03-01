@@ -132,12 +132,27 @@ async function runOrchestrationTask(
 
   let memoryContext: import("./orchestrator-memory.js").OrchestrationMemoryContext | null = null;
   let agentDir: string | null = null;
+  let missionDir: string | null = null;
 
   try {
     // 1. Initialize mission workspace (empty directory)
-    const missionDir = await initMissionWorkspace(opts.workspaceDir, orchId);
+    missionDir = await initMissionWorkspace(opts.workspaceDir, orchId);
 
-    // 2. Initialize shared memory for orchestrator + workers
+    // 2. Create initial orchestration record (so we have state even if agent fails early)
+    const { createOrchestration } = await import("./types.js");
+    const initialOrch = createOrchestration({
+      id: orchId,
+      userPrompt: request.userPrompt,
+      orchestratorSessionKey: opts.agentSessionKey,
+      agentId: opts.agentId,
+      workspaceDir: missionDir,
+      sourceWorkspaceDir: opts.workspaceDir,
+      maxFixCycles: opts.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
+    });
+    await saveOrchestration(initialOrch);
+    logger.info("Created initial orchestration record", { orchId });
+
+    // 3. Initialize shared memory for orchestrator + workers
     const { initOrchestrationMemory } = await import("./orchestrator-memory.js");
     memoryContext = await initOrchestrationMemory({
       orchId,
@@ -145,16 +160,20 @@ async function runOrchestrationTask(
       agentId: opts.agentId,
     });
 
-    // 3. Broadcast start event
+    // 4. Broadcast start event
     await broadcastOrchestrationEvent({
       type: "orchestration.started",
       orchestrationId: orchId,
       userPrompt: request.userPrompt,
     });
 
-    // 4. Run Orchestrator agent
+    // 5. Run Orchestrator agent
     // The orchestrator agent will use the orchestrate tool to:
     // - create-plan (task decomposition)
+    // - dispatch (spawn workers)
+    // - run-acceptance (verify results)
+    // - create-fix-tasks + dispatch (if needed)
+    // - complete (copy to output)
     // - dispatch (spawn workers)
     // - run-acceptance (verify results)
     // - create-fix-tasks + dispatch (if needed)
@@ -305,14 +324,14 @@ Execute the entire workflow automatically.`;
       session.dispose();
     }
 
-    // 5. Load final orchestration state
+    // 6. Load final orchestration state
     const orch = await loadOrchestration(orchId);
 
     if (!orch) {
       throw new Error("Orchestration state not found after execution");
     }
 
-    // 6. Broadcast completion or failure event
+    // 7. Broadcast completion or failure event
     if (orch.status === "completed") {
       const outputPath = `./.verso-output/${orchId}`;
       await broadcastOrchestrationEvent({
@@ -372,7 +391,7 @@ Execute the entire workflow automatically.`;
       });
     }
   } finally {
-    // 7. Cleanup resources
+    // 8. Cleanup resources
     try {
       if (memoryContext) {
         const { cleanupOrchestrationMemory } = await import("./orchestrator-memory.js");
