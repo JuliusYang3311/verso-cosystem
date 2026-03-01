@@ -127,40 +127,11 @@ async function runOrchestrationTask(
 
     const { buildOrchestratorSystemPrompt } = await import("./orchestrator-prompt.js");
     const { createOrchestrateTool } = await import("./orchestrator-tools.js");
-    const { loadConfig } = await import("../config/config.js");
-    const { resolveConfiguredModelRef } = await import("../agents/model-selection.js");
-    const { resolveModel } = await import("../agents/pi-embedded-runner/model.js");
-    const { resolveApiKeyForProvider } = await import("../agents/model-auth.js");
+    const { resolveAgentModel } = await import("./model-resolver.js");
     const { resolveOpenClawAgentDir } = await import("../agents/agent-paths.js");
 
-    const cfg = loadConfig();
-    const ref = resolveConfiguredModelRef({
-      cfg,
-      defaultProvider: "anthropic",
-      defaultModel: "claude-sonnet-4-20250514",
-    });
-
+    const { model, authStorage, modelRegistry } = await resolveAgentModel();
     const agentDir = resolveOpenClawAgentDir();
-    const { model, error, authStorage, modelRegistry } = resolveModel(
-      ref.provider,
-      ref.model,
-      agentDir,
-      cfg,
-    );
-
-    if (!model || error) {
-      throw new Error(`Failed to resolve orchestrator model: ${error ?? "unknown"}`);
-    }
-
-    // Inject auth
-    try {
-      const auth = await resolveApiKeyForProvider({ provider: ref.provider, cfg, agentDir });
-      if (auth.apiKey) {
-        authStorage.setRuntimeApiKey(ref.provider, auth.apiKey);
-      }
-    } catch {
-      // best-effort
-    }
 
     // Create orchestrate tool
     const orchestrateTool = createOrchestrateTool({

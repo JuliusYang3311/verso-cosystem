@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Orchestration, Subtask } from "./types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { resolveAgentModel } from "./model-resolver.js";
 import { saveOrchestration } from "./store.js";
 import { buildWorkerSystemPrompt } from "./worker-prompt.js";
 
@@ -74,48 +75,6 @@ function cleanupSandbox(sandboxDir: string): void {
   } catch (err) {
     logger.warn("Failed to cleanup sandbox", { sandboxDir, error: String(err) });
   }
-}
-
-// --- Model resolution (evolver pattern) ---
-
-async function resolveAgentModel(): Promise<{
-  model: import("@mariozechner/pi-ai").Model<import("@mariozechner/pi-ai").Api>;
-  authStorage: import("@mariozechner/pi-coding-agent").AuthStorage;
-  modelRegistry: import("@mariozechner/pi-coding-agent").ModelRegistry;
-}> {
-  const { loadConfig } = await import("../config/config.js");
-  const { resolveConfiguredModelRef } = await import("../agents/model-selection.js");
-  const { resolveModel } = await import("../agents/pi-embedded-runner/model.js");
-
-  const cfg = loadConfig();
-  const ref = resolveConfiguredModelRef({
-    cfg,
-    defaultProvider: "anthropic",
-    defaultModel: "claude-sonnet-4-20250514",
-  });
-
-  const agentDir = (await import("../agents/agent-paths.js")).resolveOpenClawAgentDir();
-  const { model, error, authStorage, modelRegistry } = resolveModel(
-    ref.provider,
-    ref.model,
-    agentDir,
-    cfg,
-  );
-  if (!model || error) {
-    throw new Error(`Failed to resolve model ${ref.provider}/${ref.model}: ${error ?? "unknown"}`);
-  }
-
-  const { resolveApiKeyForProvider } = await import("../agents/model-auth.js");
-  try {
-    const auth = await resolveApiKeyForProvider({ provider: ref.provider, cfg, agentDir });
-    if (auth.apiKey) {
-      authStorage.setRuntimeApiKey(ref.provider, auth.apiKey);
-    }
-  } catch {
-    // best-effort
-  }
-
-  return { model, authStorage, modelRegistry };
 }
 
 // --- Sandbox helpers (adapted from evolver) ---

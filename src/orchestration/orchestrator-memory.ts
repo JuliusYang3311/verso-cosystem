@@ -1,11 +1,14 @@
 // src/orchestration/orchestrator-memory.ts — Shared memory management for orchestration
 //
-// Creates a temporary, isolated memory instance shared by orchestrator and workers.
+// Creates a MemoryIndexManager instance shared by orchestrator and workers.
+// Uses the real agentId (e.g. "main") to resolve config, embedding provider,
+// latent factors, MMR, three-layer memory, and hybrid search — identical to
+// the main agent's memory system.
+//
 // Memory is automatically cleaned up after orchestration completes.
 
 import fs from "node:fs";
 import path from "node:path";
-import type { VersoConfig } from "../config/types.js";
 import type { MemoryIndexManager } from "../memory/manager.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
@@ -28,15 +31,20 @@ export function createOrchestrationMemoryDir(sourceWorkspaceDir: string, orchId:
 
 /**
  * Initialize shared memory for orchestration.
- * Both orchestrator and workers will use this memory instance.
+ *
+ * Uses the real agentId (e.g. "main") so that MemoryIndexManager resolves
+ * the full memory config chain: embedding provider, latent factors, MMR,
+ * three-layer memory (L0/L1/chunks), hybrid search (vector + BM25), and
+ * dynamic context loading — identical to the main agent.
+ *
+ * Both orchestrator and workers share this memory instance via MEMORY_DIR env.
  */
 export async function initOrchestrationMemory(params: {
   orchId: string;
   sourceWorkspaceDir: string;
-  cfg?: VersoConfig;
   agentId: string;
 }): Promise<OrchestrationMemoryContext> {
-  const { orchId, sourceWorkspaceDir, cfg, agentId } = params;
+  const { orchId, sourceWorkspaceDir, agentId } = params;
 
   try {
     // Create temporary memory directory
@@ -46,13 +54,16 @@ export async function initOrchestrationMemory(params: {
     const { MemoryIndexManager } = await import("../memory/manager.js");
     const { loadConfig } = await import("../config/config.js");
 
-    const config = cfg ?? loadConfig();
+    const cfg = loadConfig();
 
-    // Create memory manager instance
-    // Note: We use a custom cache key to ensure this is a separate instance
+    // Use the real agentId (e.g. "main") so MemoryIndexManager resolves:
+    // - resolveMemorySearchConfig: provider, model, fallback, hybrid, sources
+    // - resolveAgentWorkspaceDir: correct workspace for file watching
+    // - createEmbeddingProvider: embedding model (local/remote)
+    // - latent factors, MMR, three-layer memory, dynamic context
     const memoryManager = await MemoryIndexManager.get({
-      cfg: config,
-      agentId: `orch:${orchId}:${agentId}`, // Unique agent ID for this orchestration
+      cfg,
+      agentId, // Real agent ID, not orch-prefixed
     });
 
     if (!memoryManager) {
@@ -60,7 +71,11 @@ export async function initOrchestrationMemory(params: {
       return { memoryDir, memoryManager: null };
     }
 
-    logger.info("Initialized orchestration memory", { orchId, memoryDir });
+    logger.info("Initialized orchestration memory", {
+      orchId,
+      memoryDir,
+      agentId,
+    });
 
     return { memoryDir, memoryManager };
   } catch (err) {
@@ -77,19 +92,15 @@ export async function initOrchestrationMemory(params: {
 
 /**
  * Cleanup orchestration memory.
- * Closes the memory manager and removes the memory directory.
+ * Note: We do NOT close the memory manager here because it may be shared
+ * with the main agent via the INDEX_CACHE. We only clean up the temporary
+ * memory directory.
  */
 export async function cleanupOrchestrationMemory(
   memoryContext: OrchestrationMemoryContext,
 ): Promise<void> {
   try {
-    // Close memory manager
-    if (memoryContext.memoryManager) {
-      await memoryContext.memoryManager.close();
-      logger.info("Closed orchestration memory manager");
-    }
-
-    // Remove memory directory
+    // Remove memory directory (temporary orchestration data only)
     if (fs.existsSync(memoryContext.memoryDir)) {
       fs.rmSync(memoryContext.memoryDir, { recursive: true, force: true });
       logger.info("Removed orchestration memory directory", {
