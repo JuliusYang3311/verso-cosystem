@@ -236,18 +236,27 @@ async function runOrchestrationTask(
     const { createAgentSession, codingTools, SessionManager } =
       await import("@mariozechner/pi-coding-agent");
 
-    // TEMPORARY: Use working version without web search to isolate the problem
-    const orchestratorTools = [orchestrateTool, ...codingTools];
-    // const orchestratorTools = [
-    //   orchestrateTool,
-    //   ...codingTools,
-    //   ...(webSearchTool ? [webSearchTool] : []),
-    // ];
+    const orchestratorTools = [
+      orchestrateTool,
+      ...codingTools,
+      ...(webSearchTool ? [webSearchTool] : []),
+    ];
 
-    logger.info("Creating agent session with tools", {
+    logger.info("Tools BEFORE passing to createAgentSession", {
       orchId,
       toolCount: orchestratorTools.length,
       toolNames: orchestratorTools.map((t) => t.name),
+      toolsJson: JSON.stringify(
+        orchestratorTools.map((t) => ({
+          name: t.name,
+          label: t.label,
+          hasDescription: !!t.description,
+          hasParameters: !!t.parameters,
+          hasExecute: typeof t.execute === "function",
+        })),
+        null,
+        2,
+      ),
     });
 
     const created = await createAgentSession({
@@ -272,6 +281,30 @@ async function runOrchestrationTask(
         "name" in t &&
         (t as { name: string }).name === "orchestrate",
     );
+
+    logger.info("Tools AFTER session creation (comparison)", {
+      orchId,
+      toolsPassedIn: orchestratorTools.length,
+      toolsInSession: sessionTools.length,
+      passedInNames: orchestratorTools.map((t) => t.name),
+      sessionNames: sessionTools.map((t: unknown) =>
+        typeof t === "object" && t !== null && "name" in t
+          ? (t as { name: string }).name
+          : "unnamed",
+      ),
+      missingTools: orchestratorTools
+        .filter(
+          (t) =>
+            !sessionTools.some(
+              (st: unknown) =>
+                typeof st === "object" &&
+                st !== null &&
+                "name" in st &&
+                (st as { name: string }).name === t.name,
+            ),
+        )
+        .map((t) => t.name),
+    });
 
     logger.info("Session tools verification", {
       orchId,
