@@ -2,6 +2,7 @@
 
 import { execSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Orchestration, Subtask } from "./types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -33,6 +34,47 @@ export type WorkerResult = {
   filesChanged: string[];
   error?: string;
 };
+
+// --- Sandbox creation (simplified for orchestration - no pnpm install) ---
+
+function createOrchestrationSandbox(missionWorkspaceDir: string): {
+  ok: boolean;
+  sandboxDir: string | null;
+  error: string | null;
+} {
+  try {
+    const sandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), "orch-worker-"));
+
+    // Copy mission workspace contents (may be empty initially)
+    if (fs.existsSync(missionWorkspaceDir)) {
+      const files = fs.readdirSync(missionWorkspaceDir);
+      for (const file of files) {
+        const src = path.join(missionWorkspaceDir, file);
+        const dst = path.join(sandboxDir, file);
+        const stat = fs.statSync(src);
+        if (stat.isDirectory()) {
+          fs.cpSync(src, dst, { recursive: true });
+        } else {
+          fs.copyFileSync(src, dst);
+        }
+      }
+    }
+
+    return { ok: true, sandboxDir, error: null };
+  } catch (err) {
+    return { ok: false, sandboxDir: null, error: String(err) };
+  }
+}
+
+function cleanupSandbox(sandboxDir: string): void {
+  try {
+    if (fs.existsSync(sandboxDir)) {
+      fs.rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    logger.warn("Failed to cleanup sandbox", { sandboxDir, error: String(err) });
+  }
+}
 
 // --- Model resolution (evolver pattern) ---
 
@@ -159,9 +201,8 @@ async function runWorkerTask(params: {
       process.env.VERSO_MEMORY_DIR = memoryDir;
     }
 
-    // 1. Create tmpdir sandbox
-    const { createTmpdirSandbox } = await import("../evolver/gep/sandbox-runner.js");
-    const sandbox = createTmpdirSandbox(missionWorkspaceDir);
+    // 1. Create tmpdir sandbox (simplified - no pnpm install)
+    const sandbox = createOrchestrationSandbox(missionWorkspaceDir);
     if (!sandbox.ok || !sandbox.sandboxDir) {
       return {
         subtaskId: subtask.id,
@@ -290,8 +331,7 @@ async function runWorkerTask(params: {
       }
     }
     if (sandboxDir) {
-      const { cleanupTmpdir } = await import("../evolver/gep/sandbox-runner.js");
-      cleanupTmpdir(sandboxDir);
+      cleanupSandbox(sandboxDir);
     }
 
     // Restore original memory env vars
