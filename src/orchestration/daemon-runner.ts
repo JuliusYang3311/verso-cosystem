@@ -199,6 +199,18 @@ async function runOrchestrationTask(
       verifyCmd: opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
     });
 
+    // Verify orchestrate tool structure
+    logger.info("Orchestrate tool created", {
+      orchId,
+      hasName: !!orchestrateTool.name,
+      name: orchestrateTool.name,
+      hasLabel: !!orchestrateTool.label,
+      hasDescription: !!orchestrateTool.description,
+      hasParameters: !!orchestrateTool.parameters,
+      hasExecute: typeof orchestrateTool.execute === "function",
+      toolKeys: Object.keys(orchestrateTool),
+    });
+
     // Create web search tool for orchestrator
     logger.info("Creating web search tool", { orchId });
     const { createWebSearchTool } = await import("../agents/tools/web-search.js");
