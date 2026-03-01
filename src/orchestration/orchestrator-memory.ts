@@ -1,11 +1,12 @@
 // src/orchestration/orchestrator-memory.ts — Shared memory management for orchestration
 //
-// Creates a MemoryIndexManager instance shared by orchestrator and workers.
-// Uses the real agentId (e.g. "main") to resolve config, embedding provider,
-// latent factors, MMR, three-layer memory, and hybrid search — identical to
-// the main agent's memory system.
+// Creates an ISOLATED MemoryIndexManager instance for each orchestration.
+// Uses MemoryIndexManager.createIsolated() to get the full memory feature set
+// (embedding, latent factors, MMR, three-layer memory, hybrid search)
+// without polluting the main agent's memory cache.
 //
-// Memory is automatically cleaned up after orchestration completes.
+// Modeled after novel-writer's NovelMemoryStore pattern:
+// independent DB, independent provider, independent lifecycle.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -30,14 +31,16 @@ export function createOrchestrationMemoryDir(sourceWorkspaceDir: string, orchId:
 }
 
 /**
- * Initialize shared memory for orchestration.
+ * Initialize an isolated memory engine for orchestration.
  *
- * Uses the real agentId (e.g. "main") so that MemoryIndexManager resolves
- * the full memory config chain: embedding provider, latent factors, MMR,
- * three-layer memory (L0/L1/chunks), hybrid search (vector + BM25), and
- * dynamic context loading — identical to the main agent.
+ * Creates a MemoryIndexManager.createIsolated() instance that:
+ * - Uses the real agentId to resolve full memory config
+ * - Points to the orchestration's mission workspace (isolated DB)
+ * - Has its own embedding provider, latent factors, MMR, hybrid search
+ * - Is NOT in the global INDEX_CACHE (won't affect main agent)
+ * - Can be safely closed and cleaned up after orchestration completes
  *
- * Both orchestrator and workers share this memory instance via MEMORY_DIR env.
+ * Both orchestrator and workers share this instance via MEMORY_DIR env.
  */
 export async function initOrchestrationMemory(params: {
   orchId: string;
@@ -50,28 +53,26 @@ export async function initOrchestrationMemory(params: {
     // Create temporary memory directory
     const memoryDir = createOrchestrationMemoryDir(sourceWorkspaceDir, orchId);
 
-    // Import memory manager
     const { MemoryIndexManager } = await import("../memory/manager.js");
     const { loadConfig } = await import("../config/config.js");
 
     const cfg = loadConfig();
 
-    // Use the real agentId (e.g. "main") so MemoryIndexManager resolves:
-    // - resolveMemorySearchConfig: provider, model, fallback, hybrid, sources
-    // - resolveAgentWorkspaceDir: correct workspace for file watching
-    // - createEmbeddingProvider: embedding model (local/remote)
-    // - latent factors, MMR, three-layer memory, dynamic context
-    const memoryManager = await MemoryIndexManager.get({
+    // Create isolated instance — not cached, independent lifecycle
+    // Uses real agentId to resolve config (embedding, latent factors, MMR, etc.)
+    // but workspaceDir points to the orchestration's mission workspace
+    const memoryManager = await MemoryIndexManager.createIsolated({
       cfg,
-      agentId, // Real agent ID, not orch-prefixed
+      agentId,
+      workspaceDir: memoryDir,
     });
 
     if (!memoryManager) {
-      logger.warn("Failed to create memory manager for orchestration", { orchId });
+      logger.warn("Failed to create isolated memory manager for orchestration", { orchId });
       return { memoryDir, memoryManager: null };
     }
 
-    logger.info("Initialized orchestration memory", {
+    logger.info("Initialized isolated orchestration memory", {
       orchId,
       memoryDir,
       agentId,
@@ -92,15 +93,20 @@ export async function initOrchestrationMemory(params: {
 
 /**
  * Cleanup orchestration memory.
- * Note: We do NOT close the memory manager here because it may be shared
- * with the main agent via the INDEX_CACHE. We only clean up the temporary
- * memory directory.
+ * Closes the isolated memory manager and removes the memory directory.
+ * Safe to call — the manager is not in the global cache.
  */
 export async function cleanupOrchestrationMemory(
   memoryContext: OrchestrationMemoryContext,
 ): Promise<void> {
   try {
-    // Remove memory directory (temporary orchestration data only)
+    // Close isolated memory manager (releases DB connections, watchers, etc.)
+    if (memoryContext.memoryManager) {
+      await memoryContext.memoryManager.close();
+      logger.info("Closed isolated orchestration memory manager");
+    }
+
+    // Remove memory directory
     if (fs.existsSync(memoryContext.memoryDir)) {
       fs.rmSync(memoryContext.memoryDir, { recursive: true, force: true });
       logger.info("Removed orchestration memory directory", {

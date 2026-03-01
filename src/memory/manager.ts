@@ -226,6 +226,51 @@ export class MemoryIndexManager implements MemorySearchManager {
     return manager;
   }
 
+  /**
+   * Create an isolated MemoryIndexManager that is NOT added to the global cache.
+   * Caller is responsible for calling close() when done.
+   *
+   * Used by orchestration to create temporary, independent memory engines
+   * with the full feature set (embedding, latent factors, MMR, three-layer
+   * memory, hybrid search) but isolated from the main agent's memory.
+   *
+   * Modeled after novel-writer's NovelMemoryStore.open() pattern:
+   * independent DB, independent provider, independent lifecycle.
+   */
+  static async createIsolated(params: {
+    cfg: VersoConfig;
+    agentId: string;
+    workspaceDir: string;
+    providerResult?: EmbeddingProviderResult;
+  }): Promise<MemoryIndexManager | null> {
+    const { cfg, agentId, workspaceDir } = params;
+    const settings = resolveMemorySearchConfig(cfg, agentId);
+    if (!settings) {
+      return null;
+    }
+    const providerResult =
+      params.providerResult ??
+      (await createEmbeddingProvider({
+        config: cfg,
+        agentDir: resolveAgentDir(cfg, agentId),
+        provider: settings.provider,
+        remote: settings.remote,
+        model: settings.model,
+        fallback: settings.fallback,
+        local: settings.local,
+      }));
+    const key = `isolated:${workspaceDir}:${Date.now()}`;
+    // Not added to INDEX_CACHE — caller owns the lifecycle
+    return new MemoryIndexManager({
+      cacheKey: key,
+      cfg,
+      agentId,
+      workspaceDir,
+      settings,
+      providerResult,
+    });
+  }
+
   private constructor(params: {
     cacheKey: string;
     cfg: VersoConfig;
