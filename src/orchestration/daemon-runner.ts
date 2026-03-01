@@ -401,7 +401,7 @@ Start now by calling orchestrate with action "create-plan".`;
             toolNames: toolCalls.map((tc: unknown) => (tc as { name: string }).name),
           });
         } else {
-          logger.warn("Agent completed without making any tool calls", {
+          logger.error("Agent completed without making any tool calls", {
             orchId,
             contentTypes: lastMessage.content.map((c: unknown) =>
               typeof c === "object" && c !== null && "type" in c
@@ -409,7 +409,21 @@ Start now by calling orchestrate with action "create-plan".`;
                 : "unknown",
             ),
           });
+          throw new Error(
+            "Orchestrator agent did not call the orchestrate tool. This is a critical error. " +
+              "The agent must use the orchestrate tool to decompose tasks.",
+          );
         }
+      } else {
+        logger.error("Agent response has no content or invalid structure", {
+          orchId,
+          hasLastMessage: !!lastMessage,
+          hasContent: lastMessage && "content" in lastMessage,
+          isArray: lastMessage && "content" in lastMessage && Array.isArray(lastMessage.content),
+        });
+        throw new Error(
+          "Orchestrator agent response is invalid. Expected tool calls but got no valid content.",
+        );
       }
 
       logger.info("Orchestrator agent completed successfully", {
