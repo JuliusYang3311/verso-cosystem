@@ -31,6 +31,7 @@ type OrchestratorStatus = {
 
 const LOG_FILENAME = "orchestrator-daemon.log";
 const PID_FILENAME = "orchestrator-daemon.pid";
+const LOCK_FILENAME = "orchestrator-daemon.lock";
 
 function ensureLogsDir(): string {
   const stateDir = resolveStateDir();
@@ -39,13 +40,19 @@ function ensureLogsDir(): string {
   return logsDir;
 }
 
-function resolveLogPaths(): { logPath: string; pidPath: string; queuePath: string } {
+function resolveLogPaths(): {
+  logPath: string;
+  pidPath: string;
+  queuePath: string;
+  lockPath: string;
+} {
   const logsDir = ensureLogsDir();
   const stateDir = resolveStateDir();
   return {
     logPath: path.join(logsDir, LOG_FILENAME),
     pidPath: path.join(logsDir, PID_FILENAME),
     queuePath: path.join(stateDir, "orchestrator-queue.json"),
+    lockPath: path.join(logsDir, LOCK_FILENAME),
   };
 }
 
@@ -90,45 +97,80 @@ export async function startOrchestratorDaemon(
   opts?: OrchestratorDaemonOptions,
 ): Promise<OrchestratorStartResult> {
   const cfg = opts?.cfg;
-  const { logPath, pidPath } = resolveLogPaths();
-  const existingPid = readPid(pidPath);
-  if (existingPid && isPidAlive(existingPid)) {
-    return { started: false, pid: existingPid, logPath };
+  const { logPath, pidPath, lockPath } = resolveLogPaths();
+
+  // Acquire lock to prevent duplicate daemon starts
+  let lockFd: number;
+  try {
+    // Try to create lock file exclusively (fails if already exists)
+    lockFd = fs.openSync(lockPath, "wx");
+  } catch {
+    // Lock file exists, check if daemon is actually running
+    const existingPid = readPid(pidPath);
+    if (existingPid && isPidAlive(existingPid)) {
+      return { started: false, pid: existingPid, logPath };
+    }
+    // Stale lock, remove it and retry
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {
+      // ignore
+    }
+    try {
+      lockFd = fs.openSync(lockPath, "wx");
+    } catch {
+      return { started: false, error: "Failed to acquire daemon start lock", logPath };
+    }
   }
 
-  const workspace = resolveWorkspace(cfg);
-  const agentId = opts?.agentId ?? "main";
-  const agentSessionKey = `agent:${agentId}`;
+  try {
+    const existingPid = readPid(pidPath);
+    if (existingPid && isPidAlive(existingPid)) {
+      return { started: false, pid: existingPid, logPath };
+    }
 
-  // Get orchestration config
-  const orchConfig = cfg?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
-  const maxWorkers = orchConfig?.maxWorkers ?? 4;
-  const maxFixCycles = orchConfig?.maxFixCycles ?? 3;
-  const maxOrchestrations = orchConfig?.maxOrchestrations ?? 2;
-  const verifyCmd = orchConfig?.verifyCmd ?? "";
+    const workspace = resolveWorkspace(cfg);
+    const agentId = opts?.agentId ?? "main";
+    const agentSessionKey = `agent:${agentId}`;
 
-  const scriptPath = path.join(process.cwd(), "dist", "orchestration", "daemon-entry.js");
+    // Get orchestration config
+    const orchConfig = cfg?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
+    const maxWorkers = orchConfig?.maxWorkers ?? 4;
+    const maxFixCycles = orchConfig?.maxFixCycles ?? 3;
+    const maxOrchestrations = orchConfig?.maxOrchestrations ?? 2;
+    const verifyCmd = orchConfig?.verifyCmd ?? "";
 
-  // Open log file for daemon output
-  const logFd = fs.openSync(logPath, "a");
+    const scriptPath = path.join(process.cwd(), "dist", "orchestration", "daemon-entry.js");
 
-  const child = spawn(process.execPath, [scriptPath], {
-    detached: true,
-    stdio: ["ignore", logFd, logFd], // Redirect stdout and stderr to log file
-    env: {
-      ...process.env,
-      ORCHESTRATOR_WORKSPACE: workspace,
-      ORCHESTRATOR_AGENT_ID: agentId,
-      ORCHESTRATOR_SESSION_KEY: agentSessionKey,
-      ORCHESTRATOR_MAX_WORKERS: String(maxWorkers),
-      ORCHESTRATOR_MAX_FIX_CYCLES: String(maxFixCycles),
-      ORCHESTRATOR_MAX_ORCHESTRATIONS: String(maxOrchestrations),
-      ORCHESTRATOR_VERIFY_CMD: verifyCmd,
-    },
-  });
-  child.unref();
-  fs.writeFileSync(pidPath, String(child.pid));
-  return { started: true, pid: child.pid, logPath };
+    // Open log file for daemon output
+    const logFd = fs.openSync(logPath, "a");
+
+    const child = spawn(process.execPath, [scriptPath], {
+      detached: true,
+      stdio: ["ignore", logFd, logFd], // Redirect stdout and stderr to log file
+      env: {
+        ...process.env,
+        ORCHESTRATOR_WORKSPACE: workspace,
+        ORCHESTRATOR_AGENT_ID: agentId,
+        ORCHESTRATOR_SESSION_KEY: agentSessionKey,
+        ORCHESTRATOR_MAX_WORKERS: String(maxWorkers),
+        ORCHESTRATOR_MAX_FIX_CYCLES: String(maxFixCycles),
+        ORCHESTRATOR_MAX_ORCHESTRATIONS: String(maxOrchestrations),
+        ORCHESTRATOR_VERIFY_CMD: verifyCmd,
+      },
+    });
+    child.unref();
+    fs.writeFileSync(pidPath, String(child.pid));
+    return { started: true, pid: child.pid, logPath };
+  } finally {
+    // Release lock
+    try {
+      fs.closeSync(lockFd);
+      fs.unlinkSync(lockPath);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 /**
@@ -157,9 +199,19 @@ export async function stopOrchestratorDaemon(): Promise<OrchestratorStopResult> 
  * Get the status of the orchestrator daemon.
  */
 export async function getOrchestratorStatus(): Promise<OrchestratorStatus> {
-  const { logPath, pidPath, queuePath } = resolveLogPaths();
+  const { logPath, pidPath, queuePath, lockPath } = resolveLogPaths();
   const pid = readPid(pidPath);
   const running = pid ? isPidAlive(pid) : false;
+
+  // Clean up stale lock if daemon is not running
+  if (!running) {
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {
+      // ignore
+    }
+  }
+
   return { running, pid: running ? (pid ?? undefined) : undefined, logPath, queuePath };
 }
 

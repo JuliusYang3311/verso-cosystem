@@ -394,9 +394,13 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
   if (!orch) {
     return jsonResult({ error: `Orchestration ${orchId} not found` });
   }
+  if (!orch.plan) {
+    return jsonResult({ error: "No plan found" });
+  }
 
   orch.currentFixCycle += 1;
 
+  // Create fix tasks and convert them to subtasks
   const newFixes: FixTask[] = rawFixes.map((raw: Record<string, unknown>, i: number) => ({
     id: `fix-c${orch.currentFixCycle}-${i + 1}`,
     sourceSubtaskId: String((raw.subtaskId as string) ?? ""),
@@ -405,6 +409,22 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
     createdAtMs: Date.now(),
   }));
 
+  // Convert fix tasks to subtasks so they can be picked up by workers
+  const fixSubtasks: Subtask[] = newFixes.map((fix) => {
+    const sourceTask = orch.plan!.subtasks.find((s) => s.id === fix.sourceSubtaskId);
+    return {
+      id: fix.id,
+      title: `Fix: ${sourceTask?.title || fix.sourceSubtaskId}`,
+      description: fix.description,
+      acceptanceCriteria: sourceTask?.acceptanceCriteria || [],
+      status: "pending" as const,
+      retryCount: 0,
+      createdAtMs: Date.now(),
+    };
+  });
+
+  // Add fix subtasks to the plan so workers can pick them up
+  orch.plan.subtasks.push(...fixSubtasks);
   orch.fixTasks.push(...newFixes);
   orch.status = "dispatching";
   await saveOrchestration(orch);

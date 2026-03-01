@@ -260,37 +260,18 @@ async function runOrchestrationTask(
     const session = created.session;
     logger.info("Orchestrator agent session created", { orchId });
 
-    // Verify tools are actually available in the session
-    const sessionTools = (session as unknown as { tools?: unknown[] }).tools || [];
-    const orchestrateToolInSession = sessionTools.find(
-      (t: unknown) =>
-        typeof t === "object" &&
-        t !== null &&
-        "name" in t &&
-        (t as { name: string }).name === "orchestrate",
-    );
+    // Verify tools are actually available in the session using getActiveToolNames()
+    const sessionToolNames = session.getActiveToolNames();
+    const hasOrchestrateTool = sessionToolNames.includes("orchestrate");
 
     // Multi-line logging AFTER
-    const sessionToolNames = sessionTools.map((t: unknown) =>
-      typeof t === "object" && t !== null && "name" in t ? (t as { name: string }).name : "unnamed",
-    );
-
     logger.info(`Tools AFTER createAgentSession (orchId: ${orchId})`);
-    logger.info(`  count: ${sessionTools.length}`);
+    logger.info(`  count: ${sessionToolNames.length}`);
     logger.info(`  names: ${sessionToolNames.join(", ")}`);
 
     // Find missing custom tools
     const missingTools = customToolsList
-      .filter(
-        (t: { name: string }) =>
-          !sessionTools.some(
-            (st: unknown) =>
-              typeof st === "object" &&
-              st !== null &&
-              "name" in st &&
-              (st as { name: string }).name === t.name,
-          ),
-      )
+      .filter((t: { name: string }) => !sessionToolNames.includes(t.name))
       .map((t: { name: string }) => t.name);
 
     if (missingTools.length > 0) {
@@ -299,20 +280,10 @@ async function runOrchestrationTask(
       logger.error(`  missingNames: ${missingTools.join(", ")}`);
     }
 
-    // Log the full orchestrate tool definition
-    if (orchestrateToolInSession) {
-      logger.info("Orchestrate tool definition", {
-        orchId,
-        toolDefinition: JSON.stringify(orchestrateToolInSession, null, 2),
-      });
-    } else {
+    if (!hasOrchestrateTool) {
       logger.error("Orchestrate tool NOT found in session!", {
         orchId,
-        availableTools: sessionTools.map((t: unknown) =>
-          typeof t === "object" && t !== null && "name" in t
-            ? (t as { name: string }).name
-            : "unnamed",
-        ),
+        availableTools: sessionToolNames,
       });
     }
 
