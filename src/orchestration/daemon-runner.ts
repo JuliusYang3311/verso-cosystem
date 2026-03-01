@@ -341,6 +341,42 @@ Start now by calling orchestrate with action "create-plan".`;
 
       await session.prompt(orchestratorMessage);
       result = session.getLastAssistantText?.() ?? "";
+
+      // Log detailed agent response information
+      const messages = session.messages ?? [];
+      const lastMessage = messages[messages.length - 1];
+
+      logger.info("Orchestrator agent response details", {
+        orchId,
+        resultLength: result.length,
+        resultPreview: result.slice(0, 500),
+        messageCount: messages.length,
+        lastMessageRole: lastMessage?.role,
+        hasToolCalls: !!(
+          lastMessage &&
+          "content" in lastMessage &&
+          Array.isArray(lastMessage.content) &&
+          lastMessage.content.some((c: any) => c.type === "tool_use")
+        ),
+      });
+
+      // If there are tool calls, log them
+      if (lastMessage && "content" in lastMessage && Array.isArray(lastMessage.content)) {
+        const toolCalls = lastMessage.content.filter((c: any) => c.type === "tool_use");
+        if (toolCalls.length > 0) {
+          logger.info("Agent made tool calls", {
+            orchId,
+            toolCallCount: toolCalls.length,
+            toolNames: toolCalls.map((tc: any) => tc.name),
+          });
+        } else {
+          logger.warn("Agent completed without making any tool calls", {
+            orchId,
+            contentTypes: lastMessage.content.map((c: any) => c.type),
+          });
+        }
+      }
+
       logger.info("Orchestrator agent completed successfully", {
         orchId,
         resultLength: result.length,
