@@ -1,21 +1,19 @@
 // src/orchestration/orchestrator-tools.ts — The orchestrate agent tool
 
 import { Type } from "@sinclair/typebox";
-import crypto from "node:crypto";
 import { stringEnum } from "../agents/schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "../agents/tools/common.js";
 import { broadcastOrchestrationEvent, buildOrchestrationSnapshot } from "./events.js";
 import {
   saveOrchestration,
   loadOrchestration,
-  initMissionWorkspace,
   copyMissionToOutput,
   cleanupMissionWorkspace,
+  listOrchestrations,
 } from "./store.js";
 import {
   type Subtask,
   type FixTask,
-  createOrchestration,
   createSubtask,
   isSubtaskReady,
   ORCHESTRATION_DEFAULTS,
@@ -143,7 +141,7 @@ OUTPUT DIRECTORY: Results are copied to this directory in the source workspace:
 
 // --- Action Handlers ---
 
-async function handleCreatePlan(params: Record<string, unknown>, opts: OrchestrateToolOptions) {
+async function handleCreatePlan(params: Record<string, unknown>, _opts: OrchestrateToolOptions) {
   const planSummary = readStringParam(params, "planSummary", { required: true });
   const userPrompt = readStringParam(params, "userPrompt", { required: true });
   const verifyCmd = readStringParam(params, "verifyCmd"); // Optional, determined by orchestrator
@@ -153,18 +151,22 @@ async function handleCreatePlan(params: Record<string, unknown>, opts: Orchestra
     return jsonResult({ error: "subtasks array is required and must not be empty" });
   }
 
-  const orchId = crypto.randomUUID().slice(0, 8);
-  const missionDir = await initMissionWorkspace(opts.workspaceDir, orchId);
+  // Find existing orchestration by userPrompt (created by daemon-runner)
+  const allOrchs = await listOrchestrations();
+  const existingOrch = allOrchs.find((o) => o.userPrompt === userPrompt && o.status === "planning");
 
-  const orch = createOrchestration({
-    id: orchId,
-    userPrompt,
-    orchestratorSessionKey: opts.agentSessionKey,
-    agentId: opts.agentId,
-    workspaceDir: missionDir,
-    sourceWorkspaceDir: opts.workspaceDir,
-    maxFixCycles: opts.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
-  });
+  if (!existingOrch) {
+    return jsonResult({
+      error:
+        "No orchestration found in planning state. This should have been created by the daemon.",
+    });
+  }
+
+  const orchId = existingOrch.id;
+  const orch = await loadOrchestration(orchId);
+  if (!orch) {
+    return jsonResult({ error: `Orchestration ${orchId} not found` });
+  }
 
   const subtasks: Subtask[] = rawSubtasks.map((raw: Record<string, unknown>, i: number) => {
     const id = `t${i + 1}`;
@@ -191,12 +193,12 @@ async function handleCreatePlan(params: Record<string, unknown>, opts: Orchestra
 
   return jsonResult({
     orchestrationId: orchId,
-    missionWorkspace: missionDir,
+    missionWorkspace: orch.workspaceDir,
     status: orch.status,
     subtaskCount: subtasks.length,
     verifyCmd: verifyCmd || "(none - LLM-only evaluation)",
     subtasks: subtasks.map((s) => ({ id: s.id, title: s.title, status: s.status })),
-    message: `Plan created with ${subtasks.length} subtasks. Mission workspace: ${missionDir}. Call dispatch to start workers.`,
+    message: `Plan created with ${subtasks.length} subtasks. Mission workspace: ${orch.workspaceDir}. Call dispatch to start workers.`,
   });
 }
 

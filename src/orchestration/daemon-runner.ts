@@ -199,18 +199,24 @@ async function runOrchestrationTask(
       verifyCmd: opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
     });
 
-    // Create web search tool for orchestrator
+    // Create web search and web fetch tools for orchestrator
     const { createWebSearchTool } = await import("../agents/tools/web-search.js");
+    const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
     const { loadConfig } = await import("../config/config.js");
     const config = loadConfig();
     const webSearchTool = createWebSearchTool({ config, sandboxed: false });
+    const webFetchTool = createWebFetchTool({ config, sandboxed: false });
 
     // Create in-memory orchestrator agent session
     logger.info("Creating orchestrator agent session", { orchId });
     const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
 
-    // Use customTools parameter to add orchestrate + web_search tools
-    const customToolsList = [orchestrateTool, ...(webSearchTool ? [webSearchTool] : [])];
+    // Use customTools parameter to add orchestrate + web_search + web_fetch tools
+    const customToolsList = [
+      orchestrateTool,
+      ...(webSearchTool ? [webSearchTool] : []),
+      ...(webFetchTool ? [webFetchTool] : []),
+    ];
 
     const created = await createAgentSession({
       cwd: missionDir,

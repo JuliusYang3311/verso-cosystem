@@ -136,7 +136,7 @@ export async function startOrchestratorDaemon(
     // Get orchestration config
     const orchConfig = cfg?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
     const maxWorkers = orchConfig?.maxWorkers ?? 4;
-    const maxFixCycles = orchConfig?.maxFixCycles ?? 3;
+    const maxFixCycles = orchConfig?.maxFixCycles ?? 30;
     const maxOrchestrations = orchConfig?.maxOrchestrations ?? 2;
     const verifyCmd = orchConfig?.verifyCmd ?? "";
 
@@ -226,7 +226,7 @@ export async function submitOrchestration(
   const { lockPath } = resolveLogPaths();
 
   // Acquire lock to prevent race condition when checking/starting daemon
-  let lockFd: number;
+  let lockFd: number | null = null;
   try {
     lockFd = fs.openSync(lockPath, "wx");
   } catch {
@@ -242,7 +242,7 @@ export async function submitOrchestration(
         throw new Error("Failed to acquire orchestration submit lock");
       }
     } else {
-      // Daemon is running, just enqueue
+      // Daemon is running, just enqueue (no lock needed)
       const orchestrationId = enqueueOrchestration(userPrompt);
       return { orchestrationId, daemonStarted: false };
     }
@@ -267,12 +267,14 @@ export async function submitOrchestration(
 
     return { orchestrationId, daemonStarted };
   } finally {
-    // Release lock
-    try {
-      fs.closeSync(lockFd);
-      fs.unlinkSync(lockPath);
-    } catch {
-      // ignore
+    // Release lock if we acquired it
+    if (lockFd !== null) {
+      try {
+        fs.closeSync(lockFd);
+        fs.unlinkSync(lockPath);
+      } catch {
+        // ignore
+      }
     }
   }
 }
