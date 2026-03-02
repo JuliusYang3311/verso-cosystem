@@ -74,6 +74,7 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
     });
 
     // For completion/failure events, inject a notification into the main agent session
+    // AND process the queue to start the next orchestration
     if (event.type === "orchestration.completed" || event.type === "orchestration.failed") {
       const orchId = event.orchestrationId;
 
@@ -129,6 +130,41 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
           error: String(err),
           orchId,
           mainSessionKey,
+        });
+      }
+
+      // Process queue: start next orchestration if any
+      try {
+        const { startOrchestratorDaemon, dequeueOrchestration } = await import("./orchestrator.js");
+
+        const nextItem = dequeueOrchestration();
+        if (nextItem) {
+          logger.info("Starting next queued orchestration", {
+            orchestrationId: nextItem.orchestrationId,
+          });
+
+          const startResult = await startOrchestratorDaemon({
+            cfg: nextItem.cfg,
+            agentId: nextItem.agentId,
+            orchestrationId: nextItem.orchestrationId,
+            userPrompt: nextItem.userPrompt,
+          });
+
+          if (startResult.started) {
+            logger.info("Successfully started queued orchestration", {
+              orchestrationId: nextItem.orchestrationId,
+              pid: startResult.pid,
+            });
+          } else {
+            logger.warn("Failed to start queued orchestration", {
+              orchestrationId: nextItem.orchestrationId,
+              error: startResult.error,
+            });
+          }
+        }
+      } catch (err) {
+        logger.error("Failed to process orchestration queue", {
+          error: String(err),
         });
       }
     }

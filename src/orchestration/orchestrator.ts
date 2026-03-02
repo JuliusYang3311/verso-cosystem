@@ -1,19 +1,33 @@
-// src/orchestration/orchestrator.ts — Orchestrator daemon management
+// src/orchestration/orchestrator.ts — Orchestrator daemon management (multi-daemon architecture)
 //
-// Start/stop/status functions for the orchestrator daemon.
-// Similar to src/agents/evolver.ts
+// Each orchestration runs in its own dedicated daemon process.
+// maxOrchestrations controls the maximum number of concurrent daemons.
+// Queuing: When max daemons reached, new orchestrations are queued and auto-started when a daemon completes.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { VersoConfig } from "../config/types.js";
 import { resolveStateDir } from "../config/paths.js";
-import { enqueueOrchestration } from "./daemon-runner.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
+import { saveOrchestration } from "./store.js";
+import { createOrchestration } from "./types.js";
+
+const logger = createSubsystemLogger("orchestrator-daemon-manager");
+
+type QueuedOrchestration = {
+  orchestrationId: string;
+  cfg?: VersoConfig;
+  agentId: string;
+  userPrompt: string;
+  queuedAtMs: number;
+};
 
 type OrchestratorStartResult = {
   started: boolean;
   pid?: number;
   logPath: string;
+  orchestrationId: string;
   error?: string;
 };
 
@@ -22,16 +36,12 @@ type OrchestratorStopResult = {
   pid?: number;
 };
 
-type OrchestratorStatus = {
-  running: boolean;
-  pid?: number;
-  logPath: string;
-  queuePath: string;
+export type OrchestratorDaemonOptions = {
+  cfg?: VersoConfig;
+  agentId?: string;
+  orchestrationId: string;
+  userPrompt: string;
 };
-
-const LOG_FILENAME = "orchestrator-daemon.log";
-const PID_FILENAME = "orchestrator-daemon.pid";
-const LOCK_FILENAME = "orchestrator-daemon.lock";
 
 function ensureLogsDir(): string {
   const stateDir = resolveStateDir();
@@ -40,21 +50,69 @@ function ensureLogsDir(): string {
   return logsDir;
 }
 
-function resolveLogPaths(): {
-  logPath: string;
-  pidPath: string;
-  queuePath: string;
-  lockPath: string;
-} {
+function resolveLogPath(orchestrationId: string): string {
   const logsDir = ensureLogsDir();
-  const stateDir = resolveStateDir();
-  return {
-    logPath: path.join(logsDir, LOG_FILENAME),
-    pidPath: path.join(logsDir, PID_FILENAME),
-    queuePath: path.join(stateDir, "orchestrator-queue.json"),
-    lockPath: path.join(logsDir, LOCK_FILENAME),
-  };
+  return path.join(logsDir, `orchestrator-${orchestrationId}.log`);
 }
+
+function resolvePidPath(orchestrationId: string): string {
+  const logsDir = ensureLogsDir();
+  return path.join(logsDir, `orchestrator-${orchestrationId}.pid`);
+}
+
+function resolveLockPath(orchestrationId: string): string {
+  const logsDir = ensureLogsDir();
+  return path.join(logsDir, `orchestrator-${orchestrationId}.lock`);
+}
+
+function resolveQueuePath(): string {
+  const stateDir = resolveStateDir();
+  return path.join(stateDir, "orchestration-queue.json");
+}
+
+function loadQueue(): QueuedOrchestration[] {
+  const queuePath = resolveQueuePath();
+  try {
+    if (!fs.existsSync(queuePath)) {
+      return [];
+    }
+    const raw = fs.readFileSync(queuePath, "utf-8");
+    return JSON.parse(raw) as QueuedOrchestration[];
+  } catch {
+    return [];
+  }
+}
+
+function saveQueue(queue: QueuedOrchestration[]): void {
+  const queuePath = resolveQueuePath();
+  fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), "utf-8");
+}
+
+function enqueueOrchestration(item: QueuedOrchestration): void {
+  const queue = loadQueue();
+  queue.push(item);
+  saveQueue(queue);
+  logger.info("Orchestration queued", {
+    orchestrationId: item.orchestrationId,
+    queueLength: queue.length,
+  });
+}
+
+function dequeueOrchestration(): QueuedOrchestration | null {
+  const queue = loadQueue();
+  if (queue.length === 0) {
+    return null;
+  }
+  const item = queue.shift()!;
+  saveQueue(queue);
+  logger.info("Orchestration dequeued", {
+    orchestrationId: item.orchestrationId,
+    remainingInQueue: queue.length,
+  });
+  return item;
+}
+
+export { dequeueOrchestration };
 
 function readPid(pidPath: string): number | null {
   try {
@@ -84,31 +142,68 @@ function resolveWorkspace(cfg?: VersoConfig): string {
   );
 }
 
-export type OrchestratorDaemonOptions = {
-  cfg?: VersoConfig;
-  agentId?: string;
-};
+function countActiveDaemons(): number {
+  const logsDir = ensureLogsDir();
+  const files = fs.readdirSync(logsDir);
+  let count = 0;
+  for (const file of files) {
+    if (file.startsWith("orchestrator-") && file.endsWith(".pid")) {
+      const pidPath = path.join(logsDir, file);
+      const pid = readPid(pidPath);
+      if (pid && isPidAlive(pid)) {
+        count++;
+      }
+    }
+  }
+  return count;
+}
 
 /**
- * Start the orchestrator daemon in the background.
- * The daemon will process queued orchestration requests.
+ * Start a dedicated daemon for a specific orchestration.
+ * If max daemons reached, the orchestration is queued.
  */
 export async function startOrchestratorDaemon(
-  opts?: OrchestratorDaemonOptions,
+  opts: OrchestratorDaemonOptions,
 ): Promise<OrchestratorStartResult> {
-  const cfg = opts?.cfg;
-  const { logPath, pidPath, lockPath } = resolveLogPaths();
+  const cfg = opts.cfg;
+  const orchestrationId = opts.orchestrationId;
+  const logPath = resolveLogPath(orchestrationId);
+  const pidPath = resolvePidPath(orchestrationId);
+  const lockPath = resolveLockPath(orchestrationId);
+
+  // Check max concurrent daemons
+  const agentId = opts.agentId ?? "main";
+  const orchConfig = cfg?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
+  const maxOrchestrations = orchConfig?.maxOrchestrations ?? 2;
+  const activeDaemons = countActiveDaemons();
+
+  if (activeDaemons >= maxOrchestrations) {
+    // Queue this orchestration
+    enqueueOrchestration({
+      orchestrationId,
+      cfg,
+      agentId,
+      userPrompt: opts.userPrompt,
+      queuedAtMs: Date.now(),
+    });
+
+    return {
+      started: false,
+      orchestrationId,
+      logPath,
+      error: `Maximum concurrent orchestrations reached (${activeDaemons}/${maxOrchestrations}). Orchestration queued.`,
+    };
+  }
 
   // Acquire lock to prevent duplicate daemon starts
   let lockFd: number;
   try {
-    // Try to create lock file exclusively (fails if already exists)
     lockFd = fs.openSync(lockPath, "wx");
   } catch {
     // Lock file exists, check if daemon is actually running
     const existingPid = readPid(pidPath);
     if (existingPid && isPidAlive(existingPid)) {
-      return { started: false, pid: existingPid, logPath };
+      return { started: false, pid: existingPid, orchestrationId, logPath };
     }
     // Stale lock, remove it and retry
     try {
@@ -119,25 +214,27 @@ export async function startOrchestratorDaemon(
     try {
       lockFd = fs.openSync(lockPath, "wx");
     } catch {
-      return { started: false, error: "Failed to acquire daemon start lock", logPath };
+      return {
+        started: false,
+        orchestrationId,
+        logPath,
+        error: "Failed to acquire daemon start lock",
+      };
     }
   }
 
   try {
     const existingPid = readPid(pidPath);
     if (existingPid && isPidAlive(existingPid)) {
-      return { started: false, pid: existingPid, logPath };
+      return { started: false, pid: existingPid, orchestrationId, logPath };
     }
 
     const workspace = resolveWorkspace(cfg);
-    const agentId = opts?.agentId ?? "main";
     const agentSessionKey = `agent:${agentId}`;
 
     // Get orchestration config
-    const orchConfig = cfg?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
     const maxWorkers = orchConfig?.maxWorkers ?? 4;
     const maxFixCycles = orchConfig?.maxFixCycles ?? 30;
-    const maxOrchestrations = orchConfig?.maxOrchestrations ?? 2;
     const verifyCmd = orchConfig?.verifyCmd ?? "";
 
     const scriptPath = path.join(process.cwd(), "dist", "orchestration", "daemon-entry.js");
@@ -155,13 +252,13 @@ export async function startOrchestratorDaemon(
         ORCHESTRATOR_SESSION_KEY: agentSessionKey,
         ORCHESTRATOR_MAX_WORKERS: String(maxWorkers),
         ORCHESTRATOR_MAX_FIX_CYCLES: String(maxFixCycles),
-        ORCHESTRATOR_MAX_ORCHESTRATIONS: String(maxOrchestrations),
         ORCHESTRATOR_VERIFY_CMD: verifyCmd,
+        ORCHESTRATOR_ORCHESTRATION_ID: orchestrationId, // Pass orchestration ID
       },
     });
     child.unref();
     fs.writeFileSync(pidPath, String(child.pid));
-    return { started: true, pid: child.pid, logPath };
+    return { started: true, pid: child.pid, orchestrationId, logPath };
   } finally {
     // Release lock
     try {
@@ -174,10 +271,12 @@ export async function startOrchestratorDaemon(
 }
 
 /**
- * Stop the orchestrator daemon.
+ * Stop a specific orchestrator daemon.
  */
-export async function stopOrchestratorDaemon(): Promise<OrchestratorStopResult> {
-  const { pidPath } = resolveLogPaths();
+export async function stopOrchestratorDaemon(
+  orchestrationId: string,
+): Promise<OrchestratorStopResult> {
+  const pidPath = resolvePidPath(orchestrationId);
   const pid = readPid(pidPath);
   if (!pid) {
     return { stopped: false };
@@ -196,85 +295,52 @@ export async function stopOrchestratorDaemon(): Promise<OrchestratorStopResult> 
 }
 
 /**
- * Get the status of the orchestrator daemon.
- */
-export async function getOrchestratorStatus(): Promise<OrchestratorStatus> {
-  const { logPath, pidPath, queuePath, lockPath } = resolveLogPaths();
-  const pid = readPid(pidPath);
-  const running = pid ? isPidAlive(pid) : false;
-
-  // Clean up stale lock if daemon is not running
-  if (!running) {
-    try {
-      fs.unlinkSync(lockPath);
-    } catch {
-      // ignore
-    }
-  }
-
-  return { running, pid: running ? (pid ?? undefined) : undefined, logPath, queuePath };
-}
-
-/**
  * Submit an orchestration request.
- * If the daemon is not running, it will be started automatically.
+ * Creates the orchestration and starts a dedicated daemon for it.
  */
 export async function submitOrchestration(
   userPrompt: string,
-  opts?: OrchestratorDaemonOptions,
-): Promise<{ orchestrationId: string; daemonStarted: boolean }> {
-  const { lockPath } = resolveLogPaths();
+  opts?: { cfg?: VersoConfig; agentId?: string },
+): Promise<{ orchestrationId: string; daemonStarted: boolean; error?: string }> {
+  const cfg = opts?.cfg;
+  const agentId = opts?.agentId ?? "main";
+  const workspace = resolveWorkspace(cfg);
 
-  // Acquire lock to prevent race condition when checking/starting daemon
-  let lockFd: number | null = null;
-  try {
-    lockFd = fs.openSync(lockPath, "wx");
-  } catch {
-    // Lock exists, wait a bit and retry (another request is starting daemon)
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    // Try again without lock - daemon should be running now
-    const status = await getOrchestratorStatus();
-    if (!status.running) {
-      // Still not running, try to acquire lock
-      try {
-        lockFd = fs.openSync(lockPath, "wx");
-      } catch {
-        throw new Error("Failed to acquire orchestration submit lock");
-      }
-    } else {
-      // Daemon is running, just enqueue (no lock needed)
-      const orchestrationId = enqueueOrchestration(userPrompt);
-      return { orchestrationId, daemonStarted: false };
-    }
+  // Generate orchestration ID
+  const orchestrationId = `orch-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  // Get orchestration config
+  const orchConfig = cfg?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
+  const maxFixCycles = orchConfig?.maxFixCycles ?? 30;
+
+  // Create orchestration record
+  const orchestration = createOrchestration({
+    id: orchestrationId,
+    userPrompt,
+    orchestratorSessionKey: `agent:${agentId}:orch:${orchestrationId}`,
+    agentId,
+    workspaceDir: "", // Will be set by daemon
+    sourceWorkspaceDir: workspace,
+    maxFixCycles,
+  });
+
+  await saveOrchestration(orchestration);
+
+  // Start dedicated daemon for this orchestration
+  const startResult = await startOrchestratorDaemon({
+    cfg,
+    agentId,
+    orchestrationId,
+    userPrompt,
+  });
+
+  if (!startResult.started) {
+    return {
+      orchestrationId,
+      daemonStarted: false,
+      error: startResult.error || "Failed to start daemon",
+    };
   }
 
-  try {
-    // Check if daemon is running
-    const status = await getOrchestratorStatus();
-    let daemonStarted = false;
-
-    if (!status.running) {
-      // Start the daemon
-      const startResult = await startOrchestratorDaemon(opts);
-      if (!startResult.started && !startResult.pid) {
-        throw new Error("Failed to start orchestrator daemon");
-      }
-      daemonStarted = true;
-    }
-
-    // Enqueue the orchestration request
-    const orchestrationId = enqueueOrchestration(userPrompt);
-
-    return { orchestrationId, daemonStarted };
-  } finally {
-    // Release lock if we acquired it
-    if (lockFd !== null) {
-      try {
-        fs.closeSync(lockFd);
-        fs.unlinkSync(lockPath);
-      } catch {
-        // ignore
-      }
-    }
-  }
+  return { orchestrationId, daemonStarted: true };
 }

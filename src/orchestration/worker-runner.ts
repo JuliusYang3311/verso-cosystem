@@ -16,17 +16,8 @@ const logger = createSubsystemLogger("orchestration-worker");
 
 const DEFAULT_WORKER_TIMEOUT_MS = 600_000; // 10 minutes per task
 
-// --- Concurrency tracking ---
-
-const activeOrchestrationIds = new Set<string>();
-
-export function getActiveOrchestrationCount(): number {
-  return activeOrchestrationIds.size;
-}
-
-export function isOrchestrationActive(orchId: string): boolean {
-  return activeOrchestrationIds.has(orchId);
-}
+// --- Concurrency tracking removed (multi-daemon architecture) ---
+// Each daemon runs one orchestration, so no cross-orchestration tracking needed
 
 // --- Types ---
 
@@ -350,92 +341,84 @@ async function runWorkerTask(params: {
   }
 }
 
-// --- Orchestration waiting pool ---
-
-const waitingQueue: Array<() => void> = [];
-
-function releaseOrchestrationSlot(orchId: string): void {
-  activeOrchestrationIds.delete(orchId);
-  // Wake up the next waiting orchestration
-  const next = waitingQueue.shift();
-  if (next) {
-    next();
-  }
-}
-
-async function acquireOrchestrationSlot(orchId: string, maxOrchestrations: number): Promise<void> {
-  if (activeOrchestrationIds.size < maxOrchestrations) {
-    activeOrchestrationIds.add(orchId);
-    return;
-  }
-
-  // Wait for a slot to open
-  logger.info(
-    `orchestration ${orchId}: waiting for slot (${activeOrchestrationIds.size}/${maxOrchestrations} active)`,
-  );
-  await new Promise<void>((resolve) => {
-    waitingQueue.push(resolve);
-  });
-  activeOrchestrationIds.add(orchId);
-}
-
 // --- Worker pool with task claiming ---
 
 export async function runWorkerPool(params: {
   orchestration: Orchestration;
   maxWorkers: number;
-  maxOrchestrations: number;
   memoryDir?: string; // Shared memory directory
   timeoutMs?: number;
 }): Promise<WorkerResult[]> {
-  const { orchestration: orch, maxWorkers, maxOrchestrations, memoryDir, timeoutMs } = params;
+  const { orchestration: orch, maxWorkers, memoryDir, timeoutMs } = params;
 
   if (!orch.plan) {
     throw new Error("No plan found");
   }
 
-  // Wait for a slot if at capacity
-  await acquireOrchestrationSlot(orch.id, maxOrchestrations);
+  const subtasks = orch.plan.subtasks;
+  const subtaskById = new Map(subtasks.map((s) => [s.id, s]));
 
-  try {
-    const subtasks = orch.plan.subtasks;
-    const subtaskById = new Map(subtasks.map((s) => [s.id, s]));
+  // Build initial pending queue: only ready (pending + deps met) subtasks
+  const pending: string[] = subtasks.filter((s) => isSubtaskReady(s, subtasks)).map((s) => s.id);
 
-    // Build initial pending queue: only ready (pending + deps met) subtasks
-    const pending: string[] = subtasks.filter((s) => isSubtaskReady(s, subtasks)).map((s) => s.id);
+  const results: WorkerResult[] = [];
 
-    const results: WorkerResult[] = [];
+  const claimNext = (): Subtask | null => {
+    // First try to claim from existing pending queue
+    const id = pending.shift();
+    if (id) {
+      return subtaskById.get(id) ?? null;
+    }
 
-    const claimNext = (): Subtask | null => {
-      // First try to claim from existing pending queue
-      const id = pending.shift();
-      if (id) {
-        return subtaskById.get(id) ?? null;
+    // If pending queue is empty, check if any new tasks became ready
+    const newlyReady = subtasks.filter((s) => isSubtaskReady(s, subtasks));
+    if (newlyReady.length > 0) {
+      pending.push(...newlyReady.map((s) => s.id));
+      const nextId = pending.shift();
+      return nextId ? (subtaskById.get(nextId) ?? null) : null;
+    }
+
+    return null;
+  };
+
+  const workerLoop = async (): Promise<void> => {
+    while (true) {
+      const task = claimNext();
+      if (!task) {
+        break;
       }
 
-      // If pending queue is empty, check if any new tasks became ready
-      const newlyReady = subtasks.filter((s) => isSubtaskReady(s, subtasks));
-      if (newlyReady.length > 0) {
-        pending.push(...newlyReady.map((s) => s.id));
-        const nextId = pending.shift();
-        return nextId ? (subtaskById.get(nextId) ?? null) : null;
-      }
+      task.status = "running";
+      task.startedAtMs = Date.now();
+      await saveOrchestration(orch);
 
-      return null;
-    };
+      // Broadcast subtask started
+      await broadcastOrchestrationEvent({
+        type: "orchestration.subtask",
+        payload: {
+          orchestrationId: orch.id,
+          subtaskId: task.id,
+          status: task.status,
+          title: task.title,
+        },
+      });
 
-    const workerLoop = async (): Promise<void> => {
-      while (true) {
-        const task = claimNext();
-        if (!task) {
-          break;
-        }
+      try {
+        const result = await runWorkerTask({
+          subtask: task,
+          orchestrationId: orch.id,
+          missionWorkspaceDir: orch.workspaceDir,
+          memoryDir, // Pass shared memory dir
+          timeoutMs,
+        });
 
-        task.status = "running";
-        task.startedAtMs = Date.now();
+        task.status = result.ok ? "completed" : "failed";
+        task.completedAtMs = Date.now();
+        task.resultSummary = result.resultSummary;
+        task.error = result.error;
         await saveOrchestration(orch);
 
-        // Broadcast subtask started
+        // Broadcast subtask completed/failed
         await broadcastOrchestrationEvent({
           type: "orchestration.subtask",
           payload: {
@@ -443,72 +426,43 @@ export async function runWorkerPool(params: {
             subtaskId: task.id,
             status: task.status,
             title: task.title,
+            error: task.error,
           },
         });
 
-        try {
-          const result = await runWorkerTask({
-            subtask: task,
+        results.push(result);
+      } catch (err) {
+        // Ensure task is marked as failed even if there's an unhandled exception
+        task.status = "failed";
+        task.completedAtMs = Date.now();
+        task.error = err instanceof Error ? err.message : String(err);
+        await saveOrchestration(orch);
+
+        // Broadcast subtask failed
+        await broadcastOrchestrationEvent({
+          type: "orchestration.subtask",
+          payload: {
             orchestrationId: orch.id,
-            missionWorkspaceDir: orch.workspaceDir,
-            memoryDir, // Pass shared memory dir
-            timeoutMs,
-          });
-
-          task.status = result.ok ? "completed" : "failed";
-          task.completedAtMs = Date.now();
-          task.resultSummary = result.resultSummary;
-          task.error = result.error;
-          await saveOrchestration(orch);
-
-          // Broadcast subtask completed/failed
-          await broadcastOrchestrationEvent({
-            type: "orchestration.subtask",
-            payload: {
-              orchestrationId: orch.id,
-              subtaskId: task.id,
-              status: task.status,
-              title: task.title,
-              error: task.error,
-            },
-          });
-
-          results.push(result);
-        } catch (err) {
-          // Ensure task is marked as failed even if there's an unhandled exception
-          task.status = "failed";
-          task.completedAtMs = Date.now();
-          task.error = err instanceof Error ? err.message : String(err);
-          await saveOrchestration(orch);
-
-          // Broadcast subtask failed
-          await broadcastOrchestrationEvent({
-            type: "orchestration.subtask",
-            payload: {
-              orchestrationId: orch.id,
-              subtaskId: task.id,
-              status: task.status,
-              title: task.title,
-              error: task.error,
-            },
-          });
-
-          results.push({
             subtaskId: task.id,
-            ok: false,
-            resultSummary: "",
-            filesChanged: [],
+            status: task.status,
+            title: task.title,
             error: task.error,
-          });
-        }
+          },
+        });
+
+        results.push({
+          subtaskId: task.id,
+          ok: false,
+          resultSummary: "",
+          filesChanged: [],
+          error: task.error,
+        });
       }
-    };
+    }
+  };
 
-    const workerCount = Math.min(maxWorkers, pending.length);
-    await Promise.all(Array.from({ length: workerCount }, () => workerLoop()));
+  const workerCount = Math.min(maxWorkers, pending.length);
+  await Promise.all(Array.from({ length: workerCount }, () => workerLoop()));
 
-    return results;
-  } finally {
-    releaseOrchestrationSlot(orch.id);
-  }
+  return results;
 }

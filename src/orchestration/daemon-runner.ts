@@ -1,14 +1,17 @@
-// src/orchestration/daemon-runner.ts — Orchestrator daemon runner
+// src/orchestration/daemon-runner.ts — Orchestrator daemon runner (single-task per daemon)
 //
-// Runs orchestration tasks in a background daemon process (similar to evolver daemon).
-// Each orchestration runs in an isolated mission workspace and doesn't occupy gateway sessions.
+// Each daemon runs exactly one orchestration task.
+// Multiple daemons can run concurrently (controlled by maxOrchestrations).
 
-import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
-import { resolveStateDir } from "../config/paths.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { broadcastOrchestrationEvent } from "./events.js";
+import {
+  initOrchestrationMemory,
+  cleanupOrchestrationMemory,
+  getOrchestrationMemoryEnv,
+} from "./orchestrator-memory.js";
+import { buildOrchestratorSystemPrompt } from "./orchestrator-prompt.js";
+import { createOrchestrateTool } from "./orchestrator-tools.js";
 import {
   loadOrchestration,
   saveOrchestration,
@@ -23,169 +26,63 @@ export type OrchestratorDaemonOptions = {
   workspaceDir: string;
   agentId: string;
   agentSessionKey: string;
+  orchestrationId: string;
   maxWorkers?: number;
   maxFixCycles?: number;
-  maxOrchestrations?: number;
   verifyCmd?: string;
 };
 
-export type OrchestrationRequest = {
-  id: string;
-  userPrompt: string;
-  requestedAtMs: number;
-};
-
-const QUEUE_FILENAME = "orchestrator-queue.json";
-
-function resolveQueuePath(): string {
-  const stateDir = resolveStateDir();
-  return path.join(stateDir, QUEUE_FILENAME);
-}
-
-function loadQueue(): OrchestrationRequest[] {
-  try {
-    const queuePath = resolveQueuePath();
-    if (!fs.existsSync(queuePath)) {
-      return [];
-    }
-    const raw = fs.readFileSync(queuePath, "utf-8");
-    if (!raw.trim()) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      logger.warn("Queue file is not an array, resetting", { queuePath });
-      return [];
-    }
-    return parsed as OrchestrationRequest[];
-  } catch (err) {
-    logger.error("Failed to load queue, resetting", { error: String(err) });
-    return [];
-  }
-}
-
-function saveQueue(queue: OrchestrationRequest[]): void {
-  try {
-    const queuePath = resolveQueuePath();
-    const queueDir = path.dirname(queuePath);
-    if (!fs.existsSync(queueDir)) {
-      fs.mkdirSync(queueDir, { recursive: true });
-    }
-    const tempPath = `${queuePath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(queue, null, 2), "utf-8");
-    fs.renameSync(tempPath, queuePath);
-  } catch (err) {
-    logger.error("Failed to save queue", { error: String(err) });
-    throw err;
-  }
-}
-
 /**
- * Enqueue an orchestration request.
- * The daemon will pick it up and execute it in the background.
+ * Run a single orchestration task in this daemon.
+ * The daemon exits when the task completes or fails.
  */
-export function enqueueOrchestration(userPrompt: string): string {
-  if (!userPrompt || userPrompt.trim().length === 0) {
-    throw new Error("User prompt cannot be empty");
+async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<void> {
+  const orchId = opts.orchestrationId;
+  const t0 = Date.now();
+
+  logger.info("Starting orchestration task", { orchId });
+
+  // Load orchestration
+  const orch = await loadOrchestration(orchId);
+  if (!orch) {
+    logger.error("Orchestration not found", { orchId });
+    throw new Error(`Orchestration ${orchId} not found`);
   }
 
-  const orchId = crypto.randomUUID().slice(0, 8);
-  const queue = loadQueue();
+  // Initialize mission workspace
+  const missionDir = await initMissionWorkspace(orchId, opts.workspaceDir);
+  orch.workspaceDir = missionDir;
+  await saveOrchestration(orch);
 
-  // Check for duplicate requests (same prompt within last 5 minutes)
-  const recentDuplicate = queue.find(
-    (req) => req.userPrompt === userPrompt && Date.now() - req.requestedAtMs < 5 * 60 * 1000,
-  );
-
-  if (recentDuplicate) {
-    logger.warn("Duplicate orchestration request detected", {
-      orchId: recentDuplicate.id,
-      userPrompt: userPrompt.slice(0, 100),
-    });
-    return recentDuplicate.id;
-  }
-
-  queue.push({
-    id: orchId,
-    userPrompt,
-    requestedAtMs: Date.now(),
+  // Broadcast orchestration started event
+  await broadcastOrchestrationEvent({
+    type: "orchestration.started",
+    orchestrationId: orch.id,
+    userPrompt: orch.userPrompt,
   });
-  saveQueue(queue);
-  logger.info("Enqueued orchestration", { orchId, userPrompt: userPrompt.slice(0, 100) });
-  return orchId;
-}
 
-/**
- * Run a single orchestration task.
- * This is called by the daemon for each queued request.
- *
- * Architecture: Daemon runs an Orchestrator agent that uses the orchestrate tool.
- * The Orchestrator agent decomposes tasks, dispatches workers, and runs acceptance tests.
- * Workers execute subtasks in the shared mission workspace with shared memory.
- */
-async function runOrchestrationTask(
-  request: OrchestrationRequest,
-  opts: OrchestratorDaemonOptions,
-): Promise<void> {
-  const orchId = request.id;
-  logger.info("Starting orchestration", { orchId });
+  // Create shared memory for orchestrator + workers
+  logger.info("Creating shared memory", { orchId });
+  const memoryContext = await initOrchestrationMemory({
+    orchId,
+    sourceWorkspaceDir: opts.workspaceDir,
+    agentId: opts.agentId,
+  });
+  const memoryEnv = getOrchestrationMemoryEnv(memoryContext.memoryDir);
 
-  let memoryContext: import("./orchestrator-memory.js").OrchestrationMemoryContext | null = null;
-  let agentDir: string | null = null;
-  let missionDir: string | null = null;
+  // Set memory env vars for orchestrator agent
+  process.env.MEMORY_DIR = memoryEnv.MEMORY_DIR;
+  process.env.VERSO_MEMORY_DIR = memoryEnv.VERSO_MEMORY_DIR;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let session: any = null;
 
   try {
-    // 1. Initialize mission workspace (empty directory)
-    missionDir = await initMissionWorkspace(opts.workspaceDir, orchId);
-
-    // 2. Create initial orchestration record (so we have state even if agent fails early)
-    const { createOrchestration } = await import("./types.js");
-    const initialOrch = createOrchestration({
-      id: orchId,
-      userPrompt: request.userPrompt,
-      orchestratorSessionKey: opts.agentSessionKey,
-      agentId: opts.agentId,
-      workspaceDir: missionDir,
-      sourceWorkspaceDir: opts.workspaceDir,
-      maxFixCycles: opts.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
-    });
-    await saveOrchestration(initialOrch);
-    logger.info("Created initial orchestration record", { orchId });
-
-    // 3. Initialize shared memory for orchestrator + workers
-    const { initOrchestrationMemory } = await import("./orchestrator-memory.js");
-    memoryContext = await initOrchestrationMemory({
-      orchId,
-      sourceWorkspaceDir: opts.workspaceDir,
-      agentId: opts.agentId,
-    });
-
-    // 4. Broadcast start event
-    await broadcastOrchestrationEvent({
-      type: "orchestration.started",
-      orchestrationId: orchId,
-      userPrompt: request.userPrompt,
-    });
-
-    // 5. Run Orchestrator agent
-    // The orchestrator agent will use the orchestrate tool to:
-    // - create-plan (task decomposition)
-    // - dispatch (spawn workers)
-    // - run-acceptance (verify results)
-    // - create-fix-tasks + dispatch (if needed)
-    // - complete (copy to output)
-
-    logger.info("Initializing orchestrator agent", { orchId });
-
-    const { buildOrchestratorSystemPrompt } = await import("./orchestrator-prompt.js");
-    const { createOrchestrateTool } = await import("./orchestrator-tools.js");
+    // Resolve model and auth
     const { resolveAgentModel } = await import("./model-resolver.js");
-    const { resolveOpenClawAgentDir } = await import("../agents/agent-paths.js");
-
-    logger.info("Resolving agent model", { orchId });
     const { model, authStorage, modelRegistry } = await resolveAgentModel();
+    const { resolveOpenClawAgentDir } = await import("../agents/agent-paths.js");
     const agentDir = resolveOpenClawAgentDir();
-    logger.info("Agent model resolved", { orchId, modelId: model.id, agentDir });
 
     // Create orchestrate tool
     logger.info("Creating orchestrate tool", { orchId });
@@ -195,7 +92,7 @@ async function runOrchestrationTask(
       workspaceDir: missionDir,
       maxWorkers: opts.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers,
       maxFixCycles: opts.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
-      maxOrchestrations: opts.maxOrchestrations ?? ORCHESTRATION_DEFAULTS.maxOrchestrations,
+      maxOrchestrations: 1, // Single task per daemon
       verifyCmd: opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
     });
 
@@ -258,7 +155,7 @@ async function runOrchestrationTask(
       sessionManager: SessionManager.inMemory(missionDir),
     });
 
-    const session = created.session;
+    session = created.session;
     logger.info("Orchestrator agent session created", { orchId });
 
     // Verify tools are registered
@@ -268,15 +165,16 @@ async function runOrchestrationTask(
       .map((t: { name: string }) => t.name);
 
     if (missingTools.length > 0) {
-      throw new Error(`Critical: Tools missing after session creation: ${missingTools.join(", ")}`);
+      logger.warn("Some tools not registered", { orchId, missingTools });
     }
 
+    // Build orchestrator prompt
     const orchestratorMessage = `${buildOrchestratorSystemPrompt()}
 
 ORCHESTRATION ID: ${orchId}
 
 TASK:
-${request.userPrompt}
+${orch.userPrompt}
 
 CRITICAL INSTRUCTIONS:
 You MUST use the orchestrate tool to complete this task. Do NOT provide a text response without calling the tool.
@@ -284,398 +182,97 @@ You MUST use the orchestrate tool to complete this task. Do NOT provide a text r
 Your FIRST action must be to call the orchestrate tool with action "create-plan" to decompose the task into subtasks.
 IMPORTANT: When calling create-plan, you MUST include the orchestrationId parameter: "${orchId}"
 
-After creating the plan, follow this workflow:
+After creating the plan, follow this AUTOMATED workflow (do NOT wait for user input):
 1. Call orchestrate with action "create-plan" and orchestrationId "${orchId}" (REQUIRED FIRST STEP)
-2. Call orchestrate with action "dispatch" and orchestrationId "${orchId}" to run workers
+2. Call orchestrate with action "dispatch" and orchestrationId "${orchId}" to run workers (BLOCKS until all workers complete)
 3. Call orchestrate with action "run-acceptance" and orchestrationId "${orchId}" to verify results
 4. If tests pass, call orchestrate with action "complete" and orchestrationId "${orchId}"
-5. If tests fail, call orchestrate with action "create-fix-tasks" and orchestrationId "${orchId}", then repeat steps 2-4
+5. If tests fail, call orchestrate with action "create-fix-tasks" and orchestrationId "${orchId}", then IMMEDIATELY call "dispatch" again (step 2), then "run-acceptance" again (step 3), then repeat until tests pass or max cycles reached
+
+IMPORTANT: After calling "create-fix-tasks", you MUST immediately call "dispatch" again to run the fix workers. Do NOT stop after creating fix tasks.
 
 Start now by calling orchestrate with action "create-plan" and orchestrationId "${orchId}".`;
 
-    let result = "";
-    try {
-      logger.info("Starting orchestrator agent prompt execution", { orchId });
+    // Run orchestrator agent
+    logger.info("Running orchestrator agent", { orchId });
+    await session.prompt(orchestratorMessage);
 
-      // Dynamic context loading (copied from main agent's attempt.ts)
-      const { buildDynamicContext, loadContextParams } =
-        await import("../agents/dynamic-context.js");
-
-      // Extract search query from user prompt
-      const searchQuery = request.userPrompt.slice(0, 500);
-
-      // Retrieve chunks from shared memory manager (graceful fallback to empty on error)
-      let retrievedChunks: Parameters<typeof buildDynamicContext>[0]["retrievedChunks"] = [];
-      if (searchQuery && memoryContext?.memoryManager) {
-        try {
-          const searchResults = await memoryContext.memoryManager.search(searchQuery, {
-            maxResults: 20,
-            sessionKey: `agent:${opts.agentId}:orch:${orchId}`,
-          });
-          retrievedChunks = searchResults.map(
-            (r: {
-              snippet: string;
-              score: number;
-              path: string;
-              source: string;
-              startLine: number;
-              endLine: number;
-              timestamp?: number;
-              l0Abstract?: string;
-              l1Overview?: string;
-            }) => ({
-              snippet: r.snippet,
-              score: r.score,
-              path: r.path,
-              source: r.source,
-              startLine: r.startLine,
-              endLine: r.endLine,
-              timestamp: r.timestamp,
-              l0Abstract: r.l0Abstract,
-              l1Overview: r.l1Overview,
-            }),
-          );
-        } catch (retrievalErr) {
-          logger.debug("Memory retrieval failed (non-fatal)", { error: String(retrievalErr) });
-        }
-      }
-
-      // Load tunable context params (evolver-managed via context_params.json)
-      const contextParams = await loadContextParams();
-
-      // Estimate token counts (rough estimate: ~4 chars per token)
-      const systemPromptTokens = Math.ceil(orchestratorMessage.length / 4);
-      const contextLimit = model.contextWindow ?? 200000;
-      const reserveForReply = 8000;
-
-      // Get all messages from session (empty for first prompt)
-      const allMessages = session.messages ?? [];
-
-      // Apply dynamic context
-      const dynamicResult = buildDynamicContext({
-        allMessages,
-        retrievedChunks,
-        contextLimit,
-        systemPromptTokens,
-        reserveForReply,
-        compactionSummary: null,
-        params: contextParams,
-      });
-
-      logger.info("Dynamic context allocated", {
-        orchId,
-        recentTokens: dynamicResult.recentTokens,
-        retrievalTokens: dynamicResult.retrievalTokens,
-        totalTokens: dynamicResult.totalTokens,
-        recentRatioUsed: dynamicResult.recentRatioUsed.toFixed(2),
-        thresholdUsed: dynamicResult.thresholdUsed.toFixed(2),
-      });
-
-      logger.info("Sending prompt to orchestrator agent", {
-        orchId,
-        promptLength: orchestratorMessage.length,
-      });
-
-      // Use prefill technique to force tool calling
-      // Add a user message, then immediately add an assistant message that starts a tool call
-      // This forces the LLM to complete the tool call instead of generating text
-      await session.prompt(orchestratorMessage);
-
-      // Check if agent made tool calls
-      let messages = session.messages ?? [];
-      let lastMessage = messages[messages.length - 1];
-
-      // If the agent didn't call tools, inject a prefill to force it
-      if (
-        !lastMessage ||
-        !("content" in lastMessage) ||
-        !Array.isArray(lastMessage.content) ||
-        !lastMessage.content.some(
-          (c: unknown) =>
-            typeof c === "object" &&
-            c !== null &&
-            "type" in c &&
-            (c as { type: string }).type === "tool_use",
-        )
-      ) {
-        logger.warn("Agent did not call tools on first attempt, retrying with prefill", {
-          orchId,
-          firstAttemptResponse: result.slice(0, 1000), // Log what agent said instead
-        });
-
-        // Add a follow-up message that forces tool usage
-        await session.prompt(
-          "You must use the orchestrate tool now. Start by calling orchestrate with action 'create-plan'.",
-        );
-
-        // Re-check messages after retry
-        messages = session.messages ?? [];
-        lastMessage = messages[messages.length - 1];
-      }
-
-      result = session.getLastAssistantText?.() ?? "";
-
-      // Log detailed agent response information
-      logger.info("Orchestrator agent response details", {
-        orchId,
-        resultLength: result.length,
-        resultPreview: result.slice(0, 500),
-        fullResponse: result, // Log FULL response to see what agent is saying
-        messageCount: messages.length,
-        lastMessageRole: lastMessage?.role,
-        hasToolCalls: !!(
-          lastMessage &&
-          "content" in lastMessage &&
-          Array.isArray(lastMessage.content) &&
-          lastMessage.content.some(
-            (c: unknown) =>
-              typeof c === "object" &&
-              c !== null &&
-              "type" in c &&
-              (c as { type: string }).type === "tool_use",
-          )
-        ),
-      });
-
-      // If there are tool calls, log them
-      if (lastMessage && "content" in lastMessage && Array.isArray(lastMessage.content)) {
-        const toolCalls = lastMessage.content.filter(
-          (c: unknown) =>
-            typeof c === "object" &&
-            c !== null &&
-            "type" in c &&
-            (c as { type: string }).type === "tool_use",
-        );
-        if (toolCalls.length > 0) {
-          logger.info("Agent made tool calls", {
-            orchId,
-            toolCallCount: toolCalls.length,
-            toolNames: toolCalls.map((tc: unknown) => (tc as { name: string }).name),
-          });
-        } else {
-          logger.warn("Agent completed without making any tool calls after retry", {
-            orchId,
-            contentTypes: lastMessage.content.map((c: unknown) =>
-              typeof c === "object" && c !== null && "type" in c
-                ? (c as { type: string }).type
-                : "unknown",
-            ),
-          });
-        }
-      } else {
-        logger.warn("Agent response has no content or invalid structure", {
-          orchId,
-          hasLastMessage: !!lastMessage,
-          hasContent: lastMessage && "content" in lastMessage,
-          isArray: lastMessage && "content" in lastMessage && Array.isArray(lastMessage.content),
-        });
-      }
-
-      logger.info("Orchestrator agent completed successfully", {
-        orchId,
-        resultLength: result.length,
-        resultPreview: result.slice(0, 200),
-      });
-    } catch (promptErr) {
-      logger.error("Orchestrator agent prompt execution failed", {
-        orchId,
-        error: promptErr instanceof Error ? promptErr.message : String(promptErr),
-        stack: promptErr instanceof Error ? promptErr.stack : undefined,
-      });
-      throw promptErr; // Re-throw to be caught by outer catch block
-    } finally {
-      logger.info("Disposing orchestrator agent session", { orchId });
-      session.dispose();
-    }
-
-    // 6. Load final orchestration state
-    const orch = await loadOrchestration(orchId);
-
-    if (!orch) {
-      throw new Error("Orchestration state not found after execution");
-    }
-
-    // 7. Broadcast completion or failure event
-    if (orch.status === "completed") {
-      const outputPath = `./.verso-output/${orchId}`;
-      await broadcastOrchestrationEvent({
-        type: "orchestration.completed",
-        orchestrationId: orchId,
-        outputPath,
-        summary: result ?? "Orchestration completed",
-      });
-    } else if (orch.status === "failed") {
-      await broadcastOrchestrationEvent({
-        type: "orchestration.failed",
-        orchestrationId: orchId,
-        error: orch.error ?? "Orchestration failed",
-      });
-    } else {
-      // Orchestration ended in unexpected state
-      logger.warn("Orchestration ended in unexpected state", {
-        orchId,
-        status: orch.status,
-      });
-      orch.status = "failed";
-      orch.error = `Orchestration ended in unexpected state: ${orch.status}`;
-      await saveOrchestration(orch);
-      await broadcastOrchestrationEvent({
-        type: "orchestration.failed",
-        orchestrationId: orchId,
-        error: orch.error,
-      });
-    }
+    const elapsed = Date.now() - t0;
+    logger.info("Orchestration task completed", { orchId, elapsed_ms: elapsed });
   } catch (err) {
-    // Capture detailed error information
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    const errorStack = err instanceof Error ? err.stack : undefined;
+    const elapsed = Date.now() - t0;
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("Orchestration task failed", { orchId, error: msg, elapsed_ms: elapsed });
 
-    logger.error("Orchestration failed with exception", {
-      orchId,
-      error: errorMessage,
-      stack: errorStack,
-    });
+    // Mark orchestration as failed
+    const orch = await loadOrchestration(orchId);
+    if (orch) {
+      orch.status = "failed";
+      orch.error = msg;
+      orch.completedAtMs = Date.now();
+      await saveOrchestration(orch);
 
-    // Ensure orchestration is marked as failed
-    try {
-      const orch = await loadOrchestration(orchId);
-      if (orch) {
-        orch.status = "failed";
-        orch.error = errorStack || errorMessage; // Save full stack trace
-        orch.completedAtMs = Date.now();
-        await saveOrchestration(orch);
-        logger.info("Saved failed orchestration state", { orchId });
-      } else {
-        logger.error("Cannot save failed state: orchestration not found", { orchId });
-      }
-    } catch (saveErr) {
-      logger.error("Failed to save error state", { orchId, error: String(saveErr) });
-    }
-
-    // Broadcast failure event
-    try {
+      // Broadcast failure event
       await broadcastOrchestrationEvent({
         type: "orchestration.failed",
-        orchestrationId: orchId,
-        error: errorMessage, // Use concise message for notification
-      });
-      logger.info("Broadcasted failure event", { orchId });
-    } catch (broadcastErr) {
-      logger.error("Failed to broadcast failure event", {
-        orchId,
-        error: String(broadcastErr),
+        orchestrationId: orch.id,
+        error: msg,
       });
     }
 
-    // Return early to avoid duplicate processing in the status check below
-    return;
+    throw err;
   } finally {
-    // 8. Cleanup resources
-    try {
-      if (memoryContext) {
-        const { cleanupOrchestrationMemory } = await import("./orchestrator-memory.js");
-        await cleanupOrchestrationMemory(memoryContext);
-        logger.info("Cleaned up orchestration memory", { orchId });
+    // Cleanup
+    if (session) {
+      try {
+        session.dispose();
+      } catch {
+        // ignore
       }
-    } catch (cleanupErr) {
-      logger.error("Failed to cleanup memory", { orchId, error: String(cleanupErr) });
     }
 
-    // Cleanup agent session directory
+    // Close shared memory
     try {
-      if (agentDir) {
-        const agentSessionDir = path.join(agentDir, `orch-${orchId}-${opts.agentId}`);
-        if (fs.existsSync(agentSessionDir)) {
-          fs.rmSync(agentSessionDir, { recursive: true, force: true });
-          logger.info("Cleaned up agent session directory", { orchId, agentSessionDir });
-        }
-      }
-    } catch (cleanupErr) {
-      logger.error("Failed to cleanup agent session directory", {
-        orchId,
-        error: String(cleanupErr),
-      });
+      await cleanupOrchestrationMemory(memoryContext);
+    } catch (err) {
+      logger.warn("Failed to close shared memory", { orchId, error: String(err) });
     }
 
-    // Cleanup mission workspace if orchestration failed
-    try {
-      const orch = await loadOrchestration(orchId);
-      if (orch && orch.status === "failed") {
+    // Cleanup mission workspace if failed
+    const finalOrch = await loadOrchestration(orchId);
+    if (finalOrch?.status === "failed") {
+      try {
         await cleanupMissionWorkspace(opts.workspaceDir, orchId);
-        logger.info("Cleaned up failed orchestration workspace", { orchId });
+      } catch (err) {
+        logger.warn("Failed to cleanup mission workspace", { orchId, error: String(err) });
       }
-    } catch (cleanupErr) {
-      logger.error("Failed to cleanup workspace", { orchId, error: String(cleanupErr) });
     }
+
+    // Restore memory env vars
+    delete process.env.MEMORY_DIR;
+    delete process.env.VERSO_MEMORY_DIR;
   }
 }
 
 /**
- * Main daemon loop.
- * Continuously processes queued orchestration requests.
- * Exits automatically after idle timeout when queue is empty.
+ * Main daemon entry point.
+ * Runs a single orchestration task and exits.
  */
 export async function runOrchestratorDaemon(opts: OrchestratorDaemonOptions): Promise<void> {
-  logger.info("Orchestrator daemon started", { workspaceDir: opts.workspaceDir });
+  logger.info("Orchestrator daemon started", {
+    orchestrationId: opts.orchestrationId,
+    workspaceDir: opts.workspaceDir,
+  });
 
-  const maxConcurrent = opts.maxOrchestrations ?? ORCHESTRATION_DEFAULTS.maxOrchestrations;
-  const runningTasks = new Set<Promise<void>>();
-  const IDLE_TIMEOUT_MS = 60000; // Exit after 60 seconds of inactivity
-  let lastActivityMs = Date.now();
-
-  while (true) {
-    try {
-      // Wait for running tasks to complete if at max capacity
-      if (runningTasks.size >= maxConcurrent) {
-        await Promise.race(runningTasks);
-        continue;
-      }
-
-      const queue = loadQueue();
-
-      if (queue.length === 0) {
-        // No pending requests
-        if (runningTasks.size === 0) {
-          // No running tasks either, check idle timeout
-          const idleMs = Date.now() - lastActivityMs;
-          if (idleMs >= IDLE_TIMEOUT_MS) {
-            logger.info("Daemon idle timeout reached, exiting gracefully", {
-              idleMs,
-              timeoutMs: IDLE_TIMEOUT_MS,
-            });
-            process.exit(0);
-          }
-          // Sleep for a bit before checking again
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-        } else {
-          // Wait for any running task to complete
-          await Promise.race(runningTasks);
-        }
-        continue;
-      }
-
-      // Process the first request
-      lastActivityMs = Date.now(); // Reset idle timer
-      const request = queue.shift()!;
-      saveQueue(queue);
-
-      // Run task in background
-      const taskPromise = runOrchestrationTask(request, opts)
-        .catch((err) => {
-          logger.error("Task execution failed", {
-            orchId: request.id,
-            error: String(err),
-          });
-        })
-        .finally(() => {
-          runningTasks.delete(taskPromise);
-        });
-
-      runningTasks.add(taskPromise);
-    } catch (err) {
-      logger.error("Daemon loop error", { error: String(err) });
-      // Sleep before retrying
-      await new Promise((resolve) => setTimeout(resolve, 10000));
-    }
+  try {
+    await runOrchestrationTask(opts);
+    logger.info("Daemon exiting successfully", { orchestrationId: opts.orchestrationId });
+    process.exit(0);
+  } catch (err) {
+    logger.error("Daemon exiting with error", {
+      orchestrationId: opts.orchestrationId,
+      error: String(err),
+    });
+    process.exit(1);
   }
 }

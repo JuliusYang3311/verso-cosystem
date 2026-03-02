@@ -230,13 +230,11 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
   });
 
   const maxWorkers = opts.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers;
-  const maxOrchestrations = opts.maxOrchestrations ?? ORCHESTRATION_DEFAULTS.maxOrchestrations;
 
   try {
     const results = await runWorkerPool({
       orchestration: orch,
       maxWorkers,
-      maxOrchestrations,
     });
 
     const completed = results.filter((r) => r.ok).length;
