@@ -14,7 +14,7 @@ import { buildWorkerSystemPrompt } from "./worker-prompt.js";
 
 const logger = createSubsystemLogger("orchestration-worker");
 
-const DEFAULT_WORKER_TIMEOUT_MS = 600_000; // 10 minutes per task
+const DEFAULT_WORKER_TIMEOUT_MS = 600_000; // 10 minutes of inactivity per task
 
 // --- Concurrency tracking removed (multi-daemon architecture) ---
 // Each daemon runs one orchestration, so no cross-orchestration tracking needed
@@ -46,7 +46,11 @@ function createOrchestrationSandbox(missionWorkspaceDir: string): {
         const src = path.join(missionWorkspaceDir, file);
         const dst = path.join(sandboxDir, file);
         const stat = fs.statSync(src);
-        if (stat.isDirectory()) {
+
+        // Symlink node_modules instead of copying (much faster)
+        if (file === "node_modules" && stat.isDirectory()) {
+          fs.symlinkSync(src, dst, "dir");
+        } else if (stat.isDirectory()) {
           fs.cpSync(src, dst, { recursive: true });
         } else {
           fs.copyFileSync(src, dst);
@@ -315,31 +319,59 @@ async function runWorkerTask(params: {
       "If you cannot complete the task, output: TASK_FAILED",
     ].join("\n");
 
+    // Activity-based timeout: reset timer on each tool use
+    let lastActivityMs = Date.now();
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-    const timeoutPromise = new Promise<"timeout">((resolve) => {
-      timeoutHandle = setTimeout(() => resolve("timeout"), timeoutMs);
-    });
-    const agentPromise = session.prompt(prompt).then(() => "done" as const);
-    const result = await Promise.race([agentPromise, timeoutPromise]);
 
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
-      timeoutHandle = null;
+    const checkTimeout = () => {
+      const idleMs = Date.now() - lastActivityMs;
+      if (idleMs >= timeoutMs) {
+        return true; // Timed out
+      }
+      // Schedule next check
+      timeoutHandle = setTimeout(checkTimeout, Math.min(30_000, timeoutMs - idleMs));
+      return false;
+    };
+
+    // Start timeout checker
+    timeoutHandle = setTimeout(checkTimeout, timeoutMs);
+
+    // Monitor session activity
+    const originalOnToolUse = session.onToolUse;
+    if (originalOnToolUse) {
+      session.onToolUse = (...args: unknown[]) => {
+        lastActivityMs = Date.now(); // Reset activity timer
+        return originalOnToolUse.apply(session, args);
+      };
     }
 
-    if (result === "timeout") {
-      try {
-        await session.abort();
-      } catch {
-        // ignore
+    try {
+      await session.prompt(prompt);
+
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
       }
-      return {
-        subtaskId: subtask.id,
-        ok: false,
-        resultSummary: "",
-        filesChanged: [],
-        error: `Worker timed out after ${timeoutMs}ms`,
-      };
+
+      // Check if we timed out
+      if (checkTimeout()) {
+        try {
+          await session.abort();
+        } catch {
+          // ignore
+        }
+        return {
+          subtaskId: subtask.id,
+          ok: false,
+          resultSummary: "",
+          filesChanged: [],
+          error: `Worker timed out after ${timeoutMs}ms of inactivity`,
+        };
+      }
+    } catch (err) {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+      throw err;
     }
 
     // 5. Extract result
