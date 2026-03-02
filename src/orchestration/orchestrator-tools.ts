@@ -674,6 +674,8 @@ async function handleAbort(params: Record<string, unknown>) {
     return jsonResult({ error: `Orchestration ${orchId} not found` });
   }
 
+  logger.info("Aborting orchestration", { orchId });
+
   if (orch.plan) {
     for (const subtask of orch.plan.subtasks) {
       if (subtask.status === "pending" || subtask.status === "running") {
@@ -689,22 +691,29 @@ async function handleAbort(params: Record<string, unknown>) {
   }
 
   orch.status = "failed";
-  orch.error = "Aborted by orchestrator";
+  orch.error = "Aborted by user";
+  orch.completedAtMs = Date.now();
   await saveOrchestration(orch);
 
   // Broadcast abort event
   await broadcastOrchestrationEvent({
     type: "orchestration.failed",
     orchestrationId: orchId,
-    error: "Aborted by orchestrator",
+    error: "Aborted by user",
   });
 
   // Clean up mission workspace — no point keeping it after abort
   await cleanupMissionWorkspace(orch.sourceWorkspaceDir, orchId);
 
+  logger.info("Orchestration aborted successfully", { orchId });
+
+  // Return a result that signals the orchestrator agent to stop
+  // The agent should see this as a terminal state and end the conversation
   return jsonResult({
     orchestrationId: orchId,
     status: "failed",
-    message: "Orchestration aborted. Mission workspace cleaned up.",
+    aborted: true,
+    message:
+      "✅ Orchestration aborted successfully. All tasks cancelled and workspace cleaned up. You can now end this session.",
   });
 }

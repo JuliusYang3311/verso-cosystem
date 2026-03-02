@@ -203,12 +203,21 @@ IMPORTANT:
 - Do NOT call "run-acceptance" if there are still pending tasks. Call "dispatch" first to complete all pending tasks.
 - Before calling "complete", ensure ALL tasks are done (no pending, no running).
 - The "complete" action will reject if there are pending/running tasks remaining.
+- If the orchestration is aborted (you receive a response with "aborted": true), acknowledge the abort and STOP immediately. Do not call any more tools.
 
 Start now by calling orchestrate with action "create-plan" and orchestrationId "${orchId}".`;
 
     // Run orchestrator agent
     logger.info("Running orchestrator agent", { orchId });
     await session.prompt(orchestratorMessage);
+
+    // After agent completes, check if orchestration was aborted
+    const finalOrch = await loadOrchestration(orchId);
+    if (finalOrch?.status === "failed" && finalOrch.error === "Aborted by user") {
+      logger.info("Orchestration was aborted by user", { orchId });
+      // Don't throw error - this is a clean abort, not a failure
+      return;
+    }
 
     const elapsed = Date.now() - t0;
     logger.info("Orchestration task completed", { orchId, elapsed_ms: elapsed });
