@@ -416,6 +416,16 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
   const verifyCmd =
     verifyCmdOverride ?? orch.plan.verifyCmd ?? opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd;
 
+  // If verifyCmd was overridden, update the plan to use the corrected command
+  if (verifyCmdOverride && verifyCmdOverride !== orch.plan.verifyCmd) {
+    orch.plan.verifyCmd = verifyCmdOverride;
+    logger.info("Updated plan verifyCmd", {
+      orchId,
+      oldCmd: orch.plan.verifyCmd,
+      newCmd: verifyCmdOverride,
+    });
+  }
+
   orch.status = "acceptance";
   await saveOrchestration(orch);
 
