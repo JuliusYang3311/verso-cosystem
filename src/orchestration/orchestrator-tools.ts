@@ -519,6 +519,15 @@ async function handleComplete(params: Record<string, unknown>) {
   // Copy to output directory
   const copyResult = await copyMissionToOutput(orch.sourceWorkspaceDir, orchId, finalOutputDir);
 
+  // Log the resolved output path for debugging
+  logger.info("Orchestration completion", {
+    orchId,
+    copied: copyResult.copied,
+    outputPath: copyResult.resolvedPath,
+    sourceWorkspace: orch.sourceWorkspaceDir,
+    error: copyResult.error,
+  });
+
   orch.status = "completed";
   orch.completedAtMs = Date.now();
   if (summary) {
