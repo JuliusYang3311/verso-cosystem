@@ -146,8 +146,20 @@ export async function runCodingAgentInSandbox(params: {
     detectChangedFiles(sandboxDir);
 
     // Dynamically import pi-coding-agent to avoid top-level dependency issues
-    const { createAgentSession, codingTools, SessionManager } =
-      await import("@mariozechner/pi-coding-agent");
+    const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
+
+    // Create web search and web fetch tools for evolver agent
+    const { createWebSearchTool } = await import("../agents/tools/web-search.js");
+    const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
+    const { loadConfig } = await import("../config/config.js");
+    const config = loadConfig();
+    const webSearchTool = createWebSearchTool({ config, sandboxed: false });
+    const webFetchTool = createWebFetchTool({ config, sandboxed: false });
+
+    const evolverTools = [
+      ...(webSearchTool ? [webSearchTool] : []),
+      ...(webFetchTool ? [webFetchTool] : []),
+    ];
 
     const { session } = await createAgentSession({
       cwd: sandboxDir,
@@ -155,7 +167,7 @@ export async function runCodingAgentInSandbox(params: {
       authStorage,
       modelRegistry,
       model,
-      tools: codingTools,
+      customTools: evolverTools, // Use customTools to add web tools alongside coding tools
       sessionManager: SessionManager.inMemory(sandboxDir),
     });
 
