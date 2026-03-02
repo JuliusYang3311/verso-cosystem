@@ -207,15 +207,45 @@ async function runOrchestrationTask(
     const webSearchTool = createWebSearchTool({ config, sandboxed: false });
     const webFetchTool = createWebFetchTool({ config, sandboxed: false });
 
+    // Create Google Workspace tools for orchestrator (if enabled)
+    // Only provide sheets, drive, docs, slides (minimal set for data analysis)
+    const gworkspaceTools = [];
+    if (config.google?.enabled) {
+      const {
+        sheetsCreateSpreadsheet,
+        sheetsAppendValues,
+        docsCreateDocument,
+        driveListFiles,
+        driveUploadFile,
+        driveDownloadFile,
+        slidesCreatePresentation,
+      } = await import("../agents/tools/gworkspace-tools.js");
+
+      const services = config.google.services || ["sheets", "docs", "drive", "slides"];
+      if (services.includes("sheets")) {
+        gworkspaceTools.push(sheetsCreateSpreadsheet, sheetsAppendValues);
+      }
+      if (services.includes("docs")) {
+        gworkspaceTools.push(docsCreateDocument);
+      }
+      if (services.includes("drive")) {
+        gworkspaceTools.push(driveListFiles, driveUploadFile, driveDownloadFile);
+      }
+      if (services.includes("slides")) {
+        gworkspaceTools.push(slidesCreatePresentation);
+      }
+    }
+
     // Create in-memory orchestrator agent session
     logger.info("Creating orchestrator agent session", { orchId });
     const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
 
-    // Use customTools parameter to add orchestrate + web_search + web_fetch tools
+    // Use customTools parameter to add orchestrate + web_search + web_fetch + gworkspace tools
     const customToolsList = [
       orchestrateTool,
       ...(webSearchTool ? [webSearchTool] : []),
       ...(webFetchTool ? [webFetchTool] : []),
+      ...gworkspaceTools,
     ];
 
     const created = await createAgentSession({
