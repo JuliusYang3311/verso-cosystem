@@ -192,8 +192,18 @@ async function runWorkerTask(params: {
   subtask: Subtask;
   orchestrationId: string;
   missionWorkspaceDir: string;
-  memoryDir?: string; // Shared memory directory
+  memoryDir?: string;
   timeoutMs?: number;
+  // Shared resources to avoid repeated resolution
+  sharedResources?: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    authStorage: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    modelRegistry: any;
+    agentDir: string;
+  };
 }): Promise<WorkerResult> {
   const {
     subtask,
@@ -201,6 +211,7 @@ async function runWorkerTask(params: {
     missionWorkspaceDir,
     memoryDir,
     timeoutMs = DEFAULT_WORKER_TIMEOUT_MS,
+    sharedResources,
   } = params;
   const t0 = Date.now();
 
@@ -219,8 +230,7 @@ async function runWorkerTask(params: {
       process.env.VERSO_MEMORY_DIR = memoryDir;
     }
 
-    // 0. Ensure dependencies are installed in mission workspace (if package.json exists)
-    ensureDependenciesInstalled(missionWorkspaceDir);
+    // 0. Dependencies already installed by pool (skip redundant check)
 
     // 1. Create tmpdir sandbox (copies mission workspace including node_modules if present)
     const sandbox = createOrchestrationSandbox(missionWorkspaceDir);
@@ -238,9 +248,24 @@ async function runWorkerTask(params: {
     // Init git tracking for change detection
     initGitTracking(sandboxDir);
 
-    // 2. Resolve model
-    const { model, authStorage, modelRegistry } = await resolveAgentModel();
-    const agentDir = (await import("../agents/agent-paths.js")).resolveOpenClawAgentDir();
+    // 2. Use shared resources if provided, otherwise resolve
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let model: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let authStorage: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let modelRegistry: any;
+    let agentDir: string;
+
+    if (sharedResources) {
+      ({ model, authStorage, modelRegistry, agentDir } = sharedResources);
+    } else {
+      const resolved = await resolveAgentModel();
+      model = resolved.model;
+      authStorage = resolved.authStorage;
+      modelRegistry = resolved.modelRegistry;
+      agentDir = (await import("../agents/agent-paths.js")).resolveOpenClawAgentDir();
+    }
 
     // 3. Create in-memory agent session
     const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
@@ -455,6 +480,13 @@ export async function runWorkerPool(params: {
   const subtasks = orch.plan.subtasks;
   const subtaskById = new Map(subtasks.map((s) => [s.id, s]));
 
+  // Optimize: Install dependencies once before starting workers
+  ensureDependenciesInstalled(orch.workspaceDir);
+
+  // Optimize: Resolve model/auth once and share across workers
+  const { model, authStorage, modelRegistry } = await resolveAgentModel();
+  const agentDir = (await import("../agents/agent-paths.js")).resolveOpenClawAgentDir();
+
   // Build initial pending queue: only ready (pending + deps met) subtasks
   const pending: string[] = subtasks.filter((s) => isSubtaskReady(s, subtasks)).map((s) => s.id);
 
@@ -487,45 +519,49 @@ export async function runWorkerPool(params: {
 
       task.status = "running";
       task.startedAtMs = Date.now();
-      await saveOrchestration(orch);
-
-      // Broadcast subtask started
-      await broadcastOrchestrationEvent({
-        type: "orchestration.subtask",
-        payload: {
-          orchestrationId: orch.id,
-          subtaskId: task.id,
-          status: task.status,
-          title: task.title,
-        },
-      });
-
-      try {
-        const result = await runWorkerTask({
-          subtask: task,
-          orchestrationId: orch.id,
-          missionWorkspaceDir: orch.workspaceDir,
-          memoryDir, // Pass shared memory dir
-          timeoutMs,
-        });
-
-        task.status = result.ok ? "completed" : "failed";
-        task.completedAtMs = Date.now();
-        task.resultSummary = result.resultSummary;
-        task.error = result.error;
-        await saveOrchestration(orch);
-
-        // Broadcast subtask completed/failed
-        await broadcastOrchestrationEvent({
+      // Optimize: Save and broadcast in parallel (non-blocking)
+      Promise.all([
+        saveOrchestration(orch),
+        broadcastOrchestrationEvent({
           type: "orchestration.subtask",
           payload: {
             orchestrationId: orch.id,
             subtaskId: task.id,
             status: task.status,
             title: task.title,
-            error: task.error,
           },
+        }),
+      ]).catch((err) => logger.warn("Failed to save/broadcast task start", { error: String(err) }));
+
+      try {
+        const result = await runWorkerTask({
+          subtask: task,
+          orchestrationId: orch.id,
+          missionWorkspaceDir: orch.workspaceDir,
+          memoryDir,
+          timeoutMs,
+          sharedResources: { model, authStorage, modelRegistry, agentDir },
         });
+
+        task.status = result.ok ? "completed" : "failed";
+        task.completedAtMs = Date.now();
+        task.resultSummary = result.resultSummary;
+        task.error = result.error;
+
+        // Optimize: Save and broadcast in parallel
+        await Promise.all([
+          saveOrchestration(orch),
+          broadcastOrchestrationEvent({
+            type: "orchestration.subtask",
+            payload: {
+              orchestrationId: orch.id,
+              subtaskId: task.id,
+              status: task.status,
+              title: task.title,
+              error: task.error,
+            },
+          }),
+        ]);
 
         results.push(result);
       } catch (err) {
@@ -533,19 +569,20 @@ export async function runWorkerPool(params: {
         task.status = "failed";
         task.completedAtMs = Date.now();
         task.error = err instanceof Error ? err.message : String(err);
-        await saveOrchestration(orch);
 
-        // Broadcast subtask failed
-        await broadcastOrchestrationEvent({
-          type: "orchestration.subtask",
-          payload: {
-            orchestrationId: orch.id,
-            subtaskId: task.id,
-            status: task.status,
-            title: task.title,
-            error: task.error,
-          },
-        });
+        await Promise.all([
+          saveOrchestration(orch),
+          broadcastOrchestrationEvent({
+            type: "orchestration.subtask",
+            payload: {
+              orchestrationId: orch.id,
+              subtaskId: task.id,
+              status: task.status,
+              title: task.title,
+              error: task.error,
+            },
+          }),
+        ]);
 
         results.push({
           subtaskId: task.id,
