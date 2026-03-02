@@ -421,6 +421,16 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
     };
   });
 
+  // Mark original failed subtasks as cancelled to prevent reprocessing
+  const fixedSubtaskIds = new Set(newFixes.map((f) => f.sourceSubtaskId));
+  let cancelledCount = 0;
+  for (const subtask of orch.plan.subtasks) {
+    if (fixedSubtaskIds.has(subtask.id) && subtask.status === "failed") {
+      subtask.status = "cancelled";
+      cancelledCount++;
+    }
+  }
+
   // Add fix subtasks to the plan so workers can pick them up
   orch.plan.subtasks.push(...fixSubtasks);
   orch.fixTasks.push(...newFixes);
@@ -436,8 +446,13 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
   return jsonResult({
     orchestrationId: orchId,
     fixCycle: orch.currentFixCycle,
-    fixTasks: newFixes.map((f) => ({ id: f.id, description: f.description.slice(0, 100) })),
-    message: `Created ${newFixes.length} fix tasks (cycle ${orch.currentFixCycle}/${orch.maxFixCycles}). Call dispatch to start fix workers.`,
+    cancelledSubtasks: cancelledCount,
+    fixTasks: newFixes.map((f) => ({
+      id: f.id,
+      sourceSubtaskId: f.sourceSubtaskId,
+      description: f.description.slice(0, 100),
+    })),
+    message: `Created ${newFixes.length} fix tasks (cycle ${orch.currentFixCycle}/${orch.maxFixCycles}). Cancelled ${cancelledCount} failed subtasks. Call dispatch to start fix workers.`,
   });
 }
 
