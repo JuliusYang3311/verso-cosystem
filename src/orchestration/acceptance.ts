@@ -72,6 +72,11 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
   const agentDir = resolveOpenClawAgentDir();
 
   for (const subtask of subtasks) {
+    // Skip cancelled subtasks (they were replaced by fix tasks)
+    if (subtask.status === "cancelled") {
+      continue;
+    }
+
     if (subtask.status !== "completed") {
       verdicts.push({
         subtaskId: subtask.id,
