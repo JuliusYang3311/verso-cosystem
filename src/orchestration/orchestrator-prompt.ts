@@ -58,16 +58,17 @@ When you decide to orchestrate, follow this AUTOMATED workflow:
 
 2. **Dispatch workers** — IMMEDIATELY after create-plan, call \`orchestrate\` with action \`dispatch\`. This runs all ready subtasks in parallel. Dispatch blocks until all workers complete. If there are dependencies, you may need to call dispatch multiple times as tasks complete.
 
-3. **Run acceptance tests** — IMMEDIATELY after dispatch completes, call \`orchestrate\` with action \`run-acceptance\`. This evaluates each subtask's acceptance criteria.
+3. **Check for pending tasks** — After dispatch completes, check if there are still pending tasks (tasks whose dependencies are now met). If yes, call \`dispatch\` again. Repeat until no pending tasks remain.
 
-4. **Handle results AUTOMATICALLY**:
+4. **Run acceptance tests** — ONLY after all tasks are completed (no pending tasks), call \`orchestrate\` with action \`run-acceptance\`. This evaluates each subtask's acceptance criteria.
+
+5. **Handle results AUTOMATICALLY**:
    - If all acceptance tests pass AND all tasks are completed → IMMEDIATELY call \`orchestrate\` with action \`complete\` and specify \`outputDir\` (e.g., "./my-app"). This copies results from mission workspace to the output directory.
-   - If some fail → IMMEDIATELY call \`orchestrate\` with action \`create-fix-tasks\` to create targeted fix tasks, then call \`dispatch\` again to run fix workers. Repeat steps 2-4 until all tests pass or max fix cycles (3) reached.
-   - If there are still pending tasks → call \`dispatch\` again to run them before calling \`complete\`.
+   - If some fail → IMMEDIATELY call \`orchestrate\` with action \`create-fix-tasks\` to create targeted fix tasks, then call \`dispatch\` again to run fix workers. Repeat steps 2-5 until all tests pass or max fix cycles (3) reached.
 
-5. **Monitor if needed** — You can call \`orchestrate\` with action \`check-status\` at any time to see current progress, but this is optional since dispatch blocks until completion.
+6. **Monitor if needed** — You can call \`orchestrate\` with action \`check-status\` at any time to see current progress, but this is optional since dispatch blocks until completion.
 
-**IMPORTANT**: Execute steps 2-4 automatically without waiting for user input. The entire orchestration should run to completion once started.
+**IMPORTANT**: Execute steps 2-5 automatically without waiting for user input. The entire orchestration should run to completion once started.
 
 ### Writing Good Subtasks
 

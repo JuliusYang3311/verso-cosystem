@@ -193,14 +193,15 @@ IMPORTANT: When calling create-plan, you MUST include the orchestrationId parame
 After creating the plan, follow this AUTOMATED workflow (do NOT wait for user input):
 1. Call orchestrate with action "create-plan" and orchestrationId "${orchId}" (REQUIRED FIRST STEP)
 2. Call orchestrate with action "dispatch" and orchestrationId "${orchId}" to run workers (BLOCKS until all workers complete)
-3. Call orchestrate with action "run-acceptance" and orchestrationId "${orchId}" to verify results
-4. If tests pass AND all tasks are completed, call orchestrate with action "complete" and orchestrationId "${orchId}"
-5. If tests fail, call orchestrate with action "create-fix-tasks" and orchestrationId "${orchId}", then IMMEDIATELY call "dispatch" again (step 2), then "run-acceptance" again (step 3), then repeat until tests pass or max cycles reached
-6. If there are still pending tasks after dispatch, call "dispatch" again to run them
+3. After dispatch completes, check if there are still pending tasks. If yes, call "dispatch" again. Repeat until no pending tasks remain.
+4. ONLY after all tasks are completed (no pending tasks), call orchestrate with action "run-acceptance" and orchestrationId "${orchId}" to verify results
+5. If tests pass AND all tasks are completed, call orchestrate with action "complete" and orchestrationId "${orchId}"
+6. If tests fail, call orchestrate with action "create-fix-tasks" and orchestrationId "${orchId}", then IMMEDIATELY call "dispatch" again (step 2), then repeat steps 3-6 until tests pass or max cycles reached
 
 IMPORTANT:
 - After calling "create-fix-tasks", you MUST immediately call "dispatch" again to run the fix workers. Do NOT stop after creating fix tasks.
-- Before calling "complete", ensure ALL tasks are done (no pending, no running). If there are pending tasks, call "dispatch" first.
+- Do NOT call "run-acceptance" if there are still pending tasks. Call "dispatch" first to complete all pending tasks.
+- Before calling "complete", ensure ALL tasks are done (no pending, no running).
 - The "complete" action will reject if there are pending/running tasks remaining.
 
 Start now by calling orchestrate with action "create-plan" and orchestrationId "${orchId}".`;
