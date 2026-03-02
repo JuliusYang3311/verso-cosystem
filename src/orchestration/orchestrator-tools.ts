@@ -346,7 +346,7 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
       autoFixCreated: autoFixCount,
       // Minimal response to reduce context accumulation
       // Use check-status if you need detailed task information
-      message: `Dispatch complete: ${completed} succeeded, ${failed} failed.${autoFixCount > 0 ? ` Auto-created ${autoFixCount} fix tasks for blocked dependencies.` : ""}${failed > 0 ? " Run dispatch again to execute fix tasks, or run acceptance to evaluate." : " All tasks succeeded - run acceptance tests next."}`,
+      message: `Dispatch complete: ${completed} succeeded, ${failed} failed.${autoFixCount > 0 ? ` Auto-created ${autoFixCount} fix tasks for blocked dependencies. MUST call dispatch again to execute fix tasks before running acceptance.` : failed > 0 ? " Some tasks failed - check if there are pending tasks. If no pending tasks, run acceptance to evaluate." : " All tasks succeeded - check if there are pending tasks. If no pending tasks, run acceptance tests next."}`,
     });
   } catch (err) {
     return jsonResult({
