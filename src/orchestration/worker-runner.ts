@@ -81,7 +81,17 @@ function getChangedFilesAfter(sandboxDir: string): string[] {
     return result
       .split("\n")
       .map((l) => l.trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((file) => {
+        // Exclude node_modules and other large directories
+        // These should be installed in mission workspace and shared
+        return (
+          !file.startsWith("node_modules/") &&
+          !file.startsWith(".git/") &&
+          !file.startsWith("dist/") &&
+          !file.startsWith("build/")
+        );
+      });
   } catch {
     return [];
   }
@@ -120,6 +130,58 @@ function copyChangedFilesBack(sandboxDir: string, targetDir: string, files: stri
   }
 }
 
+/**
+ * Install dependencies if package.json exists and is newer than node_modules.
+ * Handles incremental updates as workers add dependencies during orchestration.
+ */
+function ensureDependenciesInstalled(missionWorkspaceDir: string): void {
+  try {
+    const packageJsonPath = path.join(missionWorkspaceDir, "package.json");
+    const nodeModulesPath = path.join(missionWorkspaceDir, "node_modules");
+
+    if (!fs.existsSync(packageJsonPath)) {
+      return;
+    }
+
+    const needsInstall =
+      !fs.existsSync(nodeModulesPath) ||
+      fs.statSync(packageJsonPath).mtimeMs > fs.statSync(nodeModulesPath).mtimeMs;
+
+    if (!needsInstall) {
+      return;
+    }
+
+    logger.info("Installing dependencies", { missionWorkspaceDir });
+
+    // Detect package manager
+    const lockFiles = {
+      "pnpm-lock.yaml": "pnpm install",
+      "yarn.lock": "yarn install",
+    };
+
+    let installCmd = "npm install";
+    for (const [lockFile, cmd] of Object.entries(lockFiles)) {
+      if (fs.existsSync(path.join(missionWorkspaceDir, lockFile))) {
+        installCmd = cmd;
+        break;
+      }
+    }
+
+    execSync(installCmd, {
+      cwd: missionWorkspaceDir,
+      stdio: "pipe",
+      timeout: 300_000,
+    });
+
+    logger.info("Dependencies installed", { missionWorkspaceDir });
+  } catch (err) {
+    logger.warn("Failed to install dependencies", {
+      missionWorkspaceDir,
+      error: String(err),
+    });
+  }
+}
+
 // --- Single worker task ---
 
 async function runWorkerTask(params: {
@@ -153,7 +215,10 @@ async function runWorkerTask(params: {
       process.env.VERSO_MEMORY_DIR = memoryDir;
     }
 
-    // 1. Create tmpdir sandbox (simplified - no pnpm install)
+    // 0. Ensure dependencies are installed in mission workspace (if package.json exists)
+    ensureDependenciesInstalled(missionWorkspaceDir);
+
+    // 1. Create tmpdir sandbox (copies mission workspace including node_modules if present)
     const sandbox = createOrchestrationSandbox(missionWorkspaceDir);
     if (!sandbox.ok || !sandbox.sandboxDir) {
       return {
