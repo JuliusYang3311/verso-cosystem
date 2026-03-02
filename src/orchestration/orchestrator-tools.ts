@@ -416,7 +416,7 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
   const verifyCmd =
     verifyCmdOverride ?? orch.plan.verifyCmd ?? opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd;
 
-  // If verifyCmd was overridden, update the plan to use the corrected command
+  // If verifyCmd was overridden, update the plan
   if (verifyCmdOverride && verifyCmdOverride !== orch.plan.verifyCmd) {
     orch.plan.verifyCmd = verifyCmdOverride;
     logger.info("Updated plan verifyCmd", {
@@ -474,13 +474,14 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
     failedCount: result.verdicts.filter((v) => !v.passed).length,
     currentFixCycle: orch.currentFixCycle,
     maxFixCycles: orch.maxFixCycles,
+    currentVerifyCmd: orch.plan.verifyCmd,
     // Minimal response to reduce context accumulation
     // Use check-status if you need detailed verdict information
     message: result.passed
       ? "All acceptance tests passed. Call complete to copy results to output directory."
       : orch.status === "failed"
         ? `Acceptance failed after ${orch.maxFixCycles} fix cycles. Orchestration marked as failed.`
-        : `Acceptance failed: ${result.verdicts.filter((v) => !v.passed).length} tasks need fixes. Call create-fix-tasks to generate fix tasks.`,
+        : `Acceptance failed: ${result.verdicts.filter((v) => !v.passed).length} tasks need fixes. If verifyCmd is incorrect, you can correct it by calling run-acceptance with verifyCmd parameter. Otherwise, call create-fix-tasks to fix code issues.`,
   });
 }
 

@@ -61,19 +61,19 @@ When you decide to orchestrate, follow this AUTOMATED workflow:
 3. **Check for pending tasks** — After dispatch completes, check if there are still pending tasks (tasks whose dependencies are now met). If yes, call \`dispatch\` again. Repeat until no pending tasks remain.
 
 4. **Run acceptance tests** — ONLY after all tasks are completed (no pending tasks), call \`orchestrate\` with action \`run-acceptance\`. This evaluates each subtask's acceptance criteria.
-   - **If verifyCmd fails**: The failure might be due to an incorrect command (e.g., missing await, wrong directory, missing build step). You can override verifyCmd by passing a corrected command in the \`verifyCmd\` parameter when calling \`run-acceptance\`.
+   - **If verifyCmd fails**: Check if the command itself is wrong (e.g., missing cd, missing build step, wrong order). If so, you can correct it by calling \`run-acceptance\` again with the \`verifyCmd\` parameter.
    - **Common verifyCmd issues**:
-     - Missing cd to correct directory: "cd backend && npm test" instead of "npm test"
-     - Missing build step: "npm run build && npm test" instead of just "npm test"
-     - Async commands not awaited: ensure commands complete before next step
+     - Missing cd to correct directory: \`cd backend && npm test\` instead of \`npm test\`
+     - Missing build step: \`npm run build && npm test\` instead of just \`npm test\`
      - Wrong order: install dependencies before running tests
+   - **CRITICAL - DO NOT use command output as verifyCmd**: The verifyCmd should be a simple shell command (e.g., \`npm test\`), NOT the output of a command (e.g., \`> blog-platform@1.0.0 test...\`). If you see command output in error messages, extract the actual command, don't copy the output.
 
 5. **Handle results AUTOMATICALLY**:
    - If all acceptance tests pass AND all tasks are completed → IMMEDIATELY call \`orchestrate\` with action \`complete\` and specify \`outputDir\` (e.g., "./my-app"). This copies results from mission workspace to the output directory.
    - If some fail → Analyze the failure:
      - **If verifyCmd itself is wrong** (e.g., missing build step, wrong directory): Call \`run-acceptance\` again with corrected \`verifyCmd\` parameter
      - **If code/implementation is wrong**: Call \`create-fix-tasks\` to create targeted fix tasks, then call \`dispatch\` again to run fix workers
-     - Repeat steps 2-5 until all tests pass or max fix cycles (3) reached.
+     - Repeat steps 2-5 until all tests pass or max fix cycles reached.
 
 6. **Monitor if needed** — You can call \`orchestrate\` with action \`check-status\` at any time to see current progress, but this is optional since dispatch blocks until completion.
 
