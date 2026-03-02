@@ -183,16 +183,49 @@ async function runWorkerTask(params: {
     const agentDir = (await import("../agents/agent-paths.js")).resolveOpenClawAgentDir();
 
     // 3. Create in-memory agent session
-    const { createAgentSession, codingTools, SessionManager } =
-      await import("@mariozechner/pi-coding-agent");
+    const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
 
-    // Create web search tool for workers
+    // Create web search and web fetch tools for workers (same as orchestrator)
     const { createWebSearchTool } = await import("../agents/tools/web-search.js");
+    const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
     const { loadConfig } = await import("../config/config.js");
     const config = loadConfig();
     const webSearchTool = createWebSearchTool({ config, sandboxed: false });
+    const webFetchTool = createWebFetchTool({ config, sandboxed: false });
 
-    const workerTools = [...codingTools, ...(webSearchTool ? [webSearchTool] : [])];
+    // Create Google Workspace tools for workers (if enabled, same as orchestrator)
+    const gworkspaceTools = [];
+    if (config.google?.enabled) {
+      const {
+        sheetsCreateSpreadsheet,
+        sheetsAppendValues,
+        docsCreateDocument,
+        driveListFiles,
+        driveUploadFile,
+        driveDownloadFile,
+        slidesCreatePresentation,
+      } = await import("../agents/tools/gworkspace-tools.js");
+
+      const services = config.google.services || ["sheets", "docs", "drive", "slides"];
+      if (services.includes("sheets")) {
+        gworkspaceTools.push(sheetsCreateSpreadsheet, sheetsAppendValues);
+      }
+      if (services.includes("docs")) {
+        gworkspaceTools.push(docsCreateDocument);
+      }
+      if (services.includes("drive")) {
+        gworkspaceTools.push(driveListFiles, driveUploadFile, driveDownloadFile);
+      }
+      if (services.includes("slides")) {
+        gworkspaceTools.push(slidesCreatePresentation);
+      }
+    }
+
+    const workerTools = [
+      ...(webSearchTool ? [webSearchTool] : []),
+      ...(webFetchTool ? [webFetchTool] : []),
+      ...gworkspaceTools,
+    ];
 
     const created = await createAgentSession({
       cwd: sandboxDir,
@@ -200,7 +233,7 @@ async function runWorkerTask(params: {
       authStorage,
       modelRegistry,
       model,
-      tools: workerTools, // Provide coding tools + web search
+      customTools: workerTools, // Use customTools to add tools alongside coding tools
       sessionManager: SessionManager.inMemory(sandboxDir),
     });
     session = created.session;
