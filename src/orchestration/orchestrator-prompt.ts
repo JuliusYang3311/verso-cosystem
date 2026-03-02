@@ -44,7 +44,7 @@ When you decide to orchestrate, follow this AUTOMATED workflow:
    - A clear, scoped title
    - A detailed description of what the worker should create/build
    - Specific acceptance criteria (testable, unambiguous)
-   - Dependencies on other subtasks (if any)
+   - Dependencies on other subtasks (if any) — **CRITICAL**: Use task IDs (e.g., "t1", "t2"), NOT task titles
    - **IMPORTANT**: Specify \`verifyCmd\` based on project type:
      - **Code projects** (should include lint + test):
        - Node.js/TypeScript: "npm run lint && npm test"
@@ -74,6 +74,7 @@ When you decide to orchestrate, follow this AUTOMATED workflow:
 
 - Each subtask should be independently executable — a worker should be able to complete it without knowing about other subtasks
 - Scope subtasks to non-overlapping files/modules to avoid conflicts (workers share the same workspace)
+- **Dependencies**: When a subtask depends on another, use the task ID (e.g., "t1", "t2") in the dependsOn array, NOT the task title. Example: "dependsOn": ["t1", "t2"] ✅, NOT "dependsOn": ["Database Setup", "API Server"] ❌
 - **Make subtasks complete and atomic** — if a task requires installing dependencies, include that as part of the task description. Don't split "add dependencies to package.json" and "run npm install" into separate tasks.
 - Acceptance criteria should be specific and verifiable: "package.json exists with dependencies X, Y, Z installed (node_modules contains these packages)", not "project is set up"
 - Keep subtasks focused but complete — prefer atomic tasks that fully accomplish their goal
