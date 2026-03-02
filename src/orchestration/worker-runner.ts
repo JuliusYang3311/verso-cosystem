@@ -2,7 +2,6 @@
 
 import { execSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { Orchestration, Subtask } from "./types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -30,49 +29,6 @@ export type WorkerResult = {
 };
 
 // --- Sandbox creation (simplified for orchestration - no pnpm install) ---
-
-function createOrchestrationSandbox(missionWorkspaceDir: string): {
-  ok: boolean;
-  sandboxDir: string | null;
-  error: string | null;
-} {
-  try {
-    const sandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), "orch-worker-"));
-
-    // Copy mission workspace contents (may be empty initially)
-    if (fs.existsSync(missionWorkspaceDir)) {
-      const files = fs.readdirSync(missionWorkspaceDir);
-      for (const file of files) {
-        const src = path.join(missionWorkspaceDir, file);
-        const dst = path.join(sandboxDir, file);
-        const stat = fs.statSync(src);
-
-        // Symlink node_modules instead of copying (much faster)
-        if (file === "node_modules" && stat.isDirectory()) {
-          fs.symlinkSync(src, dst, "dir");
-        } else if (stat.isDirectory()) {
-          fs.cpSync(src, dst, { recursive: true });
-        } else {
-          fs.copyFileSync(src, dst);
-        }
-      }
-    }
-
-    return { ok: true, sandboxDir, error: null };
-  } catch (err) {
-    return { ok: false, sandboxDir: null, error: String(err) };
-  }
-}
-
-function cleanupSandbox(sandboxDir: string): void {
-  try {
-    if (fs.existsSync(sandboxDir)) {
-      fs.rmSync(sandboxDir, { recursive: true, force: true });
-    }
-  } catch (err) {
-    logger.warn("Failed to cleanup sandbox", { sandboxDir, error: String(err) });
-  }
-}
 
 // --- Sandbox helpers (adapted from evolver) ---
 
@@ -113,24 +69,6 @@ function initGitTracking(sandboxDir: string): void {
     }
   } catch {
     // ignore
-  }
-}
-
-function copyChangedFilesBack(sandboxDir: string, targetDir: string, files: string[]): void {
-  for (const file of files) {
-    const src = path.join(sandboxDir, file);
-    const dst = path.join(targetDir, file);
-    if (!fs.existsSync(src)) {
-      continue;
-    }
-    const dstDir = path.dirname(dst);
-    if (!dstDir || dstDir === ".") {
-      continue;
-    }
-    if (!fs.existsSync(dstDir)) {
-      fs.mkdirSync(dstDir, { recursive: true });
-    }
-    fs.copyFileSync(src, dst);
   }
 }
 
@@ -191,7 +129,7 @@ function ensureDependenciesInstalled(missionWorkspaceDir: string): void {
 async function runWorkerTask(params: {
   subtask: Subtask;
   orchestrationId: string;
-  missionWorkspaceDir: string;
+  missionWorkspaceDir: string; // This is now the shared sandbox directory
   memoryDir?: string;
   timeoutMs?: number;
   // Shared resources to avoid repeated resolution
@@ -208,14 +146,13 @@ async function runWorkerTask(params: {
   const {
     subtask,
     orchestrationId,
-    missionWorkspaceDir,
+    missionWorkspaceDir, // Shared sandbox directory
     memoryDir,
     timeoutMs = DEFAULT_WORKER_TIMEOUT_MS,
     sharedResources,
   } = params;
   const t0 = Date.now();
 
-  let sandboxDir: string | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let session: any = null;
 
@@ -232,21 +169,10 @@ async function runWorkerTask(params: {
 
     // 0. Dependencies already installed by pool (skip redundant check)
 
-    // 1. Create tmpdir sandbox (copies mission workspace including node_modules if present)
-    const sandbox = createOrchestrationSandbox(missionWorkspaceDir);
-    if (!sandbox.ok || !sandbox.sandboxDir) {
-      return {
-        subtaskId: subtask.id,
-        ok: false,
-        resultSummary: "",
-        filesChanged: [],
-        error: `Sandbox creation failed: ${sandbox.error}`,
-      };
-    }
-    sandboxDir = sandbox.sandboxDir;
-
-    // Init git tracking for change detection
-    initGitTracking(sandboxDir);
+    // 1. Work directly in shared sandbox (no tmpdir needed)
+    // All agents (orchestrator, workers, acceptance) share the same sandbox
+    // Init git tracking for change detection (if not already initialized)
+    initGitTracking(missionWorkspaceDir);
 
     // 2. Use shared resources if provided, otherwise resolve
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -313,13 +239,13 @@ async function runWorkerTask(params: {
     ];
 
     const created = await createAgentSession({
-      cwd: sandboxDir,
+      cwd: missionWorkspaceDir,
       agentDir,
       authStorage,
       modelRegistry,
       model,
       customTools: workerTools, // Use customTools to add tools alongside coding tools
-      sessionManager: SessionManager.inMemory(sandboxDir),
+      sessionManager: SessionManager.inMemory(missionWorkspaceDir),
     });
     session = created.session;
 
@@ -327,7 +253,7 @@ async function runWorkerTask(params: {
     const workerPrompt = buildWorkerSystemPrompt({
       subtask,
       orchestrationId,
-      missionWorkspaceDir: sandboxDir,
+      missionWorkspaceDir,
     });
 
     const prompt = [
@@ -405,11 +331,8 @@ async function runWorkerTask(params: {
       lastText.includes("TASK_COMPLETE") ||
       (!lastText.includes("TASK_FAILED") && lastText.length > 0);
 
-    // 6. Detect and copy changed files
-    const filesChanged = getChangedFilesAfter(sandboxDir);
-    if (filesChanged.length > 0) {
-      copyChangedFilesBack(sandboxDir, missionWorkspaceDir, filesChanged);
-    }
+    // 6. Detect changed files (for logging and dependency detection)
+    const filesChanged = getChangedFilesAfter(missionWorkspaceDir);
 
     const elapsed = Date.now() - t0;
     logger.info(`worker: subtask ${subtask.id} completed`, {
@@ -445,9 +368,7 @@ async function runWorkerTask(params: {
         // ignore
       }
     }
-    if (sandboxDir) {
-      cleanupSandbox(sandboxDir);
-    }
+    // No tmpdir sandbox to cleanup - workers work directly in shared sandbox
 
     // Restore original memory env vars
     if (originalMemoryDir !== undefined) {
@@ -547,6 +468,23 @@ export async function runWorkerPool(params: {
         task.completedAtMs = Date.now();
         task.resultSummary = result.resultSummary;
         task.error = result.error;
+
+        // Check if worker modified package.json and install dependencies if needed
+        // This ensures next workers can use newly added dependencies
+        if (result.filesChanged.some((f) => f === "package.json" || f.endsWith("/package.json"))) {
+          logger.info("Worker modified package.json, installing dependencies", {
+            subtaskId: task.id,
+            orchestrationId: orch.id,
+          });
+          try {
+            ensureDependenciesInstalled(orch.workspaceDir);
+          } catch (err) {
+            logger.warn("Failed to install dependencies after worker completion", {
+              subtaskId: task.id,
+              error: String(err),
+            });
+          }
+        }
 
         // Optimize: Save and broadcast in parallel
         await Promise.all([

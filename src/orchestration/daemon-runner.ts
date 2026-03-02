@@ -54,6 +54,14 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
   orch.workspaceDir = missionDir;
   await saveOrchestration(orch);
 
+  // Create shared sandbox directory inside mission workspace
+  // All agents (orchestrator, workers, acceptance) work in this sandbox
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const sandboxDir = path.join(missionDir, "sandbox");
+  fs.mkdirSync(sandboxDir, { recursive: true });
+  logger.info("Created shared sandbox", { orchId, sandboxDir });
+
   // Broadcast orchestration started event
   await broadcastOrchestrationEvent({
     type: "orchestration.started",
@@ -84,12 +92,12 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     const { resolveOpenClawAgentDir } = await import("../agents/agent-paths.js");
     const agentDir = resolveOpenClawAgentDir();
 
-    // Create orchestrate tool
+    // Create orchestrate tool (pass sandboxDir instead of missionDir)
     logger.info("Creating orchestrate tool", { orchId });
     const orchestrateTool = createOrchestrateTool({
       agentSessionKey: opts.agentSessionKey,
       agentId: opts.agentId,
-      workspaceDir: missionDir,
+      workspaceDir: sandboxDir, // Use shared sandbox
       maxWorkers: opts.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers,
       maxFixCycles: opts.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
       maxOrchestrations: 1, // Single task per daemon
@@ -146,13 +154,13 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     ];
 
     const created = await createAgentSession({
-      cwd: missionDir,
+      cwd: sandboxDir, // Work in shared sandbox
       agentDir,
       authStorage,
       modelRegistry,
       model,
       customTools: customToolsList,
-      sessionManager: SessionManager.inMemory(missionDir),
+      sessionManager: SessionManager.inMemory(sandboxDir),
     });
 
     session = created.session;

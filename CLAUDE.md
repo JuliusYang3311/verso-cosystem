@@ -16,10 +16,11 @@ Build a multi-agent collaboration system where an Orchestrator daemon runs an Or
 2. **Multi-Agent Architecture**: Daemon runs multiple agents:
    - **Orchestrator Agent**: Main agent that uses `orchestrate` tool for task decomposition and verification
    - **Worker Agents**: Parallel agents that execute subtasks
-3. **Empty Mission Workspace**: Each orchestration starts with an empty isolated workspace (`.verso-missions/<orchId>/`), workers build from scratch
+3. **Shared Sandbox**: Each orchestration creates a shared sandbox directory (`.verso-missions/<orchId>/sandbox/`) where all agents work together
 4. **Shared Dynamic Memory**: Orchestrator and workers share a temporary memory instance for the duration of the task
-5. **Resource Cleanup**: All memory, sandbox, and session resources are released after completion
-6. **Gateway Events**: Completion notifications pushed to main agent session via gateway events
+5. **Dynamic Dependency Management**: Dependencies installed once before workers start, and automatically re-installed when workers modify package.json
+6. **Resource Cleanup**: All memory, sandbox, and session resources are released after completion
+7. **Gateway Events**: Completion notifications pushed to main agent session via gateway events
 
 ### Complete Workflow
 
@@ -51,9 +52,10 @@ Build a multi-agent collaboration system where an Orchestrator daemon runs an Or
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │ 4. Daemon picks up request from queue                              │
-│    a. Create empty mission workspace (.verso-missions/<orchId>/)   │
-│    b. Initialize shared memory (orchestrator + workers)            │
-│    c. Broadcast orchestration.started event                        │
+│    a. Create mission workspace (.verso-missions/<orchId>/)         │
+│    b. Create shared sandbox (.verso-missions/<orchId>/sandbox/)    │
+│    c. Initialize shared memory (orchestrator + workers)            │
+│    d. Broadcast orchestration.started event                        │
 └────────────────────────────┬────────────────────────────────────────┘
                              │
                              ▼
@@ -61,7 +63,7 @@ Build a multi-agent collaboration system where an Orchestrator daemon runs an Or
 │ 5. Daemon runs Orchestrator Agent                                  │
 │    - Session key: agent:<agentId>:orch:<orchId>                    │
 │    - Has access to orchestrate tool                                │
-│    - Works in mission workspace                                    │
+│    - Works in shared sandbox                                       │
 │    - Uses shared memory                                            │
 └────────────────────────────┬────────────────────────────────────────┘
                              │
@@ -78,13 +80,14 @@ Build a multi-agent collaboration system where an Orchestrator daemon runs an Or
 ┌─────────────────────────────────────────────────────────────────────┐
 │ 7. Orchestrator Agent: dispatch                                    │
 │    - Calls orchestrate tool (action: dispatch)                     │
+│    - Install dependencies once before starting workers             │
 │    - Worker pool spawns parallel workers                           │
 │    - Each worker:                                                  │
 │      • Session key: agent:<agentId>:orch:<orchId>:w:<subtaskId>   │
-│      • Works in tmpdir sandbox (copy of mission workspace)         │
+│      • Works in shared sandbox (same as orchestrator)              │
 │      • Has access to shared memory (MEMORY_DIR env var)            │
 │      • Executes subtask independently                              │
-│      • Changes copied back to mission workspace                    │
+│      • If modifies package.json, dependencies auto-installed       │
 │    - Workers run in parallel (up to maxWorkers)                    │
 │    - Blocks until all workers complete                             │
 └────────────────────────────┬────────────────────────────────────────┘
@@ -93,7 +96,7 @@ Build a multi-agent collaboration system where an Orchestrator daemon runs an Or
 ┌─────────────────────────────────────────────────────────────────────┐
 │ 8. Orchestrator Agent: run-acceptance                              │
 │    - Calls orchestrate tool (action: run-acceptance)               │
-│    - Runs mechanical verification (verifyCmd)                      │
+│    - Runs mechanical verification (verifyCmd) in shared sandbox    │
 │    - LLM evaluates acceptance criteria for each subtask            │
 │    - Returns pass/fail verdicts                                    │
 └────────────────────────────┬────────────────────────────────────────┘
@@ -120,8 +123,8 @@ Build a multi-agent collaboration system where an Orchestrator daemon runs an Or
 ┌─────────────────────────────────────────────────────────────────────┐
 │ 9. Orchestrator Agent: complete                                    │
 │    - Calls orchestrate tool (action: complete)                     │
-│    - Copies mission workspace to output directory                  │
-│    - Default: ./.verso-output/<orchId>/                            │
+│    - Copies shared sandbox to output directory                     │
+│    - Default: ./orchestrator-output/<orchId>/                      │
 │    - Or user-specified path                                        │
 └────────────────────────────┬────────────────────────────────────────┘
                              │
@@ -130,7 +133,7 @@ Build a multi-agent collaboration system where an Orchestrator daemon runs an Or
 │ 10. Daemon cleanup                                                 │
 │     - Close shared memory manager                                  │
 │     - Delete memory directory                                      │
-│     - Delete mission workspace (if failed)                         │
+│     - Delete mission workspace (including sandbox)                 │
 │     - Dispose all worker sessions                                  │
 └────────────────────────────┬────────────────────────────────────────┘
                              │
@@ -281,7 +284,6 @@ src/orchestration/
 ├── orchestrator-tools.ts         # Orchestrate tool (for orchestrator agent)
 ├── orchestrator-prompt.ts        # Orchestrator agent system prompt
 ├── orchestrator-memory.ts        # Shared memory management
-├── orchestrator-llm.ts           # LLM interface (deprecated, using agent now)
 ├── worker-runner.ts              # Worker pool, parallel execution
 ├── worker-prompt.ts              # Worker agent system prompt
 ├── acceptance.ts                 # Acceptance testing (verify + LLM eval)

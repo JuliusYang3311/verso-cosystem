@@ -89,6 +89,12 @@ export async function copyMissionToOutput(
     return { copied: false, error: "Mission workspace not found" };
   }
 
+  // Copy from sandbox directory (where all agents work)
+  const sandboxDir = path.join(missionDir, "sandbox");
+  if (!fs.existsSync(sandboxDir)) {
+    return { copied: false, error: "Sandbox directory not found" };
+  }
+
   // Resolve relative paths from source workspace
   const resolvedOutputDir = path.isAbsolute(outputDir)
     ? outputDir
@@ -100,8 +106,8 @@ export async function copyMissionToOutput(
       fs.mkdirSync(resolvedOutputDir, { recursive: true });
     }
 
-    // Copy mission workspace contents to output directory
-    await copyWorkspace(missionDir, resolvedOutputDir);
+    // Copy sandbox contents to output directory
+    await copyWorkspace(sandboxDir, resolvedOutputDir);
 
     return { copied: true, resolvedPath: resolvedOutputDir };
   } catch (err) {

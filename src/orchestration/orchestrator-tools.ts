@@ -96,7 +96,7 @@ ACTIONS:
 - check-status: Check status of all subtasks. Requires: orchestrationId.
 - run-acceptance: Run acceptance tests on completed subtasks. Requires: orchestrationId. Optional: verifyCmd (overrides plan's verifyCmd if specified).
 - create-fix-tasks: Create fix tasks for failed acceptance criteria. Requires: orchestrationId, fixes array.
-- complete: Copy results to output directory. Requires: orchestrationId. Optional: outputDir (relative path like "./my-app"), summary. If outputDir not specified, creates ./.verso-output/<orchestrationId>/
+- complete: Copy results to output directory. Requires: orchestrationId. Optional: outputDir (relative path like "./my-app"), summary. If outputDir not specified, creates ./orchestrator-output/<orchestrationId>/
 - abort: Cancel orchestration. Requires: orchestrationId.
 
 WORKFLOW: create-plan → dispatch → run-acceptance → complete (or create-fix-tasks → dispatch → ...)
@@ -514,7 +514,7 @@ async function handleComplete(params: Record<string, unknown>) {
   }
 
   // Default outputDir: create directory named after orchestration ID in source workspace
-  const finalOutputDir = outputDir || `./.verso-output/${orchId}`;
+  const finalOutputDir = outputDir || `./orchestrator-output/${orchId}`;
 
   // Copy to output directory
   const copyResult = await copyMissionToOutput(orch.sourceWorkspaceDir, orchId, finalOutputDir);
