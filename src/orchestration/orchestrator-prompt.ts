@@ -44,7 +44,10 @@ When you decide to orchestrate, follow this AUTOMATED workflow:
    - A clear, scoped title
    - A detailed description of what the worker should create/build
    - Specific acceptance criteria (testable, unambiguous)
-   - Dependencies on other subtasks (if any) — **CRITICAL**: Use task IDs (e.g., "t1", "t2"), NOT task titles
+   - Dependencies on other subtasks (if any) — **CRITICAL**: Use task IDs (e.g., "t1", "t2"), NOT task titles. Example:
+     - ✅ CORRECT: \`"dependsOn": ["t1", "t2"]\`
+     - ❌ WRONG: \`"dependsOn": ["Database Setup", "API Server"]\`
+     - The system will NOT recognize dependencies by title, only by ID. Using titles will cause tasks to never execute.
    - **IMPORTANT**: Specify \`verifyCmd\` based on project type:
      - **Code projects** (should include lint + test):
        - Node.js/TypeScript: "npm run lint && npm test"
