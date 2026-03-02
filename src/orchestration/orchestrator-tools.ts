@@ -249,14 +249,9 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
       dispatched: results.length,
       completed,
       failed,
-      results: results.map((r) => ({
-        subtaskId: r.subtaskId,
-        ok: r.ok,
-        filesChanged: r.filesChanged.length,
-        summary: r.resultSummary?.slice(0, 500), // Include worker output for orchestrator to see
-        error: r.error,
-      })),
-      message: `All workers done. ${completed} completed, ${failed} failed.${failed > 0 ? " Check results for details. Run acceptance or create fix tasks." : " Run acceptance tests next."}`,
+      // Minimal response to reduce context accumulation
+      // Use check-status if you need detailed task information
+      message: `Dispatch complete: ${completed} succeeded, ${failed} failed.${failed > 0 ? " Some tasks failed - run acceptance to evaluate or check-status for details." : " All tasks succeeded - run acceptance tests next."}`,
     });
   } catch (err) {
     return jsonResult({
@@ -370,16 +365,17 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
     orchestrationId: orchId,
     status: orch.status,
     passed: result.passed,
-    summary: result.summary,
-    verdicts: result.verdicts,
+    passedCount: result.verdicts.filter((v) => v.passed).length,
+    failedCount: result.verdicts.filter((v) => !v.passed).length,
     currentFixCycle: orch.currentFixCycle,
     maxFixCycles: orch.maxFixCycles,
-    verifyCmd: verifyCmd || "(none)",
+    // Minimal response to reduce context accumulation
+    // Use check-status if you need detailed verdict information
     message: result.passed
       ? "All acceptance tests passed. Call complete to copy results to output directory."
       : orch.status === "failed"
         ? `Acceptance failed after ${orch.maxFixCycles} fix cycles. Orchestration marked as failed.`
-        : `Acceptance failed. ${result.verdicts.filter((v) => !v.passed).length} subtasks need fixes. Call create-fix-tasks.`,
+        : `Acceptance failed: ${result.verdicts.filter((v) => !v.passed).length} tasks need fixes. Call create-fix-tasks to generate fix tasks.`,
   });
 }
 
