@@ -9,7 +9,6 @@ import {
   loadOrchestration,
   copyMissionToOutput,
   cleanupMissionWorkspace,
-  listOrchestrations,
 } from "./store.js";
 import {
   type Subtask,
@@ -89,7 +88,7 @@ export function createOrchestrateTool(opts: OrchestrateToolOptions): AnyAgentToo
 IMPORTANT: Mission workspace starts EMPTY. Workers build the project from scratch. Results are copied to outputDir when complete.
 
 ACTIONS:
-- create-plan: Create an orchestration plan with subtasks and acceptance criteria. Requires: planSummary, subtasks array, userPrompt. Optional: verifyCmd (project verification command, should include lint, e.g., "npm run lint && npm test").
+- create-plan: Create an orchestration plan with subtasks and acceptance criteria. Requires: orchestrationId, planSummary, subtasks array, userPrompt. Optional: verifyCmd (project verification command, should include lint, e.g., "npm run lint && npm test").
 - dispatch: Run all ready subtasks via in-memory worker pool. Blocks until all workers complete. Requires: orchestrationId.
 - check-status: Check status of all subtasks. Requires: orchestrationId.
 - run-acceptance: Run acceptance tests on completed subtasks. Requires: orchestrationId. Optional: verifyCmd (overrides plan's verifyCmd if specified).
@@ -143,7 +142,7 @@ OUTPUT DIRECTORY: Results are copied to this directory in the source workspace:
 
 async function handleCreatePlan(params: Record<string, unknown>, _opts: OrchestrateToolOptions) {
   const planSummary = readStringParam(params, "planSummary", { required: true });
-  const userPrompt = readStringParam(params, "userPrompt", { required: true });
+  const orchestrationId = readStringParam(params, "orchestrationId", { required: true });
   const verifyCmd = readStringParam(params, "verifyCmd"); // Optional, determined by orchestrator
   const rawSubtasks = params.subtasks;
 
@@ -151,21 +150,18 @@ async function handleCreatePlan(params: Record<string, unknown>, _opts: Orchestr
     return jsonResult({ error: "subtasks array is required and must not be empty" });
   }
 
-  // Find existing orchestration by userPrompt (created by daemon-runner)
-  const allOrchs = await listOrchestrations();
-  const existingOrch = allOrchs.find((o) => o.userPrompt === userPrompt && o.status === "planning");
-
-  if (!existingOrch) {
+  // Load existing orchestration by ID (created by daemon-runner)
+  const orch = await loadOrchestration(orchestrationId);
+  if (!orch) {
     return jsonResult({
-      error:
-        "No orchestration found in planning state. This should have been created by the daemon.",
+      error: `Orchestration ${orchestrationId} not found. This should have been created by the daemon.`,
     });
   }
 
-  const orchId = existingOrch.id;
-  const orch = await loadOrchestration(orchId);
-  if (!orch) {
-    return jsonResult({ error: `Orchestration ${orchId} not found` });
+  if (orch.status !== "planning") {
+    return jsonResult({
+      error: `Orchestration ${orchestrationId} is not in planning state (current: ${orch.status})`,
+    });
   }
 
   const subtasks: Subtask[] = rawSubtasks.map((raw: Record<string, unknown>, i: number) => {
@@ -192,7 +188,7 @@ async function handleCreatePlan(params: Record<string, unknown>, _opts: Orchestr
   });
 
   return jsonResult({
-    orchestrationId: orchId,
+    orchestrationId,
     missionWorkspace: orch.workspaceDir,
     status: orch.status,
     subtaskCount: subtasks.length,

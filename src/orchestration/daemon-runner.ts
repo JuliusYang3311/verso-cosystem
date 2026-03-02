@@ -243,6 +243,8 @@ async function runOrchestrationTask(
 
     const orchestratorMessage = `${buildOrchestratorSystemPrompt()}
 
+ORCHESTRATION ID: ${orchId}
+
 TASK:
 ${request.userPrompt}
 
@@ -250,15 +252,16 @@ CRITICAL INSTRUCTIONS:
 You MUST use the orchestrate tool to complete this task. Do NOT provide a text response without calling the tool.
 
 Your FIRST action must be to call the orchestrate tool with action "create-plan" to decompose the task into subtasks.
+IMPORTANT: When calling create-plan, you MUST include the orchestrationId parameter: "${orchId}"
 
 After creating the plan, follow this workflow:
-1. Call orchestrate with action "create-plan" (REQUIRED FIRST STEP)
-2. Call orchestrate with action "dispatch" to run workers
-3. Call orchestrate with action "run-acceptance" to verify results
-4. If tests pass, call orchestrate with action "complete"
-5. If tests fail, call orchestrate with action "create-fix-tasks" and repeat steps 2-4
+1. Call orchestrate with action "create-plan" and orchestrationId "${orchId}" (REQUIRED FIRST STEP)
+2. Call orchestrate with action "dispatch" and orchestrationId "${orchId}" to run workers
+3. Call orchestrate with action "run-acceptance" and orchestrationId "${orchId}" to verify results
+4. If tests pass, call orchestrate with action "complete" and orchestrationId "${orchId}"
+5. If tests fail, call orchestrate with action "create-fix-tasks" and orchestrationId "${orchId}", then repeat steps 2-4
 
-Start now by calling orchestrate with action "create-plan".`;
+Start now by calling orchestrate with action "create-plan" and orchestrationId "${orchId}".`;
 
     let result = "";
     try {
