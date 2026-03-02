@@ -250,9 +250,10 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
         subtaskId: r.subtaskId,
         ok: r.ok,
         filesChanged: r.filesChanged.length,
-        error: r.error?.slice(0, 200),
+        summary: r.resultSummary?.slice(0, 500), // Include worker output for orchestrator to see
+        error: r.error,
       })),
-      message: `All workers done. ${completed} completed, ${failed} failed.${failed > 0 ? " Run acceptance or create fix tasks." : " Run acceptance tests next."}`,
+      message: `All workers done. ${completed} completed, ${failed} failed.${failed > 0 ? " Check results for details. Run acceptance or create fix tasks." : " Run acceptance tests next."}`,
     });
   } catch (err) {
     return jsonResult({
@@ -294,12 +295,12 @@ async function handleCheckStatus(params: Record<string, unknown>) {
       title: s.title,
       status: s.status,
       error: s.error,
-      resultSummary: s.resultSummary?.slice(0, 200),
+      resultSummary: s.resultSummary?.slice(0, 500), // Show more detail for debugging
     })),
     fixTasks: orch.fixTasks.map((f) => ({
       id: f.id,
       status: f.status,
-      description: f.description.slice(0, 100),
+      description: f.description.slice(0, 200),
     })),
     message: allDone
       ? `All workers done. ${counts.completed} completed, ${counts.failed} failed.`
