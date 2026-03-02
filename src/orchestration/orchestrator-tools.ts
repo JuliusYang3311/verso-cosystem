@@ -423,11 +423,32 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
 
   // Mark original failed subtasks as cancelled to prevent reprocessing
   const fixedSubtaskIds = new Set(newFixes.map((f) => f.sourceSubtaskId));
+  const sourceToFixMap = new Map(newFixes.map((f) => [f.sourceSubtaskId, f.id]));
   let cancelledCount = 0;
+
   for (const subtask of orch.plan.subtasks) {
     if (fixedSubtaskIds.has(subtask.id) && subtask.status === "failed") {
       subtask.status = "cancelled";
       cancelledCount++;
+    }
+  }
+
+  // Update dependencies: if a subtask depends on a cancelled task, update it to depend on the fix task
+  let updatedDependencies = 0;
+  for (const subtask of orch.plan.subtasks) {
+    if (subtask.dependsOn && subtask.dependsOn.length > 0) {
+      const updatedDeps = subtask.dependsOn.map((depId) => {
+        // If this dependency was cancelled and has a fix task, update to the fix task
+        if (fixedSubtaskIds.has(depId)) {
+          const fixId = sourceToFixMap.get(depId);
+          if (fixId) {
+            updatedDependencies++;
+            return fixId;
+          }
+        }
+        return depId;
+      });
+      subtask.dependsOn = updatedDeps;
     }
   }
 
@@ -447,12 +468,13 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
     orchestrationId: orchId,
     fixCycle: orch.currentFixCycle,
     cancelledSubtasks: cancelledCount,
+    updatedDependencies,
     fixTasks: newFixes.map((f) => ({
       id: f.id,
       sourceSubtaskId: f.sourceSubtaskId,
       description: f.description.slice(0, 100),
     })),
-    message: `Created ${newFixes.length} fix tasks (cycle ${orch.currentFixCycle}/${orch.maxFixCycles}). Cancelled ${cancelledCount} failed subtasks. Call dispatch to start fix workers.`,
+    message: `Created ${newFixes.length} fix tasks (cycle ${orch.currentFixCycle}/${orch.maxFixCycles}). Cancelled ${cancelledCount} failed subtasks. Updated ${updatedDependencies} dependencies. Call dispatch to start fix workers.`,
   });
 }
 
