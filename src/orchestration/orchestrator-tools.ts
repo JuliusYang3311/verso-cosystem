@@ -3,6 +3,7 @@
 import { Type } from "@sinclair/typebox";
 import { stringEnum } from "../agents/schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "../agents/tools/common.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { broadcastOrchestrationEvent, buildOrchestrationSnapshot } from "./events.js";
 import {
   saveOrchestration,
@@ -18,6 +19,8 @@ import {
   ORCHESTRATION_DEFAULTS,
 } from "./types.js";
 import { runWorkerPool } from "./worker-runner.js";
+
+const logger = createSubsystemLogger("orchestrator-tools");
 
 const ORCHESTRATE_ACTIONS = [
   "create-plan",
@@ -484,6 +487,30 @@ async function handleComplete(params: Record<string, unknown>) {
   const orch = await loadOrchestration(orchId);
   if (!orch) {
     return jsonResult({ error: `Orchestration ${orchId} not found` });
+  }
+
+  // Validate all tasks are completed before allowing completion
+  if (orch.plan) {
+    const subtasks = orch.plan.subtasks;
+    const pending = subtasks.filter((s) => s.status === "pending");
+    const running = subtasks.filter((s) => s.status === "running");
+
+    if (pending.length > 0 || running.length > 0) {
+      logger.warn("Cannot complete: tasks still pending/running", {
+        orchId,
+        pending: pending.length,
+        running: running.length,
+      });
+
+      return jsonResult({
+        error: `Cannot complete: ${pending.length} pending, ${running.length} running tasks remain`,
+        orchestrationId: orchId,
+        status: orch.status,
+        pendingTasks: pending.map((s) => ({ id: s.id, title: s.title })),
+        runningTasks: running.map((s) => ({ id: s.id, title: s.title })),
+        message: `You must dispatch and complete all pending/running tasks before calling complete. Call dispatch to run pending tasks first.`,
+      });
+    }
   }
 
   // Default outputDir: create directory named after orchestration ID in source workspace
