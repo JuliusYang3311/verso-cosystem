@@ -243,15 +243,110 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
     const completed = results.filter((r) => r.ok).length;
     const failed = results.filter((r) => !r.ok).length;
 
+    // After dispatch, check for pending tasks with failed dependencies
+    // Automatically create fix tasks for failed dependencies and update dependency relationships
+    const allSubtasks = orch.plan?.subtasks ?? [];
+    const failedSubtaskIds = new Set(
+      allSubtasks.filter((s) => s.status === "failed").map((s) => s.id),
+    );
+    const pendingBlockedTasks: Subtask[] = [];
+
+    // Find pending tasks that depend on failed tasks
+    for (const subtask of allSubtasks) {
+      if (subtask.status === "pending" && subtask.dependsOn && subtask.dependsOn.length > 0) {
+        const hasFailedDep = subtask.dependsOn.some((depId) => failedSubtaskIds.has(depId));
+        if (hasFailedDep) {
+          pendingBlockedTasks.push(subtask);
+        }
+      }
+    }
+
+    let autoFixCount = 0;
+    if (pendingBlockedTasks.length > 0 && failed > 0) {
+      // Create fix tasks for failed dependencies
+      const failedDepsToFix = new Set<string>();
+      for (const blockedTask of pendingBlockedTasks) {
+        for (const depId of blockedTask.dependsOn ?? []) {
+          if (failedSubtaskIds.has(depId)) {
+            failedDepsToFix.add(depId);
+          }
+        }
+      }
+
+      // Generate fix tasks
+      const newFixTasks: FixTask[] = [];
+      const newFixSubtasks: Subtask[] = [];
+      const sourceToFixMap = new Map<string, string>();
+
+      for (const failedDepId of failedDepsToFix) {
+        const failedDep = allSubtasks.find((s) => s.id === failedDepId);
+        if (!failedDep) {
+          continue;
+        }
+
+        const fixId = `fix-auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        sourceToFixMap.set(failedDepId, fixId);
+
+        newFixTasks.push({
+          id: fixId,
+          sourceSubtaskId: failedDepId,
+          description: `Fix failed task: ${failedDep.title}\n\nOriginal error: ${failedDep.error ?? "Unknown error"}\n\nOriginal task description:\n${failedDep.description}`,
+          status: "pending",
+          createdAtMs: Date.now(),
+        });
+
+        newFixSubtasks.push({
+          id: fixId,
+          title: `Fix: ${failedDep.title}`,
+          description: `Fix failed task: ${failedDep.title}\n\nOriginal error: ${failedDep.error ?? "Unknown error"}\n\nOriginal task description:\n${failedDep.description}`,
+          acceptanceCriteria: failedDep.acceptanceCriteria,
+          status: "pending",
+          dependsOn: failedDep.dependsOn, // Inherit dependencies from original task
+          retryCount: 0,
+          createdAtMs: Date.now(),
+        });
+      }
+
+      // Mark original failed tasks as cancelled
+      for (const failedDepId of failedDepsToFix) {
+        const failedDep = allSubtasks.find((s) => s.id === failedDepId);
+        if (failedDep && failedDep.status === "failed") {
+          failedDep.status = "cancelled";
+        }
+      }
+
+      // Update dependencies: blocked tasks now depend on fix tasks
+      for (const blockedTask of pendingBlockedTasks) {
+        if (blockedTask.dependsOn) {
+          blockedTask.dependsOn = blockedTask.dependsOn.map((depId) => {
+            const fixId = sourceToFixMap.get(depId);
+            return fixId ?? depId;
+          });
+        }
+      }
+
+      // Add fix tasks to orchestration
+      orch.plan.subtasks.push(...newFixSubtasks);
+      orch.fixTasks.push(...newFixTasks);
+      autoFixCount = newFixTasks.length;
+
+      await saveOrchestration(orch);
+      await broadcastOrchestrationEvent({
+        type: "orchestration.updated",
+        payload: buildOrchestrationSnapshot(orch),
+      });
+    }
+
     return jsonResult({
       orchestrationId: orchId,
       status: orch.status,
       dispatched: results.length,
       completed,
       failed,
+      autoFixCreated: autoFixCount,
       // Minimal response to reduce context accumulation
       // Use check-status if you need detailed task information
-      message: `Dispatch complete: ${completed} succeeded, ${failed} failed.${failed > 0 ? " Some tasks failed - run acceptance to evaluate or check-status for details." : " All tasks succeeded - run acceptance tests next."}`,
+      message: `Dispatch complete: ${completed} succeeded, ${failed} failed.${autoFixCount > 0 ? ` Auto-created ${autoFixCount} fix tasks for blocked dependencies.` : ""}${failed > 0 ? " Run dispatch again to execute fix tasks, or run acceptance to evaluate." : " All tasks succeeded - run acceptance tests next."}`,
     });
   } catch (err) {
     return jsonResult({
