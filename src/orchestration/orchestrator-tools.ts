@@ -526,10 +526,13 @@ async function handleComplete(params: Record<string, unknown>) {
   }
   await saveOrchestration(orch);
 
-  // Broadcast completion (note: daemon also broadcasts, but this ensures immediate update)
+  // Broadcast completion with output path
   await broadcastOrchestrationEvent({
-    type: "orchestration.updated",
-    payload: buildOrchestrationSnapshot(orch),
+    type: "orchestration.completed",
+    orchestrationId: orch.id,
+    outputPath: copyResult.resolvedPath,
+    summary:
+      summary ?? `Orchestration completed. ${orch.plan?.subtasks.length ?? 0} subtasks executed.`,
   });
 
   if (copyResult.copied) {
@@ -548,8 +551,8 @@ async function handleComplete(params: Record<string, unknown>) {
       summary ?? `Orchestration completed. ${orch.plan?.subtasks.length ?? 0} subtasks executed.`,
     subtasks: subtaskSummaries,
     message: copyResult.copied
-      ? `Orchestration completed. Results copied to ${copyResult.resolvedPath}.`
-      : `Orchestration completed but copy failed: ${copyResult.error}. Mission workspace preserved at ${orch.workspaceDir}.`,
+      ? `✅ Orchestration completed successfully!\n\nProject files copied to: ${copyResult.resolvedPath}\n\nYou can find your completed project at the path above.`
+      : `⚠️ Orchestration completed but copy failed: ${copyResult.error}\n\nMission workspace preserved at: ${orch.workspaceDir}\n\nPlease manually copy files from the mission workspace.`,
   });
 }
 
