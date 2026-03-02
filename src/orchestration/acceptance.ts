@@ -77,14 +77,27 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
       continue;
     }
 
-    if (subtask.status !== "completed") {
+    // Skip pending subtasks (they haven't been executed yet, will be handled in next dispatch)
+    if (subtask.status === "pending") {
+      continue;
+    }
+
+    // Skip running subtasks (they are still executing)
+    if (subtask.status === "running") {
+      continue;
+    }
+
+    // For failed subtasks, mark as failed
+    if (subtask.status === "failed") {
       verdicts.push({
         subtaskId: subtask.id,
         passed: false,
-        reason: `Subtask not completed (status: ${subtask.status})`,
+        reason: `Subtask failed during execution`,
       });
       continue;
     }
+
+    // For completed subtasks, evaluate acceptance criteria
 
     const criteriaText = subtask.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
 
