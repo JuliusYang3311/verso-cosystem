@@ -138,109 +138,139 @@ Respond with a JSON object:
 }`;
 
     try {
-      // Create web search and web fetch tools for acceptance agent (same as orchestrator)
-      const { createWebSearchTool } = await import("../agents/tools/web-search.js");
-      const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
-      const { loadConfig } = await import("../config/config.js");
-      const config = loadConfig();
-      const webSearchTool = createWebSearchTool({ config, sandboxed: false });
-      const webFetchTool = createWebFetchTool({ config, sandboxed: false });
+      // Save original memory env vars (acceptance agent should use shared memory)
+      const originalMemoryDir = process.env.MEMORY_DIR;
+      const originalVersoMemoryDir = process.env.VERSO_MEMORY_DIR;
 
-      // Create Google Workspace tools for acceptance agent (if enabled, same as orchestrator)
-      const gworkspaceTools = [];
-      if (config.google?.enabled) {
-        const {
-          sheetsCreateSpreadsheet,
-          sheetsAppendValues,
-          docsCreateDocument,
-          driveListFiles,
-          driveUploadFile,
-          driveDownloadFile,
-          slidesCreatePresentation,
-        } = await import("../agents/tools/gworkspace-tools.js");
+      // Get shared memory directory from orchestration
+      const { getOrchestrationMemoryEnv } = await import("./orchestrator-memory.js");
+      const { resolveMissionWorkspace } = await import("./store.js");
+      const missionDir = resolveMissionWorkspace(params.workspaceDir, params.agentId);
+      const memoryDir = `${missionDir}/memory`;
+      const memoryEnv = getOrchestrationMemoryEnv(memoryDir);
 
-        const services = config.google.services || ["sheets", "docs", "drive", "slides"];
-        if (services.includes("sheets")) {
-          gworkspaceTools.push(sheetsCreateSpreadsheet, sheetsAppendValues);
-        }
-        if (services.includes("docs")) {
-          gworkspaceTools.push(docsCreateDocument);
-        }
-        if (services.includes("drive")) {
-          gworkspaceTools.push(driveListFiles, driveUploadFile, driveDownloadFile);
-        }
-        if (services.includes("slides")) {
-          gworkspaceTools.push(slidesCreatePresentation);
-        }
-      }
+      // Set memory env vars for acceptance agent (same as orchestrator and workers)
+      process.env.MEMORY_DIR = memoryEnv.MEMORY_DIR;
+      process.env.VERSO_MEMORY_DIR = memoryEnv.VERSO_MEMORY_DIR;
 
-      const acceptanceTools = [
-        ...(webSearchTool ? [webSearchTool] : []),
-        ...(webFetchTool ? [webFetchTool] : []),
-        ...gworkspaceTools,
-      ];
+      try {
+        // Create web search and web fetch tools for acceptance agent (same as orchestrator)
+        const { createWebSearchTool } = await import("../agents/tools/web-search.js");
+        const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
+        const { loadConfig } = await import("../config/config.js");
+        const config = loadConfig();
+        const webSearchTool = createWebSearchTool({ config, sandboxed: false });
+        const webFetchTool = createWebFetchTool({ config, sandboxed: false });
 
-      // Create in-memory session for evaluation
-      const created = await createAgentSession({
-        cwd: workspaceDir,
-        agentDir,
-        authStorage,
-        modelRegistry,
-        model,
-        customTools: acceptanceTools, // Use customTools to add tools alongside coding tools
-        sessionManager: SessionManager.inMemory(workspaceDir),
-      });
+        // Create Google Workspace tools for acceptance agent (if enabled, same as orchestrator)
+        const gworkspaceTools = [];
+        if (config.google?.enabled) {
+          const {
+            sheetsCreateSpreadsheet,
+            sheetsAppendValues,
+            docsCreateDocument,
+            driveListFiles,
+            driveUploadFile,
+            driveDownloadFile,
+            slidesCreatePresentation,
+          } = await import("../agents/tools/gworkspace-tools.js");
 
-      const session = created.session;
-
-      // Run evaluation
-      await session.sendUserMessage(evalPrompt);
-
-      // Get response from messages
-      const messages = session.messages;
-      const lastMessage = messages[messages.length - 1];
-      const evalResult =
-        lastMessage?.role === "assistant"
-          ? lastMessage.content
-              .filter((c) => c.type === "text")
-              .map((c) => ("text" in c ? c.text : ""))
-              .join("")
-          : "";
-
-      // Dispose session
-      session.dispose();
-
-      if (evalResult) {
-        // Try to parse JSON from the response
-        const jsonMatch = evalResult.match(/\{[\s\S]*"allPassed"[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            const parsed = JSON.parse(jsonMatch[0]) as { allPassed?: boolean; reason?: string };
-            verdicts.push({
-              subtaskId: subtask.id,
-              passed: parsed.allPassed === true,
-              reason:
-                parsed.reason ?? (parsed.allPassed ? "All criteria met" : "Some criteria not met"),
-            });
-            continue;
-          } catch {
-            // JSON parse failed, fall through
+          const services = config.google.services || ["sheets", "docs", "drive", "slides"];
+          if (services.includes("sheets")) {
+            gworkspaceTools.push(sheetsCreateSpreadsheet, sheetsAppendValues);
+          }
+          if (services.includes("docs")) {
+            gworkspaceTools.push(docsCreateDocument);
+          }
+          if (services.includes("drive")) {
+            gworkspaceTools.push(driveListFiles, driveUploadFile, driveDownloadFile);
+          }
+          if (services.includes("slides")) {
+            gworkspaceTools.push(slidesCreatePresentation);
           }
         }
-        // Fallback: check for obvious pass/fail signals
-        const lower = evalResult.toLowerCase();
-        const passed = lower.includes("allpassed") && lower.includes("true");
-        verdicts.push({
-          subtaskId: subtask.id,
-          passed,
-          reason: evalResult.slice(0, 500),
+
+        const acceptanceTools = [
+          ...(webSearchTool ? [webSearchTool] : []),
+          ...(webFetchTool ? [webFetchTool] : []),
+          ...gworkspaceTools,
+        ];
+
+        // Create in-memory session for evaluation
+        const created = await createAgentSession({
+          cwd: workspaceDir,
+          agentDir,
+          authStorage,
+          modelRegistry,
+          model,
+          customTools: acceptanceTools, // Use customTools to add tools alongside coding tools
+          sessionManager: SessionManager.inMemory(workspaceDir),
         });
-      } else {
-        verdicts.push({
-          subtaskId: subtask.id,
-          passed: false,
-          reason: "Evaluation agent returned no result",
-        });
+
+        const session = created.session;
+
+        // Run evaluation
+        await session.sendUserMessage(evalPrompt);
+
+        // Get response from messages
+        const messages = session.messages;
+        const lastMessage = messages[messages.length - 1];
+        const evalResult =
+          lastMessage?.role === "assistant"
+            ? lastMessage.content
+                .filter((c) => c.type === "text")
+                .map((c) => ("text" in c ? c.text : ""))
+                .join("")
+            : "";
+
+        // Dispose session
+        session.dispose();
+
+        if (evalResult) {
+          // Try to parse JSON from the response
+          const jsonMatch = evalResult.match(/\{[\s\S]*"allPassed"[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              const parsed = JSON.parse(jsonMatch[0]) as { allPassed?: boolean; reason?: string };
+              verdicts.push({
+                subtaskId: subtask.id,
+                passed: parsed.allPassed === true,
+                reason:
+                  parsed.reason ??
+                  (parsed.allPassed ? "All criteria met" : "Some criteria not met"),
+              });
+              continue;
+            } catch {
+              // JSON parse failed, fall through
+            }
+          }
+          // Fallback: check for obvious pass/fail signals
+          const lower = evalResult.toLowerCase();
+          const passed = lower.includes("allpassed") && lower.includes("true");
+          verdicts.push({
+            subtaskId: subtask.id,
+            passed,
+            reason: evalResult.slice(0, 500),
+          });
+        } else {
+          verdicts.push({
+            subtaskId: subtask.id,
+            passed: false,
+            reason: "Evaluation agent returned no result",
+          });
+        }
+      } finally {
+        // Restore original memory env vars
+        if (originalMemoryDir) {
+          process.env.MEMORY_DIR = originalMemoryDir;
+        } else {
+          delete process.env.MEMORY_DIR;
+        }
+        if (originalVersoMemoryDir) {
+          process.env.VERSO_MEMORY_DIR = originalVersoMemoryDir;
+        } else {
+          delete process.env.VERSO_MEMORY_DIR;
+        }
       }
     } catch (err) {
       verdicts.push({

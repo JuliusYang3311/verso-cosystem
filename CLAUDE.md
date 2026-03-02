@@ -251,6 +251,7 @@ Orchestration Memory Lifecycle:
 2. Orchestrator Agent:
    - Inherits memory env vars from daemon
    - Can store/retrieve context during task decomposition
+   - Uses memory to manage context and avoid overflow
 
 3. Worker Agents (worker-runner.ts):
    - Save original MEMORY_DIR env vars
@@ -258,7 +259,13 @@ Orchestration Memory Lifecycle:
    - Worker can access shared memory during execution
    - Restore original env vars after cleanup
 
-4. Cleanup (daemon-runner.ts finally block):
+4. Acceptance Agent (acceptance.ts):
+   - Save original MEMORY_DIR env vars
+   - Set to shared memory dir before creating session
+   - Can access shared memory during evaluation
+   - Restore original env vars after cleanup
+
+5. Cleanup (daemon-runner.ts finally block):
    - Close MemoryIndexManager (releases DB connections)
    - Delete memory directory recursively
    - All memory data is ephemeral, not persisted
@@ -270,6 +277,15 @@ Orchestration Memory Lifecycle:
 - Memory is NOT shared across different orchestrations
 - Memory is NOT shared with main agent
 - Memory is completely cleaned up after orchestration completes
+
+#### Context Management
+
+To prevent context overflow in orchestrator agent:
+
+- Tool responses (dispatch, run-acceptance) return minimal summaries
+- Detailed results stored in orchestration state (JSON files)
+- All agents (orchestrator, workers, acceptance) use shared memory for context
+- Memory system automatically manages context to prevent overflow
 
 ### File Structure
 
