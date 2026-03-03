@@ -42,6 +42,39 @@ export type BroadcastConfig = {
 
 export type AudioConfig = Record<string, never>;
 
+export type StatusReactionsEmojiConfig = {
+  thinking?: string;
+  tool?: string;
+  coding?: string;
+  web?: string;
+  done?: string;
+  error?: string;
+  stallSoft?: string;
+  stallHard?: string;
+};
+
+export type StatusReactionsTimingConfig = {
+  /** Debounce interval for intermediate states (ms). Default: 700. */
+  debounceMs?: number;
+  /** Soft stall warning timeout (ms). Default: 10000. */
+  stallSoftMs?: number;
+  /** Hard stall warning timeout (ms). Default: 30000. */
+  stallHardMs?: number;
+  /** How long to hold done emoji before cleanup (ms). Default: 1500. */
+  doneHoldMs?: number;
+  /** How long to hold error emoji before cleanup (ms). Default: 2500. */
+  errorHoldMs?: number;
+};
+
+export type StatusReactionsConfig = {
+  /** Enable lifecycle status reactions (default: false). */
+  enabled?: boolean;
+  /** Override default emojis. */
+  emojis?: StatusReactionsEmojiConfig;
+  /** Override default timing. */
+  timing?: StatusReactionsTimingConfig;
+};
+
 export type MessagesConfig = {
   /**
    * Prefix auto-added to all outbound replies.
@@ -73,6 +106,8 @@ export type MessagesConfig = {
   ackReactionScope?: "group-mentions" | "group-all" | "direct" | "all";
   /** Remove ack reaction after reply is sent (default: false). */
   removeAckAfterReply?: boolean;
+  /** Status reactions configuration (lifecycle emoji reactions). */
+  statusReactions?: StatusReactionsConfig;
   /** Text-to-speech settings for outbound replies. */
   tts?: TtsConfig;
 };

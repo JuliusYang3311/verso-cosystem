@@ -343,6 +343,11 @@ export async function runAgentTurnWithFallback(params: {
                 const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
                 if (phase === "start" || phase === "update") {
                   await params.typingSignals.signalToolStart();
+                  // Notify onToolStart callback
+                  if (phase === "start") {
+                    const name = typeof evt.data.name === "string" ? evt.data.name : undefined;
+                    await params.opts?.onToolStart?.({ name, phase });
+                  }
                 }
               }
               // Track auto-compaction completion

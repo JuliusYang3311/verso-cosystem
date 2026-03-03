@@ -81,6 +81,7 @@ export const dispatchTelegramMessage = async ({
     ackReactionPromise,
     reactionApi,
     removeAckAfterReply,
+    statusReactionController,
   } = context;
 
   const isPrivateChat = msg.chat.type === "private";
@@ -245,6 +246,10 @@ export const dispatchTelegramMessage = async ({
     skippedNonSilent: 0,
   };
 
+  if (statusReactionController) {
+    void statusReactionController.setThinking();
+  }
+
   const { queuedFinal } = await dispatchReplyWithBufferedBlockDispatcher({
     ctx: ctxPayload,
     cfg,
@@ -298,6 +303,11 @@ export const dispatchTelegramMessage = async ({
       skillFilter,
       disableBlockStreaming,
       onPartialReply: draftStream ? (payload) => updateDraftFromPartial(payload.text) : undefined,
+      onToolStart: statusReactionController
+        ? async (payload) => {
+            await statusReactionController.setTool(payload.name);
+          }
+        : undefined,
       onModelSelected,
     },
   });
@@ -322,6 +332,13 @@ export const dispatchTelegramMessage = async ({
   }
 
   const hasFinalResponse = queuedFinal || sentFallback;
+
+  if (statusReactionController && !hasFinalResponse) {
+    void statusReactionController.setError().catch((err) => {
+      logVerbose(`telegram: status reaction error finalize failed: ${String(err)}`);
+    });
+  }
+
   if (!hasFinalResponse) {
     // Ensure typing indicator is stopped if no reply was sent
     // We can't access the specific controller instance easily here as it's created inside the dispatcher factory,
@@ -375,6 +392,13 @@ export const dispatchTelegramMessage = async ({
     }
     return;
   }
+
+  if (statusReactionController) {
+    void statusReactionController.setDone().catch((err) => {
+      logVerbose(`telegram: status reaction finalize failed: ${String(err)}`);
+    });
+  }
+
   removeAckReactionAfterReply({
     removeAfterReply: removeAckAfterReply,
     ackReactionPromise,
