@@ -163,9 +163,11 @@ export const dispatchTelegramMessage = async ({
     await draftStream.flush();
   };
 
-  const disableBlockStreaming =
-    Boolean(draftStream) ||
-    (typeof telegramCfg.blockStreaming === "boolean" ? !telegramCfg.blockStreaming : undefined);
+  const disableBlockStreaming = draftStream
+    ? false // Enable block streaming when using draft streaming (needed for onPartialReply)
+    : typeof telegramCfg.blockStreaming === "boolean"
+      ? !telegramCfg.blockStreaming
+      : undefined;
 
   const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
     cfg,
