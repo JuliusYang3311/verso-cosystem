@@ -460,22 +460,35 @@ export async function runWorkerPool(params: {
 
   // Build initial pending queue: only ready (pending + deps met) subtasks
   const pending: string[] = subtasks.filter((s) => isSubtaskReady(s, subtasks)).map((s) => s.id);
+  const claimed = new Set<string>(); // Track claimed tasks to avoid duplicates
 
   const results: WorkerResult[] = [];
 
   const claimNext = (): Subtask | null => {
     // First try to claim from existing pending queue
-    const id = pending.shift();
-    if (id) {
-      return subtaskById.get(id) ?? null;
+    while (pending.length > 0) {
+      const id = pending.shift();
+      if (id && !claimed.has(id)) {
+        const task = subtaskById.get(id);
+        if (task && task.status === "pending") {
+          claimed.add(id);
+          return task;
+        }
+      }
     }
 
     // If pending queue is empty, check if any new tasks became ready
-    const newlyReady = subtasks.filter((s) => isSubtaskReady(s, subtasks));
+    const newlyReady = subtasks.filter((s) => isSubtaskReady(s, subtasks) && !claimed.has(s.id));
     if (newlyReady.length > 0) {
       pending.push(...newlyReady.map((s) => s.id));
       const nextId = pending.shift();
-      return nextId ? (subtaskById.get(nextId) ?? null) : null;
+      if (nextId && !claimed.has(nextId)) {
+        const task = subtaskById.get(nextId);
+        if (task) {
+          claimed.add(nextId);
+          return task;
+        }
+      }
     }
 
     return null;
