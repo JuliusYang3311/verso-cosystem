@@ -50,7 +50,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
   }
 
   // Initialize mission workspace
-  const missionDir = await initMissionWorkspace(orchId, opts.workspaceDir);
+  const missionDir = await initMissionWorkspace(opts.workspaceDir, orchId);
   orch.workspaceDir = missionDir;
   await saveOrchestration(orch);
 

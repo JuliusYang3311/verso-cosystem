@@ -401,8 +401,9 @@ export async function runWorkerPool(params: {
   const subtasks = orch.plan.subtasks;
   const subtaskById = new Map(subtasks.map((s) => [s.id, s]));
 
-  // Optimize: Install dependencies once before starting workers
-  ensureDependenciesInstalled(orch.workspaceDir);
+  // Optimize: Install dependencies once before starting workers (in sandbox directory)
+  const sandboxDir = path.join(orch.workspaceDir, "sandbox");
+  ensureDependenciesInstalled(sandboxDir);
 
   // Optimize: Resolve model/auth once and share across workers
   const { model, authStorage, modelRegistry } = await resolveAgentModel();
@@ -458,7 +459,7 @@ export async function runWorkerPool(params: {
         const result = await runWorkerTask({
           subtask: task,
           orchestrationId: orch.id,
-          missionWorkspaceDir: orch.workspaceDir,
+          missionWorkspaceDir: path.join(orch.workspaceDir, "sandbox"), // Use sandbox directory
           memoryDir,
           timeoutMs,
           sharedResources: { model, authStorage, modelRegistry, agentDir },
