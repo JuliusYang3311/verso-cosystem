@@ -69,7 +69,7 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
 
   // Build subtask summary for context
   const subtaskSummary = subtasks
-    .map((s) => `- [${s.status}] ${s.title}: ${s.resultSummary?.slice(0, 200) ?? "no summary"}`)
+    .map((s) => `- [${s.status}] ${s.title}: ${s.resultSummary?.slice(0, 500) ?? "no summary"}`)
     .join("\n");
 
   const evalPrompt = `You are an acceptance test evaluator. Evaluate whether the overall project satisfies the original user task.
