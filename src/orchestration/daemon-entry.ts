@@ -3,6 +3,9 @@
 // This file is spawned as a detached background process.
 // Each daemon runs exactly one orchestration task.
 
+import fs from "node:fs";
+import path from "node:path";
+import { resolveStateDir } from "../config/paths.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runOrchestratorDaemon } from "./daemon-runner.js";
 
@@ -20,6 +23,34 @@ if (!orchestrationId) {
   logger.error("ORCHESTRATOR_ORCHESTRATION_ID environment variable is required");
   process.exit(1);
 }
+
+// Helper to clean up PID file on exit
+function cleanupPidFile() {
+  try {
+    const stateDir = resolveStateDir();
+    const logsDir = path.join(stateDir, "logs");
+    const pidPath = path.join(logsDir, `orchestrator-${orchestrationId}.pid`);
+    if (fs.existsSync(pidPath)) {
+      fs.unlinkSync(pidPath);
+      logger.info("Cleaned up PID file", { orchestrationId, pidPath });
+    }
+  } catch (err) {
+    logger.warn("Failed to cleanup PID file", { orchestrationId, error: String(err) });
+  }
+}
+
+// Register cleanup handlers
+process.on("exit", cleanupPidFile);
+process.on("SIGTERM", () => {
+  logger.info("Received SIGTERM, cleaning up", { orchestrationId });
+  cleanupPidFile();
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  logger.info("Received SIGINT, cleaning up", { orchestrationId });
+  cleanupPidFile();
+  process.exit(0);
+});
 
 logger.info("Orchestrator daemon starting", {
   orchestrationId,
@@ -39,5 +70,6 @@ runOrchestratorDaemon({
   verifyCmd,
 }).catch((err) => {
   logger.error("Daemon crashed", { orchestrationId, error: String(err) });
+  cleanupPidFile();
   process.exit(1);
 });
