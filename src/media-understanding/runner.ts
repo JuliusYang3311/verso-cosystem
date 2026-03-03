@@ -702,27 +702,6 @@ function normalizeProviderQuery(
   return Object.keys(query).length > 0 ? query : undefined;
 }
 
-function buildDeepgramCompatQuery(options?: {
-  detectLanguage?: boolean;
-  punctuate?: boolean;
-  smartFormat?: boolean;
-}): ProviderQuery | undefined {
-  if (!options) {
-    return undefined;
-  }
-  const query: ProviderQuery = {};
-  if (typeof options.detectLanguage === "boolean") {
-    query.detect_language = options.detectLanguage;
-  }
-  if (typeof options.punctuate === "boolean") {
-    query.punctuate = options.punctuate;
-  }
-  if (typeof options.smartFormat === "boolean") {
-    query.smart_format = options.smartFormat;
-  }
-  return Object.keys(query).length > 0 ? query : undefined;
-}
-
 function normalizeDeepgramQueryKeys(query: ProviderQuery): ProviderQuery {
   const normalized = { ...query };
   if ("detectLanguage" in normalized) {
@@ -750,12 +729,6 @@ function resolveProviderQuery(params: {
     return mergedOptions;
   }
   let query = normalizeDeepgramQueryKeys(mergedOptions ?? {});
-  const compat = buildDeepgramCompatQuery({ ...config?.deepgram, ...entry.deepgram });
-  for (const [key, value] of Object.entries(compat ?? {})) {
-    if (query[key] === undefined) {
-      query[key] = value;
-    }
-  }
   return Object.keys(query).length > 0 ? query : undefined;
 }
 

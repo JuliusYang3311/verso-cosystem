@@ -150,8 +150,7 @@ export function resolveWhatsAppAccount(params: {
     name: accountCfg?.name?.trim() || undefined,
     enabled,
     sendReadReceipts: accountCfg?.sendReadReceipts ?? rootCfg?.sendReadReceipts ?? true,
-    messagePrefix:
-      accountCfg?.messagePrefix ?? rootCfg?.messagePrefix ?? params.cfg.messages?.messagePrefix,
+    messagePrefix: accountCfg?.messagePrefix ?? rootCfg?.messagePrefix,
     authDir,
     isLegacyAuthDir: isLegacy,
     selfChatMode: accountCfg?.selfChatMode ?? rootCfg?.selfChatMode,

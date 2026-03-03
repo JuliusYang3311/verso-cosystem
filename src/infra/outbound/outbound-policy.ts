@@ -98,10 +98,6 @@ export function enforceCrossContextPolicy(params: {
     return;
   }
 
-  if (params.cfg.tools?.message?.allowCrossContextSend) {
-    return;
-  }
-
   const currentProvider = params.toolContext?.currentChannelProvider;
   const allowWithinProvider =
     params.cfg.tools?.message?.crossContext?.allowWithinProvider !== false;

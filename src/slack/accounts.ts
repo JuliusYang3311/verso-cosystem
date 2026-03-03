@@ -124,8 +124,5 @@ export function resolveSlackReplyToMode(
   if (normalized && account.replyToModeByChatType?.[normalized] !== undefined) {
     return account.replyToModeByChatType[normalized] ?? "off";
   }
-  if (normalized === "direct" && account.dm?.replyToMode !== undefined) {
-    return account.dm.replyToMode;
-  }
   return account.replyToMode ?? "off";
 }

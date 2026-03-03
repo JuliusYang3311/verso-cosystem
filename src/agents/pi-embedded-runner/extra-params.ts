@@ -26,8 +26,13 @@ export function resolveExtraParams(params: {
 }
 
 type CacheRetention = "none" | "short" | "long";
+type ExtendedThinking = {
+  type: "enabled";
+  budget_tokens: number;
+};
 type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
   cacheRetention?: CacheRetention;
+  extended_thinking?: ExtendedThinking;
 };
 
 /**
@@ -64,6 +69,45 @@ function resolveCacheRetention(
   return undefined;
 }
 
+/**
+ * Resolve extended_thinking from extraParams for Anthropic models.
+ * Supports both object format and shorthand budget number.
+ *
+ * Examples:
+ * - { extended_thinking: { type: "enabled", budget_tokens: 10000 } }
+ * - { extended_thinking: 10000 } (shorthand)
+ */
+function resolveExtendedThinking(
+  extraParams: Record<string, unknown> | undefined,
+  provider: string,
+): ExtendedThinking | undefined {
+  if (provider !== "anthropic") {
+    return undefined;
+  }
+
+  const val = extraParams?.extended_thinking;
+  if (!val) {
+    return undefined;
+  }
+
+  // Shorthand: just a number
+  if (typeof val === "number" && val > 0) {
+    return { type: "enabled", budget_tokens: val };
+  }
+
+  // Full object format
+  if (
+    typeof val === "object" &&
+    val !== null &&
+    (val as { type?: unknown }).type === "enabled" &&
+    typeof (val as { budget_tokens?: unknown }).budget_tokens === "number"
+  ) {
+    return val as ExtendedThinking;
+  }
+
+  return undefined;
+}
+
 function createStreamFnWithExtraParams(
   baseStreamFn: StreamFn | undefined,
   extraParams: Record<string, unknown> | undefined,
@@ -83,6 +127,10 @@ function createStreamFnWithExtraParams(
   const cacheRetention = resolveCacheRetention(extraParams, provider);
   if (cacheRetention) {
     streamParams.cacheRetention = cacheRetention;
+  }
+  const extendedThinking = resolveExtendedThinking(extraParams, provider);
+  if (extendedThinking) {
+    streamParams.extended_thinking = extendedThinking;
   }
 
   if (Object.keys(streamParams).length === 0) {
