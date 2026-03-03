@@ -213,7 +213,7 @@ export async function deleteOrchestration(id: string): Promise<boolean> {
 
 // --- Helpers ---
 
-async function copyWorkspace(src: string, dest: string): Promise<void> {
+export async function copyWorkspace(src: string, dest: string): Promise<void> {
   const { execSync } = await import("node:child_process");
 
   // Validate paths

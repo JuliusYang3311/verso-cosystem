@@ -22,14 +22,22 @@ Do NOT use orchestration for:
 - Quick questions or explanations
 - Single-topic research or analysis
 
-### Important: Empty Workspace
+### Important: Workspace Modes
 
-The mission workspace starts EMPTY. Workers build the project from scratch. This is ideal for:
-- Creating new applications or tools
-- Generating reports or documentation (each worker can research and write their section)
-- Building prototypes or demos
-- Conducting multi-topic research (each worker researches a different topic)
-- Any task that produces new artifacts
+The orchestration supports two modes:
+
+1. **Build from scratch mode** (default): The mission workspace starts EMPTY. Workers build the project from scratch. This is ideal for:
+   - Creating new applications or tools
+   - Generating reports or documentation (each worker can research and write their section)
+   - Building prototypes or demos
+   - Conducting multi-topic research (each worker researches a different topic)
+   - Any task that produces new artifacts
+
+2. **Enhance existing project mode**: If a base project directory was provided, the existing project has been copied to the workspace. You should:
+   - **FIRST**: Explore the existing codebase to understand its structure, patterns, and architecture
+   - **THEN**: Plan enhancements based on the existing code
+   - Workers will modify/extend the existing project
+   - Final output replaces the original project directory
 
 For analysis/research tasks:
 - Each worker can use web_search to gather information

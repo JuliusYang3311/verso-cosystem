@@ -616,7 +616,8 @@ async function handleComplete(params: Record<string, unknown>) {
   }
 
   // Default outputDir: create directory named after orchestration ID in source workspace
-  const finalOutputDir = outputDir || `./orchestrator-output/${orchId}`;
+  // If baseProjectDir is set, use it as the output directory (replace original project)
+  const finalOutputDir = outputDir || orch.baseProjectDir || `./orchestrator-output/${orchId}`;
 
   // Copy to output directory
   const copyResult = await copyMissionToOutput(orch.sourceWorkspaceDir, orchId, finalOutputDir);
@@ -627,6 +628,8 @@ async function handleComplete(params: Record<string, unknown>) {
     copied: copyResult.copied,
     outputPath: copyResult.resolvedPath,
     sourceWorkspace: orch.sourceWorkspaceDir,
+    baseProjectDir: orch.baseProjectDir,
+    mode: orch.baseProjectDir ? "enhance" : "build-from-scratch",
     error: copyResult.error,
   });
 

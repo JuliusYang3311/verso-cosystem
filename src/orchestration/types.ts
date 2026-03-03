@@ -71,6 +71,8 @@ export type Orchestration = {
   sourceWorkspaceDir: string;
   /** The session key that triggered this orchestration (e.g., telegram:chat:123456, agent:main). */
   triggeringSessionKey?: string;
+  /** Base project directory to enhance (if provided, copied to sandbox before orchestration starts). */
+  baseProjectDir?: string;
   plan?: OrchestrationPlan;
   fixTasks: FixTask[];
   acceptanceResults: AcceptanceResult[];
@@ -106,6 +108,7 @@ export function createOrchestration(params: {
   workspaceDir: string;
   sourceWorkspaceDir: string;
   triggeringSessionKey?: string;
+  baseProjectDir?: string;
   maxFixCycles?: number;
 }): Orchestration {
   const now = Date.now();
@@ -118,6 +121,7 @@ export function createOrchestration(params: {
     workspaceDir: params.workspaceDir,
     sourceWorkspaceDir: params.sourceWorkspaceDir,
     triggeringSessionKey: params.triggeringSessionKey,
+    baseProjectDir: params.baseProjectDir,
     fixTasks: [],
     acceptanceResults: [],
     maxFixCycles: params.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,

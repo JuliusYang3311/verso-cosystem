@@ -62,6 +62,26 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
   fs.mkdirSync(sandboxDir, { recursive: true });
   logger.info("Created shared sandbox", { orchId, sandboxDir });
 
+  // If baseProjectDir is provided, copy it to sandbox before orchestration starts
+  if (orch.baseProjectDir) {
+    logger.info("Copying base project to sandbox", {
+      orchId,
+      baseProjectDir: orch.baseProjectDir,
+      sandboxDir,
+    });
+    try {
+      const { copyWorkspace } = await import("./store.js");
+      await copyWorkspace(orch.baseProjectDir, sandboxDir);
+      logger.info("Base project copied to sandbox", { orchId });
+    } catch (err) {
+      logger.error("Failed to copy base project to sandbox", {
+        orchId,
+        error: String(err),
+      });
+      throw new Error(`Failed to copy base project: ${String(err)}`, { cause: err });
+    }
+  }
+
   // Broadcast orchestration started event
   await broadcastOrchestrationEvent({
     type: "orchestration.started",

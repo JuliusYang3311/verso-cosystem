@@ -301,7 +301,12 @@ export async function stopOrchestratorDaemon(
  */
 export async function submitOrchestration(
   userPrompt: string,
-  opts?: { cfg?: VersoConfig; agentId?: string; triggeringSessionKey?: string },
+  opts?: {
+    cfg?: VersoConfig;
+    agentId?: string;
+    triggeringSessionKey?: string;
+    baseProjectDir?: string;
+  },
 ): Promise<{ orchestrationId: string; daemonStarted: boolean; error?: string }> {
   const cfg = opts?.cfg;
   const agentId = opts?.agentId ?? "main";
@@ -314,6 +319,13 @@ export async function submitOrchestration(
   const orchConfig = cfg?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
   const maxFixCycles = orchConfig?.maxFixCycles ?? 30;
 
+  // Resolve baseProjectDir to absolute path if provided
+  const baseProjectDir = opts?.baseProjectDir
+    ? path.isAbsolute(opts.baseProjectDir)
+      ? opts.baseProjectDir
+      : path.resolve(workspace, opts.baseProjectDir)
+    : undefined;
+
   // Create orchestration record
   const orchestration = createOrchestration({
     id: orchestrationId,
@@ -323,6 +335,7 @@ export async function submitOrchestration(
     workspaceDir: "", // Will be set by daemon
     sourceWorkspaceDir: workspace,
     triggeringSessionKey: opts?.triggeringSessionKey,
+    baseProjectDir,
     maxFixCycles,
   });
 
