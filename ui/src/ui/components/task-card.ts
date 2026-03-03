@@ -35,6 +35,36 @@ function statusIcon(status: OrchestrationSubtask["status"]) {
   }
 }
 
+function specializationBadge(specialization: OrchestrationSubtask["specialization"]) {
+  const badges = {
+    "code-explorer": {
+      icon: "🔍",
+      label: "Explorer",
+      title: "Code Explorer - Understand codebase",
+    },
+    "code-architect": {
+      icon: "🏗️",
+      label: "Architect",
+      title: "Code Architect - Design architecture",
+    },
+    "code-implementer": {
+      icon: "⚙️",
+      label: "Implementer",
+      title: "Code Implementer - Write code",
+    },
+    "code-reviewer": { icon: "👁️", label: "Reviewer", title: "Code Reviewer - Review quality" },
+    researcher: { icon: "📚", label: "Researcher", title: "Researcher - Gather information" },
+    generic: { icon: "📋", label: "Generic", title: "Generic worker" },
+  };
+  const badge = badges[specialization];
+  return html`
+    <span class="orch-specialization-badge orch-specialization-badge--${specialization}" title="${badge.title}">
+      <span class="orch-specialization-badge__icon">${badge.icon}</span>
+      <span class="orch-specialization-badge__label">${badge.label}</span>
+    </span>
+  `;
+}
+
 export function renderTaskCard(props: TaskCardProps) {
   const { subtask, selected, onSelect } = props;
   const criteriaCount = subtask.acceptanceCriteria.length;
@@ -51,6 +81,9 @@ export function renderTaskCard(props: TaskCardProps) {
       <div class="orch-task-card__header">
         ${statusIcon(subtask.status)}
         <span class="orch-task-card__title">${subtask.title}</span>
+      </div>
+      <div class="orch-task-card__specialization">
+        ${specializationBadge(subtask.specialization)}
       </div>
       <div class="orch-task-card__meta">
         <span class="orch-task-card__criteria">${criteriaCount} criteria</span>

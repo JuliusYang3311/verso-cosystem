@@ -458,6 +458,14 @@ export async function runWorkerPool(params: {
         }),
       ]).catch((err) => logger.warn("Failed to save/broadcast task start", { error: String(err) }));
 
+      // Trigger worker:started hook
+      const { triggerOrchestrationHook } = await import("./hooks.js");
+      await triggerOrchestrationHook("worker:started", {
+        orchestrationId: orch.id,
+        orchestration: orch,
+        subtask: task,
+      });
+
       try {
         const result = await runWorkerTask({
           subtask: task,
@@ -506,6 +514,23 @@ export async function runWorkerPool(params: {
           }),
         ]);
 
+        // Trigger worker:completed or worker:failed hook
+        if (result.ok) {
+          await triggerOrchestrationHook("worker:completed", {
+            orchestrationId: orch.id,
+            orchestration: orch,
+            subtask: task,
+            result,
+          });
+        } else {
+          await triggerOrchestrationHook("worker:failed", {
+            orchestrationId: orch.id,
+            orchestration: orch,
+            subtask: task,
+            result,
+          });
+        }
+
         results.push(result);
       } catch (err) {
         // Ensure task is marked as failed even if there's an unhandled exception
@@ -526,6 +551,13 @@ export async function runWorkerPool(params: {
             },
           }),
         ]);
+
+        // Trigger worker:failed hook for unhandled exceptions
+        await triggerOrchestrationHook("worker:failed", {
+          orchestrationId: orch.id,
+          orchestration: orch,
+          subtask: task,
+        });
 
         results.push({
           subtaskId: task.id,

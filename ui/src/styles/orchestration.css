@@ -755,3 +755,185 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Specialization Badges ── */
+.orch-specialization-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--bg-secondary, #f5f5f5);
+  border: 1px solid var(--border);
+}
+.orch-specialization-badge__icon {
+  font-size: 12px;
+}
+.orch-specialization-badge__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Specialization colors */
+.orch-specialization-badge--code-explorer {
+  background: #e3f2fd;
+  border-color: #90caf9;
+  color: #1976d2;
+}
+.orch-specialization-badge--code-architect {
+  background: #f3e5f5;
+  border-color: #ce93d8;
+  color: #7b1fa2;
+}
+.orch-specialization-badge--code-implementer {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  color: #388e3c;
+}
+.orch-specialization-badge--code-reviewer {
+  background: #fff3e0;
+  border-color: #ffcc80;
+  color: #f57c00;
+}
+.orch-specialization-badge--researcher {
+  background: #fce4ec;
+  border-color: #f48fb1;
+  color: #c2185b;
+}
+.orch-specialization-badge--generic {
+  background: #f5f5f5;
+  border-color: #e0e0e0;
+  color: #757575;
+}
+
+/* Task card specialization section */
+.orch-task-card__specialization {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* ── Confidence Scores ── */
+.orch-acceptance__verdict-confidence {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 8px;
+}
+.orch-acceptance__verdict-confidence--high {
+  background: #d4edda;
+  color: #28744c;
+}
+.orch-acceptance__verdict-confidence--low {
+  background: #fff3cd;
+  color: #856404;
+}
+
+/* Acceptance verdict issues */
+.orch-acceptance__verdict-issues {
+  margin-top: 8px;
+  padding-left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.orch-acceptance__issue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--bg-secondary, #f5f5f5);
+}
+.orch-acceptance__issue--critical {
+  background: #f8d7da;
+  border-left: 3px solid #dc3545;
+}
+.orch-acceptance__issue--major {
+  background: #fff3cd;
+  border-left: 3px solid #ffc107;
+}
+.orch-acceptance__issue--minor {
+  background: #d1ecf1;
+  border-left: 3px solid #17a2b8;
+}
+.orch-acceptance__issue-severity {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.1);
+}
+.orch-acceptance__issue-confidence {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.orch-acceptance__issue-description {
+  flex: 1;
+}
+.orch-acceptance__issue-file {
+  font-family: monospace;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+/* Dark theme adjustments */
+:root[data-theme="dark"] .orch-specialization-badge {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+:root[data-theme="dark"] .orch-specialization-badge--code-explorer {
+  background: rgba(33, 150, 243, 0.15);
+  border-color: rgba(33, 150, 243, 0.3);
+  color: #90caf9;
+}
+:root[data-theme="dark"] .orch-specialization-badge--code-architect {
+  background: rgba(156, 39, 176, 0.15);
+  border-color: rgba(156, 39, 176, 0.3);
+  color: #ce93d8;
+}
+:root[data-theme="dark"] .orch-specialization-badge--code-implementer {
+  background: rgba(76, 175, 80, 0.15);
+  border-color: rgba(76, 175, 80, 0.3);
+  color: #a5d6a7;
+}
+:root[data-theme="dark"] .orch-specialization-badge--code-reviewer {
+  background: rgba(255, 152, 0, 0.15);
+  border-color: rgba(255, 152, 0, 0.3);
+  color: #ffcc80;
+}
+:root[data-theme="dark"] .orch-specialization-badge--researcher {
+  background: rgba(233, 30, 99, 0.15);
+  border-color: rgba(233, 30, 99, 0.3);
+  color: #f48fb1;
+}
+:root[data-theme="dark"] .orch-acceptance__verdict-confidence--high {
+  background: rgba(76, 175, 80, 0.2);
+  color: #a5d6a7;
+}
+:root[data-theme="dark"] .orch-acceptance__verdict-confidence--low {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffd54f;
+}
+:root[data-theme="dark"] .orch-acceptance__issue {
+  background: rgba(255, 255, 255, 0.05);
+}
+:root[data-theme="dark"] .orch-acceptance__issue--critical {
+  background: rgba(220, 53, 69, 0.2);
+  border-left-color: #dc3545;
+}
+:root[data-theme="dark"] .orch-acceptance__issue--major {
+  background: rgba(255, 193, 7, 0.2);
+  border-left-color: #ffc107;
+}
+:root[data-theme="dark"] .orch-acceptance__issue--minor {
+  background: rgba(23, 162, 184, 0.2);
+  border-left-color: #17a2b8;
+}

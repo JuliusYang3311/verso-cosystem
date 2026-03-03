@@ -1,5 +1,7 @@
 // src/orchestration/types.ts — Multi-agent orchestration data model
 
+import type { WorkerSpecialization } from "./specializations/index.js";
+
 export type TaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
 export type OrchestrationStatus =
@@ -17,6 +19,7 @@ export type Subtask = {
   description: string;
   acceptanceCriteria: string[];
   status: TaskStatus;
+  specialization: WorkerSpecialization; // Worker specialization type for domain-specific execution
   workerSessionKey?: string;
   runId?: string;
   dependsOn?: string[];
@@ -31,7 +34,15 @@ export type Subtask = {
 export type AcceptanceVerdict = {
   subtaskId: string;
   passed: boolean;
-  reason?: string;
+  confidence: number; // Confidence score 0-100 (inspired by Claude Code's confidence-based filtering)
+  reasoning: string;
+  issues?: Array<{
+    severity: "critical" | "major" | "minor";
+    confidence: number;
+    description: string;
+    file?: string;
+    line?: number;
+  }>;
 };
 
 export type AcceptanceResult = {
@@ -136,6 +147,7 @@ export function createSubtask(params: {
   title: string;
   description: string;
   acceptanceCriteria: string[];
+  specialization: WorkerSpecialization; // REQUIRED - no default
   dependsOn?: string[];
 }): Subtask {
   return {
@@ -143,6 +155,7 @@ export function createSubtask(params: {
     title: params.title,
     description: params.description,
     acceptanceCriteria: params.acceptanceCriteria,
+    specialization: params.specialization,
     status: "pending",
     dependsOn: params.dependsOn,
     retryCount: 0,

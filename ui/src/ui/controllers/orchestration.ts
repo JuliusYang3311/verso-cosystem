@@ -7,6 +7,13 @@ export type OrchestrationSubtask = {
   title: string;
   description: string;
   acceptanceCriteria: string[];
+  specialization:
+    | "code-explorer"
+    | "code-architect"
+    | "code-implementer"
+    | "code-reviewer"
+    | "researcher"
+    | "generic";
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   dependsOn?: string[];
   resultSummary?: string;
@@ -20,7 +27,15 @@ export type OrchestrationSubtask = {
 export type OrchestrationAcceptanceVerdict = {
   subtaskId: string;
   passed: boolean;
-  reason?: string;
+  confidence: number; // 0-100
+  reasoning?: string;
+  issues?: Array<{
+    severity: "critical" | "major" | "minor";
+    confidence: number;
+    description: string;
+    file?: string;
+    line?: number;
+  }>;
 };
 
 export type OrchestrationAcceptanceResult = {

@@ -41,6 +41,10 @@ const OrchestrateToolSchema = Type.Object({
         title: Type.String(),
         description: Type.String(),
         acceptanceCriteria: Type.Array(Type.String()),
+        specialization: Type.String({
+          description:
+            "REQUIRED worker specialization type: 'code-explorer' (understand codebase), 'code-architect' (design architecture), 'code-implementer' (write code), 'code-reviewer' (review quality), 'researcher' (gather information), 'generic' (fallback for other tasks)",
+        }),
         dependsOn: Type.Optional(
           Type.Array(Type.String({ description: "Subtask IDs this depends on" })),
         ),
@@ -169,6 +173,18 @@ async function handleCreatePlan(params: Record<string, unknown>, _opts: Orchestr
 
   const subtasks: Subtask[] = rawSubtasks.map((raw: Record<string, unknown>, i: number) => {
     const id = `t${i + 1}`;
+
+    // Specialization is REQUIRED - orchestrator must specify it
+    const specialization = typeof raw.specialization === "string" ? raw.specialization : null;
+
+    if (!specialization) {
+      const title = typeof raw.title === "string" ? raw.title : `Task ${i + 1}`;
+      throw new Error(
+        `Subtask ${id} (${title}) missing required 'specialization' field. ` +
+          `Must be one of: code-explorer, code-architect, code-implementer, code-reviewer, researcher, generic`,
+      );
+    }
+
     return createSubtask({
       id,
       title: String((raw.title as string) ?? `Task ${i + 1}`),
@@ -176,6 +192,13 @@ async function handleCreatePlan(params: Record<string, unknown>, _opts: Orchestr
       acceptanceCriteria: Array.isArray(raw.acceptanceCriteria)
         ? raw.acceptanceCriteria.map(String)
         : [],
+      specialization: specialization as
+        | "code-explorer"
+        | "code-architect"
+        | "code-implementer"
+        | "code-reviewer"
+        | "researcher"
+        | "generic",
       dependsOn: Array.isArray(raw.dependsOn) ? raw.dependsOn.map(String) : undefined,
     });
   });
@@ -188,6 +211,13 @@ async function handleCreatePlan(params: Record<string, unknown>, _opts: Orchestr
   await broadcastOrchestrationEvent({
     type: "orchestration.updated",
     payload: buildOrchestrationSnapshot(orch),
+  });
+
+  // Trigger orchestration:plan-created hook
+  const { triggerOrchestrationHook } = await import("./hooks.js");
+  await triggerOrchestrationHook("orchestration:plan-created", {
+    orchestrationId: orch.id,
+    orchestration: orch,
   });
 
   return jsonResult({
@@ -300,6 +330,7 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
           title: `Fix: ${failedDep.title}`,
           description: `Fix failed task: ${failedDep.title}\n\nOriginal error: ${failedDep.error ?? "Unknown error"}\n\nOriginal task description:\n${failedDep.description}`,
           acceptanceCriteria: failedDep.acceptanceCriteria,
+          specialization: failedDep.specialization || "code-implementer", // Inherit or default to implementer
           status: "pending",
           dependsOn: failedDep.dependsOn, // Inherit dependencies from original task
           retryCount: 0,
@@ -435,6 +466,13 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
     payload: buildOrchestrationSnapshot(orch),
   });
 
+  // Trigger acceptance:started hook
+  const { triggerOrchestrationHook } = await import("./hooks.js");
+  await triggerOrchestrationHook("acceptance:started", {
+    orchestrationId: orchId,
+    orchestration: orch,
+  });
+
   const { runAcceptanceTests } = await import("./acceptance.js");
   const result = await runAcceptanceTests({
     orchestration: orch,
@@ -446,13 +484,45 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
 
   orch.acceptanceResults.push(result);
 
-  if (result.passed) {
+  // Confidence-based filtering (inspired by Claude Code)
+  // Only consider issues with confidence >= 70 as real failures
+  const CONFIDENCE_THRESHOLD = 70;
+  const highConfidenceFailures = result.verdicts.filter(
+    (v) => !v.passed && v.confidence >= CONFIDENCE_THRESHOLD,
+  );
+  const lowConfidenceFailures = result.verdicts.filter(
+    (v) => !v.passed && v.confidence < CONFIDENCE_THRESHOLD,
+  );
+
+  // Log low-confidence issues for visibility but don't block completion
+  if (lowConfidenceFailures.length > 0) {
+    logger.info("Low-confidence issues detected (not blocking completion)", {
+      orchId,
+      count: lowConfidenceFailures.length,
+      issues: lowConfidenceFailures.map((v) => ({
+        subtaskId: v.subtaskId,
+        confidence: v.confidence,
+        reasoning: v.reasoning?.slice(0, 200),
+      })),
+    });
+  }
+
+  // Only fail if there are high-confidence issues
+  const effectivelyPassed = highConfidenceFailures.length === 0;
+
+  if (effectivelyPassed) {
     orch.status = "completed";
     orch.completedAtMs = Date.now();
   } else {
     if (orch.currentFixCycle >= orch.maxFixCycles) {
       orch.status = "failed";
       orch.error = `Acceptance failed after ${orch.maxFixCycles} fix cycles`;
+
+      // Trigger orchestration:failed hook
+      await triggerOrchestrationHook("orchestration:failed", {
+        orchestrationId: orchId,
+        orchestration: orch,
+      });
     } else {
       orch.status = "fixing";
     }
@@ -466,22 +536,33 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
     payload: buildOrchestrationSnapshot(orch),
   });
 
+  // Trigger acceptance:completed hook
+  await triggerOrchestrationHook("acceptance:completed", {
+    orchestrationId: orchId,
+    orchestration: orch,
+    acceptance: result,
+  });
+
   return jsonResult({
     orchestrationId: orchId,
     status: orch.status,
-    passed: result.passed,
+    passed: effectivelyPassed,
     passedCount: result.verdicts.filter((v) => v.passed).length,
-    failedCount: result.verdicts.filter((v) => !v.passed).length,
+    failedCount: highConfidenceFailures.length,
+    lowConfidenceFailures: lowConfidenceFailures.length,
     currentFixCycle: orch.currentFixCycle,
     maxFixCycles: orch.maxFixCycles,
     currentVerifyCmd: orch.plan.verifyCmd,
+    confidenceThreshold: CONFIDENCE_THRESHOLD,
     // Minimal response to reduce context accumulation
     // Use check-status if you need detailed verdict information
-    message: result.passed
-      ? "All acceptance tests passed. Call complete to copy results to output directory."
+    message: effectivelyPassed
+      ? lowConfidenceFailures.length > 0
+        ? `All high-confidence tests passed (${lowConfidenceFailures.length} low-confidence issues ignored). Call complete to copy results to output directory.`
+        : "All acceptance tests passed. Call complete to copy results to output directory."
       : orch.status === "failed"
         ? `Acceptance failed after ${orch.maxFixCycles} fix cycles. Orchestration marked as failed.`
-        : `Acceptance failed: ${result.verdicts.filter((v) => !v.passed).length} tasks need fixes. If verifyCmd is incorrect, you can correct it by calling run-acceptance with verifyCmd parameter. Otherwise, call create-fix-tasks to fix code issues.`,
+        : `Acceptance failed: ${highConfidenceFailures.length} high-confidence issues need fixes (${lowConfidenceFailures.length} low-confidence issues ignored). If verifyCmd is incorrect, you can correct it by calling run-acceptance with verifyCmd parameter. Otherwise, call create-fix-tasks to fix code issues.`,
   });
 }
 
@@ -519,6 +600,7 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
       title: `Fix: ${sourceTask?.title || fix.sourceSubtaskId}`,
       description: fix.description,
       acceptanceCriteria: sourceTask?.acceptanceCriteria || [],
+      specialization: sourceTask?.specialization || "code-implementer", // Inherit from source or default to implementer for fixes
       status: "pending" as const,
       retryCount: 0,
       createdAtMs: Date.now(),
@@ -649,6 +731,13 @@ async function handleComplete(params: Record<string, unknown>) {
       summary ?? `Orchestration completed. ${orch.plan?.subtasks.length ?? 0} subtasks executed.`,
   });
 
+  // Trigger orchestration:completed hook
+  const { triggerOrchestrationHook } = await import("./hooks.js");
+  await triggerOrchestrationHook("orchestration:completed", {
+    orchestrationId: orch.id,
+    orchestration: orch,
+  });
+
   if (copyResult.copied) {
     await cleanupMissionWorkspace(orch.sourceWorkspaceDir, orchId);
   }
@@ -703,6 +792,13 @@ async function handleAbort(params: Record<string, unknown>) {
     type: "orchestration.failed",
     orchestrationId: orchId,
     error: "Aborted by user",
+  });
+
+  // Trigger orchestration:failed hook
+  const { triggerOrchestrationHook } = await import("./hooks.js");
+  await triggerOrchestrationHook("orchestration:failed", {
+    orchestrationId: orchId,
+    orchestration: orch,
   });
 
   // Clean up mission workspace — no point keeping it after abort

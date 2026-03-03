@@ -89,6 +89,13 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     userPrompt: orch.userPrompt,
   });
 
+  // Trigger orchestration:started hook
+  const { triggerOrchestrationHook } = await import("./hooks.js");
+  await triggerOrchestrationHook("orchestration:started", {
+    orchestrationId: orch.id,
+    orchestration: orch,
+  });
+
   // Create shared memory for orchestrator + workers
   logger.info("Creating shared memory", { orchId });
   const memoryContext = await initOrchestrationMemory({

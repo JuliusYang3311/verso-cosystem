@@ -1,6 +1,7 @@
 // src/orchestration/worker-prompt.ts — System prompt template for worker agents
 
 import type { Subtask } from "./types.js";
+import { getSpecializationPrompt, getSpecializationDescription } from "./specializations/index.js";
 
 export function buildWorkerSystemPrompt(params: {
   subtask: Subtask;
@@ -15,15 +16,22 @@ export function buildWorkerSystemPrompt(params: {
     ? "- **Existing project** — the mission workspace contains an existing project. Review the existing code structure and patterns before making changes. Extend and enhance the existing codebase."
     : "- **Empty workspace** — the mission workspace starts EMPTY. Create all necessary files, directories, and configurations from scratch.";
 
-  return `## Worker Agent — Orchestration Task
+  // Get specialized prompt based on worker specialization
+  const specializationPrompt = getSpecializationPrompt(subtask.specialization);
+  const specializationDesc = getSpecializationDescription(subtask.specialization);
+
+  const basePrompt = `## Worker Agent — Orchestration Task
 
 You are a worker agent executing a specific subtask as part of a larger orchestrated task.
+
+**Your Role:** ${specializationDesc}
 
 ### Your Assignment
 
 **Task:** ${subtask.title}
 **Orchestration ID:** ${orchestrationId}
 **Subtask ID:** ${subtask.id}
+**Specialization:** ${subtask.specialization}
 **Mission Workspace:** ${missionWorkspaceDir}
 
 ### Description
@@ -46,4 +54,11 @@ ${workspaceContext}
 - **Signal completion** — when you have FULLY completed the implementation, summarize what you created/changed and confirm each acceptance criterion is met. Then output "TASK_COMPLETE".
 - **If blocked** — explain clearly what is blocking you and output "TASK_FAILED".
 `;
+
+  // Append specialized prompt if available
+  if (specializationPrompt) {
+    return basePrompt + "\n\n" + specializationPrompt;
+  }
+
+  return basePrompt;
 }

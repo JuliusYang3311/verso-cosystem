@@ -47,7 +47,8 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
       verdicts.push({
         subtaskId: "overall",
         passed: false,
-        reason: `Verify command failed:\n${verifyOutput.slice(0, 500)}`,
+        confidence: 100, // High confidence that verify command failure is real
+        reasoning: `Verify command failed:\n${verifyOutput.slice(0, 500)}`,
       });
       return {
         passed: false,
@@ -105,13 +106,30 @@ EVALUATION INSTRUCTIONS:
    - Focus on whether the user's goal was achieved
    - Consider the project as a complete deliverable
 
+5. **Provide confidence scores** (inspired by Claude Code's confidence-based filtering):
+   - For each issue found, assign a confidence score (0-100)
+   - 90-100: Absolutely certain (will definitely fail/break)
+   - 75-89: Highly confident (very likely to cause problems)
+   - 50-74: Moderately confident (likely an issue but some uncertainty)
+   - 25-49: Somewhat confident (might be an issue, context-dependent)
+   - 0-24: Not confident (likely false positive, subjective)
+
 Examine the workspace at ${workspaceDir} to verify the overall project quality.
 
 Respond with a JSON object:
 {
   "passed": true/false,
-  "reason": "brief explanation of why the project passes or fails overall",
-  "issues": ["list of critical issues if any, empty array if none"]
+  "confidence": 0-100 (how confident you are in this verdict),
+  "reasoning": "detailed explanation of why the project passes or fails",
+  "issues": [
+    {
+      "severity": "critical" | "major" | "minor",
+      "confidence": 0-100,
+      "description": "what the issue is",
+      "file": "path/to/file.ts (optional)",
+      "line": 42 (optional)
+    }
+  ]
 }`;
 
   try {
@@ -210,15 +228,37 @@ Respond with a JSON object:
           try {
             const parsed = JSON.parse(jsonMatch[0]) as {
               passed?: boolean;
-              reason?: string;
-              issues?: string[];
+              confidence?: number;
+              reasoning?: string;
+              issues?: Array<{
+                severity?: string;
+                confidence?: number;
+                description?: string;
+                file?: string;
+                line?: number;
+              }>;
             };
+
+            const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 100;
+            const issues =
+              Array.isArray(parsed.issues) && parsed.issues.length > 0
+                ? parsed.issues.map((issue) => ({
+                    severity: (issue.severity as "critical" | "major" | "minor") ?? "major",
+                    confidence: typeof issue.confidence === "number" ? issue.confidence : 100,
+                    description: issue.description ?? "Unknown issue",
+                    file: issue.file,
+                    line: issue.line,
+                  }))
+                : undefined;
+
             verdicts.push({
               subtaskId: "overall",
               passed: parsed.passed === true,
-              reason:
-                parsed.reason ??
+              confidence,
+              reasoning:
+                parsed.reasoning ??
                 (parsed.passed ? "Project meets requirements" : "Project incomplete"),
+              issues,
             });
           } catch {
             // JSON parse failed, fall through to fallback
@@ -227,7 +267,8 @@ Respond with a JSON object:
             verdicts.push({
               subtaskId: "overall",
               passed,
-              reason: evalResult.slice(0, 500),
+              confidence: 50, // Low confidence for fallback parsing
+              reasoning: evalResult.slice(0, 500),
             });
           }
         } else {
@@ -237,14 +278,16 @@ Respond with a JSON object:
           verdicts.push({
             subtaskId: "overall",
             passed,
-            reason: evalResult.slice(0, 500),
+            confidence: 50, // Low confidence for fallback parsing
+            reasoning: evalResult.slice(0, 500),
           });
         }
       } else {
         verdicts.push({
           subtaskId: "overall",
           passed: false,
-          reason: "Evaluation agent returned no result",
+          confidence: 100, // High confidence that no result = failure
+          reasoning: "Evaluation agent returned no result",
         });
       }
     } finally {
@@ -264,7 +307,8 @@ Respond with a JSON object:
     verdicts.push({
       subtaskId: "overall",
       passed: false,
-      reason: `Evaluation failed: ${String(err)}`,
+      confidence: 100, // High confidence that exception = failure
+      reasoning: `Evaluation failed: ${String(err)}`,
     });
   }
 
