@@ -207,9 +207,48 @@ IMPORTANT:
 
 Start now by calling orchestrate with action "create-plan" and orchestrationId "${orchId}".`;
 
-    // Run orchestrator agent
+    // Run orchestrator agent with abort monitoring
     logger.info("Running orchestrator agent", { orchId });
-    await session.prompt(orchestratorMessage);
+
+    // Set up periodic abort check
+    let abortCheckInterval: NodeJS.Timeout | null = null;
+    let shouldAbort = false;
+
+    try {
+      // Check for abort every 5 seconds
+      abortCheckInterval = setInterval(async () => {
+        const currentOrch = await loadOrchestration(orchId);
+        if (currentOrch?.status === "failed" && currentOrch.error === "Aborted by user") {
+          logger.info("Abort detected during execution", { orchId });
+          shouldAbort = true;
+          // Dispose session to stop agent execution
+          if (session) {
+            try {
+              await session.dispose();
+              logger.info("Session disposed due to abort", { orchId });
+            } catch (disposeErr) {
+              logger.warn("Error disposing session during abort", {
+                orchId,
+                error: String(disposeErr),
+              });
+            }
+          }
+        }
+      }, 5000);
+
+      await session.prompt(orchestratorMessage);
+    } finally {
+      // Clean up abort check interval
+      if (abortCheckInterval) {
+        clearInterval(abortCheckInterval);
+      }
+    }
+
+    // Check if we were aborted
+    if (shouldAbort) {
+      logger.info("Orchestration was aborted by user", { orchId });
+      return;
+    }
 
     // After agent completes, check if orchestration was aborted
     const finalOrch = await loadOrchestration(orchId);
