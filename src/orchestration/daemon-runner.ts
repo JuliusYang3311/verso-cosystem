@@ -197,9 +197,17 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     }
 
     // Build orchestrator prompt
+    const workspaceMode = orch.baseProjectDir
+      ? `\n\nWORKSPACE MODE: ENHANCE EXISTING PROJECT
+The workspace contains an existing project copied from: ${orch.baseProjectDir}
+IMPORTANT: Before creating your plan, you MUST explore the existing codebase to understand its structure, patterns, and architecture. Use file reading tools to review key files. Then plan enhancements that build upon the existing code.`
+      : `\n\nWORKSPACE MODE: BUILD FROM SCRATCH
+The workspace is empty. You will build the project from scratch.`;
+
     const orchestratorMessage = `${buildOrchestratorSystemPrompt()}
 
 ORCHESTRATION ID: ${orchId}
+${workspaceMode}
 
 TASK:
 ${orch.userPrompt}

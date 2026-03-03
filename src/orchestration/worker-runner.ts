@@ -132,6 +132,7 @@ async function runWorkerTask(params: {
   missionWorkspaceDir: string; // This is now the shared sandbox directory
   memoryDir?: string;
   timeoutMs?: number;
+  hasExistingProject?: boolean;
   // Shared resources to avoid repeated resolution
   sharedResources?: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,6 +151,7 @@ async function runWorkerTask(params: {
     memoryDir,
     timeoutMs = DEFAULT_WORKER_TIMEOUT_MS,
     sharedResources,
+    hasExistingProject,
   } = params;
   const t0 = Date.now();
 
@@ -254,6 +256,7 @@ async function runWorkerTask(params: {
       subtask,
       orchestrationId,
       missionWorkspaceDir,
+      hasExistingProject,
     });
 
     const prompt = [
@@ -462,6 +465,7 @@ export async function runWorkerPool(params: {
           missionWorkspaceDir: path.join(orch.workspaceDir, "sandbox"), // Use sandbox directory
           memoryDir,
           timeoutMs,
+          hasExistingProject: !!orch.baseProjectDir,
           sharedResources: { model, authStorage, modelRegistry, agentDir },
         });
 
