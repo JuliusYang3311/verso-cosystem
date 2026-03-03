@@ -68,13 +68,12 @@ function resolveCacheRetention(
 
 /**
  * Resolve thinking config from extraParams for Anthropic models.
- * Supports adaptive thinking and extended thinking (legacy).
+ * Supports adaptive thinking and manual extended thinking.
  *
  * Examples:
  * - { thinking: { type: "adaptive" } }
  * - { thinking: { type: "enabled", budget_tokens: 10000 } }
  * - { thinking: "adaptive" } (shorthand)
- * - { extended_thinking: 10000 } (legacy shorthand, converted to thinking)
  */
 function resolveThinking(
   extraParams: Record<string, unknown> | undefined,
@@ -86,45 +85,23 @@ function resolveThinking(
   }
 
   const thinkingVal = extraParams?.thinking;
-  const extendedThinkingVal = extraParams?.extended_thinking;
-
-  // Prefer new thinking parameter
-  if (thinkingVal) {
-    // Shorthand: "adaptive"
-    if (thinkingVal === "adaptive") {
-      return { type: "adaptive" };
-    }
-
-    // Full object format
-    if (typeof thinkingVal === "object" && thinkingVal !== null) {
-      const obj = thinkingVal as { type?: unknown; budget_tokens?: unknown };
-      if (obj.type === "adaptive") {
-        return { type: "adaptive" };
-      }
-      if (obj.type === "enabled" && typeof obj.budget_tokens === "number") {
-        return { type: "enabled", budget_tokens: obj.budget_tokens };
-      }
-    }
+  if (!thinkingVal) {
+    return undefined;
   }
 
-  // Legacy extended_thinking support (convert to thinking format)
-  if (extendedThinkingVal) {
-    // Shorthand: just a number
-    if (typeof extendedThinkingVal === "number" && extendedThinkingVal > 0) {
-      return { type: "enabled", budget_tokens: extendedThinkingVal };
-    }
+  // Shorthand: "adaptive"
+  if (thinkingVal === "adaptive") {
+    return { type: "adaptive" };
+  }
 
-    // Full object format
-    if (
-      typeof extendedThinkingVal === "object" &&
-      extendedThinkingVal !== null &&
-      (extendedThinkingVal as { type?: unknown }).type === "enabled" &&
-      typeof (extendedThinkingVal as { budget_tokens?: unknown }).budget_tokens === "number"
-    ) {
-      return {
-        type: "enabled",
-        budget_tokens: (extendedThinkingVal as { budget_tokens: number }).budget_tokens,
-      };
+  // Full object format
+  if (typeof thinkingVal === "object" && thinkingVal !== null) {
+    const obj = thinkingVal as { type?: unknown; budget_tokens?: unknown };
+    if (obj.type === "adaptive") {
+      return { type: "adaptive" };
+    }
+    if (obj.type === "enabled" && typeof obj.budget_tokens === "number") {
+      return { type: "enabled", budget_tokens: obj.budget_tokens };
     }
   }
 
@@ -162,8 +139,7 @@ function createStreamFnWithExtraParams(
   if (
     provider === "anthropic" &&
     isClaude46Model(modelId) &&
-    (!extraParams ||
-      (extraParams.thinking === undefined && extraParams.extended_thinking === undefined))
+    (!extraParams || extraParams.thinking === undefined)
   ) {
     // Opus 4.6: use adaptive thinking (recommended)
     // Sonnet 4.6: use adaptive thinking (recommended, also supports manual mode)
