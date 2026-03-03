@@ -3,7 +3,7 @@ import type { VersoConfig, ReplyToMode, TelegramAccountConfig } from "../config/
 import type { RuntimeEnv } from "../runtime.js";
 import type { TelegramMessageContext } from "./bot-message-context.js";
 import type { TelegramBotOptions } from "./bot.js";
-import type { TelegramStreamMode, TelegramContext } from "./bot/types.js";
+import type { TelegramStreamMode } from "./bot/types.js";
 import { resolveAgentDir } from "../agents/agent-scope.js";
 import {
   findModelInCatalog,
@@ -42,8 +42,6 @@ async function resolveStickerVisionSupport(cfg: VersoConfig, agentId: string) {
   }
 }
 
-type ResolveBotTopicsEnabled = (ctx: TelegramContext) => boolean | Promise<boolean>;
-
 type DispatchTelegramMessageParams = {
   context: TelegramMessageContext;
   bot: Bot;
@@ -54,7 +52,6 @@ type DispatchTelegramMessageParams = {
   textLimit: number;
   telegramCfg: TelegramAccountConfig;
   opts: Pick<TelegramBotOptions, "token">;
-  resolveBotTopicsEnabled: ResolveBotTopicsEnabled;
 };
 
 export const dispatchTelegramMessage = async ({
@@ -67,11 +64,9 @@ export const dispatchTelegramMessage = async ({
   textLimit,
   telegramCfg,
   opts,
-  resolveBotTopicsEnabled,
 }: DispatchTelegramMessageParams) => {
   const {
     ctxPayload,
-    primaryCtx,
     msg,
     chatId,
     isGroup,
@@ -89,13 +84,10 @@ export const dispatchTelegramMessage = async ({
   } = context;
 
   const isPrivateChat = msg.chat.type === "private";
-  const draftThreadId = threadSpec.id;
   const draftMaxChars = Math.min(textLimit, 4096);
-  const canStreamDraft =
-    streamMode !== "off" &&
-    isPrivateChat &&
-    typeof draftThreadId === "number" &&
-    (await resolveBotTopicsEnabled(primaryCtx));
+
+  // Enable draft streaming for private chats when streamMode is configured
+  const canStreamDraft = streamMode !== "off" && isPrivateChat;
   const draftStream = canStreamDraft
     ? createTelegramDraftStream({
         api: bot.api,

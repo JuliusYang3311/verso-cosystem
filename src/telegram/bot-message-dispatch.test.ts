@@ -95,7 +95,6 @@ describe("dispatchTelegramMessage draft streaming", () => {
       resolveBotTopicsEnabled,
     });
 
-    expect(resolveBotTopicsEnabled).toHaveBeenCalledWith(context.primaryCtx);
     expect(createTelegramDraftStream).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: 123,
