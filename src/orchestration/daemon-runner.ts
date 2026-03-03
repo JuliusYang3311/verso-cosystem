@@ -329,18 +329,25 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
         if (currentOrch?.status === "failed" && currentOrch.error === "Aborted by user") {
           logger.info("Abort detected during execution", { orchId });
           shouldAbort = true;
-          // Dispose session to stop agent execution
+          // Abort session to interrupt the running prompt
           if (session) {
             try {
-              await session.dispose();
-              logger.info("Session disposed due to abort", { orchId });
+              await session.abort();
+              logger.info("Session aborted due to user abort", { orchId });
             } catch (disposeErr) {
-              logger.warn("Error disposing session during abort", {
+              logger.warn("Error aborting session during abort", {
                 orchId,
                 error: String(disposeErr),
               });
             }
           }
+          // Clear interval and exit immediately
+          if (abortCheckInterval) {
+            clearInterval(abortCheckInterval);
+          }
+          // Exit the daemon process immediately
+          logger.info("Daemon exiting due to abort", { orchId });
+          process.exit(0);
         }
       }, 5000);
 
