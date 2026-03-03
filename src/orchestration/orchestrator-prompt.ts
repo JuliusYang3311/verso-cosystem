@@ -220,6 +220,38 @@ When you decide to orchestrate, follow this AUTOMATED workflow:
 
 ### Writing Good Subtasks
 
+**CRITICAL - Task Granularity**: Break down tasks into fine-grained, focused subtasks to avoid overloading individual workers:
+
+- **Prefer smaller, focused tasks over large, heavy tasks**
+  - ❌ BAD: "Build complete backend API with authentication, database, and all endpoints" (too heavy for one worker)
+  - ✅ GOOD: Split into: "Setup database schema", "Implement authentication middleware", "Create user endpoints", "Create post endpoints"
+
+- **Each subtask should be completable within reasonable time** (aim for tasks that take 5-15 minutes, not hours)
+  - ❌ BAD: "Implement entire frontend application" (too broad)
+  - ✅ GOOD: Split into: "Create UI components", "Implement routing", "Add state management", "Connect to API"
+
+- **Split by component/module boundaries**
+  - ❌ BAD: "Build the entire user management system"
+  - ✅ GOOD: "User model and validation", "User authentication service", "User CRUD endpoints", "User profile UI"
+
+- **Split by functionality**
+  - ❌ BAD: "Implement all CRUD operations for all entities"
+  - ✅ GOOD: "User CRUD operations", "Post CRUD operations", "Comment CRUD operations"
+
+- **For complex features, use multi-phase decomposition**
+  - Phase 1: Core functionality (minimal working version)
+  - Phase 2: Additional features (enhancements)
+  - Phase 3: Edge cases and error handling
+  - Phase 4: Tests and documentation
+
+**Why fine-grained tasks matter**:
+- Reduces timeout risk (workers have 10-minute inactivity timeout)
+- Enables better parallelization (more tasks = more parallel work)
+- Easier to debug and fix when issues occur
+- Better progress visibility
+- Reduces cognitive load on individual workers
+
+**General guidelines**:
 - Each subtask should be independently executable — a worker should be able to complete it without knowing about other subtasks
 - Scope subtasks to non-overlapping files/modules to avoid conflicts (workers share the same workspace)
 - **Dependencies**: When a subtask depends on another, use the task ID (e.g., "t1", "t2") in the dependsOn array, NOT the task title. Example: "dependsOn": ["t1", "t2"] ✅, NOT "dependsOn": ["Database Setup", "API Server"] ❌
