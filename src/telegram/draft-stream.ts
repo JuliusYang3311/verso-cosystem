@@ -20,8 +20,13 @@ type TelegramSendMessageDraft = (
 export type TelegramDraftStream = {
   update: (text: string) => void;
   flush: () => Promise<void>;
-  stop: () => void;
   messageId?: () => number | undefined;
+  previewMode?: () => "message" | "draft";
+  previewRevision?: () => number;
+  clear?: () => Promise<void>;
+  stop: () => Promise<void>;
+  /** Reset internal state so the next update creates a new message instead of editing. */
+  forceNewMessage?: () => void;
 };
 
 function resolveSendMessageDraftApi(api: Bot["api"]): TelegramSendMessageDraft | undefined {
@@ -71,6 +76,8 @@ export function createTelegramDraftStream(params: {
   const draftApi = resolveSendMessageDraftApi(params.api);
   let useMessageFallback = !draftApi;
   let streamMessageId: number | undefined;
+  let previewMode: "message" | "draft" = useMessageFallback ? "message" : "draft";
+  let previewRevision = 0;
 
   if (!draftApi) {
     params.warn?.(
@@ -110,20 +117,24 @@ export function createTelegramDraftStream(params: {
         // Fallback to sendMessage/editMessageText
         if (typeof streamMessageId === "number") {
           await params.api.editMessageText(chatId, streamMessageId, trimmed);
+          previewRevision += 1;
         } else {
           const sent = await params.api.sendMessage(chatId, trimmed, threadParams);
           const sentMessageId = sent?.message_id;
           if (typeof sentMessageId === "number" && Number.isFinite(sentMessageId)) {
             streamMessageId = Math.trunc(sentMessageId);
+            previewRevision += 1;
           }
         }
       } else {
         await draftApi!(chatId, draftId, trimmed, threadParams);
+        previewRevision += 1;
       }
     } catch (err) {
       // Check if we should fallback from draft to message transport
       if (!useMessageFallback && shouldFallbackFromDraftTransport(err)) {
         useMessageFallback = true;
+        previewMode = "message";
         params.warn?.(
           "telegram draft stream: sendMessageDraft rejected by API; falling back to sendMessage/editMessageText",
         );
@@ -133,6 +144,7 @@ export function createTelegramDraftStream(params: {
           const sentMessageId = sent?.message_id;
           if (typeof sentMessageId === "number" && Number.isFinite(sentMessageId)) {
             streamMessageId = Math.trunc(sentMessageId);
+            previewRevision += 1;
           }
           return;
         } catch (fallbackErr) {
@@ -208,13 +220,39 @@ export function createTelegramDraftStream(params: {
     schedule();
   };
 
-  const stop = () => {
+  const stop = async () => {
     stopped = true;
     pendingText = "";
     if (timer) {
       clearTimeout(timer);
       timer = undefined;
     }
+  };
+
+  const clear = async () => {
+    stopped = true;
+    pendingText = "";
+    if (timer) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    if (typeof streamMessageId === "number") {
+      try {
+        await params.api.deleteMessage(chatId, streamMessageId);
+        params.log?.(`telegram draft stream cleared (message ${streamMessageId} deleted)`);
+      } catch (err) {
+        params.warn?.(
+          `telegram draft stream clear failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      streamMessageId = undefined;
+    }
+  };
+
+  const forceNewMessage = () => {
+    streamMessageId = undefined;
+    lastSentText = "";
+    pendingText = "";
   };
 
   params.log?.(
@@ -226,5 +264,9 @@ export function createTelegramDraftStream(params: {
     flush,
     stop,
     messageId: () => streamMessageId,
+    previewMode: () => previewMode,
+    previewRevision: () => previewRevision,
+    clear,
+    forceNewMessage,
   };
 }

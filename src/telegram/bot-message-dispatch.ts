@@ -253,7 +253,7 @@ export const dispatchTelegramMessage = async ({
       deliver: async (payload, info) => {
         if (info.kind === "final") {
           await flushDraft();
-          draftStream?.stop();
+          await draftStream?.stop();
         }
         const result = await deliverReplies({
           replies: [payload],
@@ -301,7 +301,7 @@ export const dispatchTelegramMessage = async ({
       onModelSelected,
     },
   });
-  draftStream?.stop();
+  await draftStream?.stop();
   let sentFallback = false;
   if (!deliveryState.delivered && deliveryState.skippedNonSilent > 0) {
     const result = await deliverReplies({
