@@ -57,6 +57,11 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
   const { createSubsystemLogger } = await import("../logging/subsystem.js");
   const logger = createSubsystemLogger("orchestration-events");
 
+  logger.info("Broadcasting orchestration event", {
+    type: event.type,
+    orchestrationId: "orchestrationId" in event ? event.orchestrationId : undefined,
+  });
+
   try {
     // Broadcast event via gateway
     const { callGateway } = await import("../gateway/call.js");
@@ -69,7 +74,7 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
       timeoutMs: 5000,
     });
 
-    logger.info("Broadcasted orchestration event", {
+    logger.info("Successfully broadcasted orchestration event via gateway", {
       type: event.type,
     });
 
@@ -77,6 +82,8 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
     // AND process the queue to start the next orchestration
     if (event.type === "orchestration.completed" || event.type === "orchestration.failed") {
       const orchId = event.orchestrationId;
+
+      logger.info("Processing completion/failure event", { orchId, type: event.type });
 
       // Load orchestration to get the main session key
       const { loadOrchestration } = await import("./store.js");
@@ -92,6 +99,13 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
       // Otherwise, extract from orchestratorSessionKey (agent:<agentId>:orch:<orchId> → agent:<agentId>)
       const mainSessionKey =
         orch.triggeringSessionKey || orch.orchestratorSessionKey.split(":orch:")[0];
+
+      logger.info("Determined main session key", {
+        orchId,
+        mainSessionKey,
+        orchestratorSessionKey: orch.orchestratorSessionKey,
+        triggeringSessionKey: orch.triggeringSessionKey,
+      });
 
       if (!mainSessionKey) {
         logger.warn("Cannot determine main session key", {
@@ -112,6 +126,12 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
         notificationMessage = `❌ Orchestration ${orchId} failed.\n\nError: ${error}`;
       }
 
+      logger.info("Injecting notification into main session", {
+        orchId,
+        mainSessionKey,
+        messageLength: notificationMessage.length,
+      });
+
       try {
         await callGateway({
           method: "chat.inject",
@@ -123,7 +143,7 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
           timeoutMs: 5000,
         });
 
-        logger.info("Injected orchestration notification into main session", {
+        logger.info("Successfully injected orchestration notification into main session", {
           orchId,
           mainSessionKey,
           type: event.type,
@@ -131,6 +151,7 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
       } catch (err) {
         logger.error("Failed to inject orchestration notification", {
           error: String(err),
+          errorStack: err instanceof Error ? err.stack : undefined,
           orchId,
           mainSessionKey,
         });
