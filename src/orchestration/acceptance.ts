@@ -13,7 +13,7 @@ export type AcceptanceTestParams = {
 
 /**
  * Run acceptance tests: first a mechanical verify command (build/lint/test),
- * then LLM-based evaluation of each subtask's acceptance criteria.
+ * then LLM-based evaluation of the overall project against the original user task.
  */
 export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<AcceptanceResult> {
   const { orchestration, workspaceDir, verifyCmd } = params;
@@ -43,16 +43,12 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
     }
 
     if (!verifyPassed) {
-      // All subtasks fail if the verify command fails
-      for (const subtask of subtasks) {
-        if (subtask.status === "completed") {
-          verdicts.push({
-            subtaskId: subtask.id,
-            passed: false,
-            reason: `Verify command failed:\n${verifyOutput.slice(0, 500)}`,
-          });
-        }
-      }
+      // Create a single verdict for the overall project
+      verdicts.push({
+        subtaskId: "overall",
+        passed: false,
+        reason: `Verify command failed:\n${verifyOutput.slice(0, 500)}`,
+      });
       return {
         passed: false,
         verdicts,
@@ -62,7 +58,7 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
     }
   }
 
-  // Step 2: LLM-based acceptance criteria evaluation per subtask
+  // Step 2: Overall project evaluation against original user task
   // Use in-memory session for evaluation (like workers do)
   const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
   const { resolveAgentModel } = await import("./model-resolver.js");
@@ -71,214 +67,205 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
   const { model, authStorage, modelRegistry } = await resolveAgentModel();
   const agentDir = resolveOpenClawAgentDir();
 
-  for (const subtask of subtasks) {
-    // Skip cancelled subtasks (they were replaced by fix tasks)
-    if (subtask.status === "cancelled") {
-      continue;
-    }
+  // Build subtask summary for context
+  const subtaskSummary = subtasks
+    .map((s) => `- [${s.status}] ${s.title}: ${s.resultSummary?.slice(0, 200) ?? "no summary"}`)
+    .join("\n");
 
-    // Skip pending subtasks (they haven't been executed yet, will be handled in next dispatch)
-    if (subtask.status === "pending") {
-      continue;
-    }
+  const evalPrompt = `You are an acceptance test evaluator. Evaluate whether the overall project satisfies the original user task.
 
-    // Skip running subtasks (they are still executing)
-    if (subtask.status === "running") {
-      continue;
-    }
+ORIGINAL USER TASK:
+${orchestration.userPrompt}
 
-    // For failed subtasks, mark as failed
-    if (subtask.status === "failed") {
-      verdicts.push({
-        subtaskId: subtask.id,
-        passed: false,
-        reason: `Subtask failed during execution`,
-      });
-      continue;
-    }
+PROJECT PLAN SUMMARY:
+${orchestration.plan?.summary ?? "No plan summary"}
 
-    // For completed subtasks, evaluate acceptance criteria
+SUBTASKS EXECUTED:
+${subtaskSummary}
 
-    const criteriaText = subtask.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
+EVALUATION INSTRUCTIONS:
 
-    const evalPrompt = `You are an acceptance test evaluator. Evaluate whether the following subtask's acceptance criteria have been met.
+1. **Evaluate the OVERALL project**, not individual subtasks:
+   - Does the final deliverable satisfy the user's original request?
+   - Is the project complete and functional as a whole?
+   - Can the user actually use what was built?
 
-Subtask: ${subtask.title}
-Description: ${subtask.description}
+2. **Check for completeness**:
+   - Are all major components present and working together?
+   - Is the project ready to use/deploy?
+   - Are there any critical missing pieces?
 
-Acceptance Criteria:
-${criteriaText}
+3. **Verify actual functionality**:
+   - For applications: Can they actually run? Are dependencies installed?
+   - For documentation/reports: Is the content complete and coherent?
+   - For tools: Do they work as intended?
 
-Worker's result summary:
-${subtask.resultSummary ?? "(no summary available)"}
+4. **Be holistic, not pedantic**:
+   - Minor issues in individual subtasks are OK if the overall project works
+   - Focus on whether the user's goal was achieved
+   - Consider the project as a complete deliverable
 
-IMPORTANT EVALUATION GUIDELINES:
-
-1. **Verify actual execution, not just file existence**:
-   - If criteria mentions "dependencies installed", check that node_modules directory exists and contains the packages
-   - If criteria mentions "script works", verify the script can actually run (check for syntax errors, missing dependencies)
-   - If criteria mentions "tests pass", verify test files exist AND are executable
-
-2. **Check for common issues**:
-   - For Node.js projects: verify node_modules exists if dependencies are required
-   - For Python projects: verify virtual environment or installed packages
-   - For configuration files: verify they are valid (not just that they exist)
-
-3. **Be strict but fair**:
-   - If a criterion says "X is installed", check that X is actually installed, not just listed in a config file
-   - If a criterion says "Y works", verify Y can actually execute
-   - If files are missing or incomplete, mark as FAIL
-
-Examine the workspace at ${workspaceDir} to verify the criteria. For each criterion, state PASS or FAIL with a brief reason.
+Examine the workspace at ${workspaceDir} to verify the overall project quality.
 
 Respond with a JSON object:
 {
-  "allPassed": true/false,
-  "reason": "brief overall summary"
+  "passed": true/false,
+  "reason": "brief explanation of why the project passes or fails overall",
+  "issues": ["list of critical issues if any, empty array if none"]
 }`;
 
+  try {
+    // Save original memory env vars (acceptance agent should use shared memory)
+    const originalMemoryDir = process.env.MEMORY_DIR;
+    const originalVersoMemoryDir = process.env.VERSO_MEMORY_DIR;
+
+    // Get shared memory directory from orchestration
+    const { getOrchestrationMemoryEnv } = await import("./orchestrator-memory.js");
+    const { resolveMissionWorkspace } = await import("./store.js");
+    const missionDir = resolveMissionWorkspace(params.workspaceDir, params.agentId);
+    const memoryDir = `${missionDir}/memory`;
+    const memoryEnv = getOrchestrationMemoryEnv(memoryDir);
+
+    // Set memory env vars for acceptance agent (same as orchestrator and workers)
+    process.env.MEMORY_DIR = memoryEnv.MEMORY_DIR;
+    process.env.VERSO_MEMORY_DIR = memoryEnv.VERSO_MEMORY_DIR;
+
     try {
-      // Save original memory env vars (acceptance agent should use shared memory)
-      const originalMemoryDir = process.env.MEMORY_DIR;
-      const originalVersoMemoryDir = process.env.VERSO_MEMORY_DIR;
+      // Create web search and web fetch tools for acceptance agent (same as orchestrator)
+      const { createWebSearchTool } = await import("../agents/tools/web-search.js");
+      const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
+      const { loadConfig } = await import("../config/config.js");
+      const config = loadConfig();
+      const webSearchTool = createWebSearchTool({ config, sandboxed: false });
+      const webFetchTool = createWebFetchTool({ config, sandboxed: false });
 
-      // Get shared memory directory from orchestration
-      const { getOrchestrationMemoryEnv } = await import("./orchestrator-memory.js");
-      const { resolveMissionWorkspace } = await import("./store.js");
-      const missionDir = resolveMissionWorkspace(params.workspaceDir, params.agentId);
-      const memoryDir = `${missionDir}/memory`;
-      const memoryEnv = getOrchestrationMemoryEnv(memoryDir);
+      // Create Google Workspace tools for acceptance agent (if enabled, same as orchestrator)
+      const gworkspaceTools = [];
+      if (config.google?.enabled) {
+        const {
+          sheetsCreateSpreadsheet,
+          sheetsAppendValues,
+          docsCreateDocument,
+          driveListFiles,
+          driveUploadFile,
+          driveDownloadFile,
+          slidesCreatePresentation,
+        } = await import("../agents/tools/gworkspace-tools.js");
 
-      // Set memory env vars for acceptance agent (same as orchestrator and workers)
-      process.env.MEMORY_DIR = memoryEnv.MEMORY_DIR;
-      process.env.VERSO_MEMORY_DIR = memoryEnv.VERSO_MEMORY_DIR;
-
-      try {
-        // Create web search and web fetch tools for acceptance agent (same as orchestrator)
-        const { createWebSearchTool } = await import("../agents/tools/web-search.js");
-        const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
-        const { loadConfig } = await import("../config/config.js");
-        const config = loadConfig();
-        const webSearchTool = createWebSearchTool({ config, sandboxed: false });
-        const webFetchTool = createWebFetchTool({ config, sandboxed: false });
-
-        // Create Google Workspace tools for acceptance agent (if enabled, same as orchestrator)
-        const gworkspaceTools = [];
-        if (config.google?.enabled) {
-          const {
-            sheetsCreateSpreadsheet,
-            sheetsAppendValues,
-            docsCreateDocument,
-            driveListFiles,
-            driveUploadFile,
-            driveDownloadFile,
-            slidesCreatePresentation,
-          } = await import("../agents/tools/gworkspace-tools.js");
-
-          const services = config.google.services || ["sheets", "docs", "drive", "slides"];
-          if (services.includes("sheets")) {
-            gworkspaceTools.push(sheetsCreateSpreadsheet, sheetsAppendValues);
-          }
-          if (services.includes("docs")) {
-            gworkspaceTools.push(docsCreateDocument);
-          }
-          if (services.includes("drive")) {
-            gworkspaceTools.push(driveListFiles, driveUploadFile, driveDownloadFile);
-          }
-          if (services.includes("slides")) {
-            gworkspaceTools.push(slidesCreatePresentation);
-          }
+        const services = config.google.services || ["sheets", "docs", "drive", "slides"];
+        if (services.includes("sheets")) {
+          gworkspaceTools.push(sheetsCreateSpreadsheet, sheetsAppendValues);
         }
+        if (services.includes("docs")) {
+          gworkspaceTools.push(docsCreateDocument);
+        }
+        if (services.includes("drive")) {
+          gworkspaceTools.push(driveListFiles, driveUploadFile, driveDownloadFile);
+        }
+        if (services.includes("slides")) {
+          gworkspaceTools.push(slidesCreatePresentation);
+        }
+      }
 
-        const acceptanceTools = [
-          ...(webSearchTool ? [webSearchTool] : []),
-          ...(webFetchTool ? [webFetchTool] : []),
-          ...gworkspaceTools,
-        ];
+      const acceptanceTools = [
+        ...(webSearchTool ? [webSearchTool] : []),
+        ...(webFetchTool ? [webFetchTool] : []),
+        ...gworkspaceTools,
+      ];
 
-        // Create in-memory session for evaluation
-        const created = await createAgentSession({
-          cwd: workspaceDir,
-          agentDir,
-          authStorage,
-          modelRegistry,
-          model,
-          customTools: acceptanceTools, // Use customTools to add tools alongside coding tools
-          sessionManager: SessionManager.inMemory(workspaceDir),
-        });
+      // Create in-memory session for evaluation
+      const created = await createAgentSession({
+        cwd: workspaceDir,
+        agentDir,
+        authStorage,
+        modelRegistry,
+        model,
+        customTools: acceptanceTools, // Use customTools to add tools alongside coding tools
+        sessionManager: SessionManager.inMemory(workspaceDir),
+      });
 
-        const session = created.session;
+      const session = created.session;
 
-        // Run evaluation
-        await session.sendUserMessage(evalPrompt);
+      // Run evaluation
+      await session.sendUserMessage(evalPrompt);
 
-        // Get response from messages
-        const messages = session.messages;
-        const lastMessage = messages[messages.length - 1];
-        const evalResult =
-          lastMessage?.role === "assistant"
-            ? lastMessage.content
-                .filter((c) => c.type === "text")
-                .map((c) => ("text" in c ? c.text : ""))
-                .join("")
-            : "";
+      // Get response from messages
+      const messages = session.messages;
+      const lastMessage = messages[messages.length - 1];
+      const evalResult =
+        lastMessage?.role === "assistant"
+          ? lastMessage.content
+              .filter((c) => c.type === "text")
+              .map((c) => ("text" in c ? c.text : ""))
+              .join("")
+          : "";
 
-        // Dispose session
-        session.dispose();
+      // Dispose session
+      session.dispose();
 
-        if (evalResult) {
-          // Try to parse JSON from the response
-          const jsonMatch = evalResult.match(/\{[\s\S]*"allPassed"[\s\S]*\}/);
-          if (jsonMatch) {
-            try {
-              const parsed = JSON.parse(jsonMatch[0]) as { allPassed?: boolean; reason?: string };
-              verdicts.push({
-                subtaskId: subtask.id,
-                passed: parsed.allPassed === true,
-                reason:
-                  parsed.reason ??
-                  (parsed.allPassed ? "All criteria met" : "Some criteria not met"),
-              });
-              continue;
-            } catch {
-              // JSON parse failed, fall through
-            }
+      if (evalResult) {
+        // Try to parse JSON from the response
+        const jsonMatch = evalResult.match(/\{[\s\S]*"passed"[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            const parsed = JSON.parse(jsonMatch[0]) as {
+              passed?: boolean;
+              reason?: string;
+              issues?: string[];
+            };
+            verdicts.push({
+              subtaskId: "overall",
+              passed: parsed.passed === true,
+              reason:
+                parsed.reason ??
+                (parsed.passed ? "Project meets requirements" : "Project incomplete"),
+            });
+          } catch {
+            // JSON parse failed, fall through to fallback
+            const lower = evalResult.toLowerCase();
+            const passed = lower.includes('"passed"') && lower.includes("true");
+            verdicts.push({
+              subtaskId: "overall",
+              passed,
+              reason: evalResult.slice(0, 500),
+            });
           }
+        } else {
           // Fallback: check for obvious pass/fail signals
           const lower = evalResult.toLowerCase();
-          const passed = lower.includes("allpassed") && lower.includes("true");
+          const passed = lower.includes("passed") && lower.includes("true");
           verdicts.push({
-            subtaskId: subtask.id,
+            subtaskId: "overall",
             passed,
             reason: evalResult.slice(0, 500),
           });
-        } else {
-          verdicts.push({
-            subtaskId: subtask.id,
-            passed: false,
-            reason: "Evaluation agent returned no result",
-          });
         }
-      } finally {
-        // Restore original memory env vars
-        if (originalMemoryDir) {
-          process.env.MEMORY_DIR = originalMemoryDir;
-        } else {
-          delete process.env.MEMORY_DIR;
-        }
-        if (originalVersoMemoryDir) {
-          process.env.VERSO_MEMORY_DIR = originalVersoMemoryDir;
-        } else {
-          delete process.env.VERSO_MEMORY_DIR;
-        }
+      } else {
+        verdicts.push({
+          subtaskId: "overall",
+          passed: false,
+          reason: "Evaluation agent returned no result",
+        });
       }
-    } catch (err) {
-      verdicts.push({
-        subtaskId: subtask.id,
-        passed: false,
-        reason: `Evaluation failed: ${String(err)}`,
-      });
+    } finally {
+      // Restore original memory env vars
+      if (originalMemoryDir) {
+        process.env.MEMORY_DIR = originalMemoryDir;
+      } else {
+        delete process.env.MEMORY_DIR;
+      }
+      if (originalVersoMemoryDir) {
+        process.env.VERSO_MEMORY_DIR = originalVersoMemoryDir;
+      } else {
+        delete process.env.VERSO_MEMORY_DIR;
+      }
     }
+  } catch (err) {
+    verdicts.push({
+      subtaskId: "overall",
+      passed: false,
+      reason: `Evaluation failed: ${String(err)}`,
+    });
   }
 
   const allPassed = verdicts.length > 0 && verdicts.every((v) => v.passed);
@@ -287,8 +274,8 @@ Respond with a JSON object:
     passed: allPassed,
     verdicts,
     summary: allPassed
-      ? `All ${verdicts.length} subtasks passed acceptance testing.`
-      : `${verdicts.filter((v) => !v.passed).length}/${verdicts.length} subtasks failed acceptance testing.`,
+      ? "Project successfully meets the original requirements."
+      : "Project does not fully meet the original requirements.",
     testedAtMs: Date.now(),
   };
 }
