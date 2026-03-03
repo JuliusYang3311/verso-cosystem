@@ -26,13 +26,10 @@ export function resolveExtraParams(params: {
 }
 
 type CacheRetention = "none" | "short" | "long";
-type ExtendedThinking = {
-  type: "enabled";
-  budget_tokens: number;
-};
+type ThinkingConfig = { type: "adaptive" } | { type: "enabled"; budget_tokens: number };
 type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
   cacheRetention?: CacheRetention;
-  extended_thinking?: ExtendedThinking;
+  thinking?: ThinkingConfig;
 };
 
 /**
@@ -70,67 +67,131 @@ function resolveCacheRetention(
 }
 
 /**
- * Resolve extended_thinking from extraParams for Anthropic models.
- * Supports both object format and shorthand budget number.
+ * Resolve thinking config from extraParams for Anthropic models.
+ * Supports adaptive thinking and extended thinking (legacy).
  *
  * Examples:
- * - { extended_thinking: { type: "enabled", budget_tokens: 10000 } }
- * - { extended_thinking: 10000 } (shorthand)
+ * - { thinking: { type: "adaptive" } }
+ * - { thinking: { type: "enabled", budget_tokens: 10000 } }
+ * - { thinking: "adaptive" } (shorthand)
+ * - { extended_thinking: 10000 } (legacy shorthand, converted to thinking)
  */
-function resolveExtendedThinking(
+function resolveThinking(
   extraParams: Record<string, unknown> | undefined,
   provider: string,
-): ExtendedThinking | undefined {
+): ThinkingConfig | undefined {
+  // Only for Anthropic API (not for other providers even if they use Claude models)
   if (provider !== "anthropic") {
     return undefined;
   }
 
-  const val = extraParams?.extended_thinking;
-  if (!val) {
-    return undefined;
+  const thinkingVal = extraParams?.thinking;
+  const extendedThinkingVal = extraParams?.extended_thinking;
+
+  // Prefer new thinking parameter
+  if (thinkingVal) {
+    // Shorthand: "adaptive"
+    if (thinkingVal === "adaptive") {
+      return { type: "adaptive" };
+    }
+
+    // Full object format
+    if (typeof thinkingVal === "object" && thinkingVal !== null) {
+      const obj = thinkingVal as { type?: unknown; budget_tokens?: unknown };
+      if (obj.type === "adaptive") {
+        return { type: "adaptive" };
+      }
+      if (obj.type === "enabled" && typeof obj.budget_tokens === "number") {
+        return { type: "enabled", budget_tokens: obj.budget_tokens };
+      }
+    }
   }
 
-  // Shorthand: just a number
-  if (typeof val === "number" && val > 0) {
-    return { type: "enabled", budget_tokens: val };
-  }
+  // Legacy extended_thinking support (convert to thinking format)
+  if (extendedThinkingVal) {
+    // Shorthand: just a number
+    if (typeof extendedThinkingVal === "number" && extendedThinkingVal > 0) {
+      return { type: "enabled", budget_tokens: extendedThinkingVal };
+    }
 
-  // Full object format
-  if (
-    typeof val === "object" &&
-    val !== null &&
-    (val as { type?: unknown }).type === "enabled" &&
-    typeof (val as { budget_tokens?: unknown }).budget_tokens === "number"
-  ) {
-    return val as ExtendedThinking;
+    // Full object format
+    if (
+      typeof extendedThinkingVal === "object" &&
+      extendedThinkingVal !== null &&
+      (extendedThinkingVal as { type?: unknown }).type === "enabled" &&
+      typeof (extendedThinkingVal as { budget_tokens?: unknown }).budget_tokens === "number"
+    ) {
+      return {
+        type: "enabled",
+        budget_tokens: (extendedThinkingVal as { budget_tokens: number }).budget_tokens,
+      };
+    }
   }
 
   return undefined;
+}
+
+/**
+ * Check if a model is Claude 4.6 series and should use adaptive thinking.
+ * Works across different providers (anthropic, newapi, openrouter, etc.)
+ */
+function isClaude46Model(modelId: string): boolean {
+  const normalized = modelId.toLowerCase().trim();
+  return (
+    normalized.includes("claude-opus-4-6") ||
+    normalized.includes("claude-sonnet-4-6") ||
+    normalized.includes("claude-haiku-4-6") ||
+    normalized.includes("claude-4-6") ||
+    normalized.includes("claude-4.6") ||
+    normalized.includes("opus-4-6") ||
+    normalized.includes("opus-4.6") ||
+    normalized.includes("sonnet-4-6") ||
+    normalized.includes("sonnet-4.6")
+  );
 }
 
 function createStreamFnWithExtraParams(
   baseStreamFn: StreamFn | undefined,
   extraParams: Record<string, unknown> | undefined,
   provider: string,
+  modelId: string,
 ): StreamFn | undefined {
-  if (!extraParams || Object.keys(extraParams).length === 0) {
+  // Auto-enable adaptive thinking for Claude 4.6 models if not explicitly configured
+  // Only for Anthropic provider (not for proxies like newapi, openrouter, etc.)
+  let effectiveParams = extraParams;
+  if (
+    provider === "anthropic" &&
+    isClaude46Model(modelId) &&
+    (!extraParams ||
+      (extraParams.thinking === undefined && extraParams.extended_thinking === undefined))
+  ) {
+    // Opus 4.6: use adaptive thinking (recommended)
+    // Sonnet 4.6: use adaptive thinking (recommended, also supports manual mode)
+    effectiveParams = {
+      ...extraParams,
+      thinking: { type: "adaptive" },
+    };
+    log.debug(`auto-enabling adaptive thinking for Claude 4.6 model: ${modelId}`);
+  }
+
+  if (!effectiveParams || Object.keys(effectiveParams).length === 0) {
     return undefined;
   }
 
   const streamParams: CacheRetentionStreamOptions = {};
-  if (typeof extraParams.temperature === "number") {
-    streamParams.temperature = extraParams.temperature;
+  if (typeof effectiveParams.temperature === "number") {
+    streamParams.temperature = effectiveParams.temperature;
   }
-  if (typeof extraParams.maxTokens === "number") {
-    streamParams.maxTokens = extraParams.maxTokens;
+  if (typeof effectiveParams.maxTokens === "number") {
+    streamParams.maxTokens = effectiveParams.maxTokens;
   }
-  const cacheRetention = resolveCacheRetention(extraParams, provider);
+  const cacheRetention = resolveCacheRetention(effectiveParams, provider);
   if (cacheRetention) {
     streamParams.cacheRetention = cacheRetention;
   }
-  const extendedThinking = resolveExtendedThinking(extraParams, provider);
-  if (extendedThinking) {
-    streamParams.extended_thinking = extendedThinking;
+  const thinking = resolveThinking(effectiveParams, provider);
+  if (thinking) {
+    streamParams.thinking = thinking;
   }
 
   if (Object.keys(streamParams).length === 0) {
@@ -190,7 +251,7 @@ export function applyExtraParamsToAgent(
         )
       : undefined;
   const merged = Object.assign({}, extraParams, override);
-  const wrappedStreamFn = createStreamFnWithExtraParams(agent.streamFn, merged, provider);
+  const wrappedStreamFn = createStreamFnWithExtraParams(agent.streamFn, merged, provider, modelId);
 
   if (wrappedStreamFn) {
     log.debug(`applying extraParams to agent streamFn for ${provider}/${modelId}`);
