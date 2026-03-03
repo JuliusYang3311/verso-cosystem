@@ -93,8 +93,6 @@ export type OnboardOptions = {
   installDaemon?: boolean;
   daemonRuntime?: GatewayDaemonRuntime;
   skipChannels?: boolean;
-  /** @deprecated Legacy alias for `skipChannels`. */
-  skipProviders?: boolean;
   skipSkills?: boolean;
   skipHealth?: boolean;
   skipUi?: boolean;

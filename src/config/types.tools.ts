@@ -53,12 +53,6 @@ export type MediaUnderstandingModelConfig = {
   language?: string;
   /** Optional provider-specific query params (merged into requests). */
   providerOptions?: Record<string, Record<string, string | number | boolean>>;
-  /** @deprecated Use providerOptions.deepgram instead. */
-  deepgram?: {
-    detectLanguage?: boolean;
-    punctuate?: boolean;
-    smartFormat?: boolean;
-  };
   /** Optional base URL override for provider requests. */
   baseUrl?: string;
   /** Optional headers merged into provider requests. */
@@ -86,12 +80,6 @@ export type MediaUnderstandingConfig = {
   language?: string;
   /** Optional provider-specific query params (merged into requests). */
   providerOptions?: Record<string, Record<string, string | number | boolean>>;
-  /** @deprecated Use providerOptions.deepgram instead. */
-  deepgram?: {
-    detectLanguage?: boolean;
-    punctuate?: boolean;
-    smartFormat?: boolean;
-  };
   /** Optional base URL override for provider requests. */
   baseUrl?: string;
   /** Optional headers merged into provider requests. */
@@ -404,11 +392,6 @@ export type ToolsConfig = {
   links?: LinkToolsConfig;
   /** Message tool configuration. */
   message?: {
-    /**
-     * @deprecated Use tools.message.crossContext settings.
-     * Allows cross-context sends across providers.
-     */
-    allowCrossContextSend?: boolean;
     crossContext?: {
       /** Allow sends to other channels within the same provider (default: true). */
       allowWithinProvider?: boolean;
