@@ -629,7 +629,9 @@ export async function runWorkerPool(params: {
     }
   };
 
-  const workerCount = Math.min(maxWorkers, pending.length);
+  // Start workers based on maxWorkers, not just initial pending length
+  // This ensures we have enough workers to handle tasks that become ready later
+  const workerCount = Math.min(maxWorkers, subtasks.length);
   await Promise.all(Array.from({ length: workerCount }, () => workerLoop()));
 
   return results;
