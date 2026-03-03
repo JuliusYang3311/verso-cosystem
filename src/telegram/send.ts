@@ -807,6 +807,118 @@ type TelegramStickerOpts = {
  * @param fileId - Telegram file_id of the sticker to send
  * @param opts - Optional configuration
  */
+type TelegramDraftOpts = {
+  token?: string;
+  accountId?: string;
+  verbose?: boolean;
+  api?: Bot["api"];
+  retry?: RetryConfig;
+  textMode?: "markdown" | "html";
+  /** Forum topic thread ID (for forum supergroups) */
+  messageThreadId?: number;
+};
+
+/**
+ * Send a draft message to a Telegram chat using sendMessageDraft API.
+ * This enables streaming partial messages while being generated.
+ * Requires Bot API 9.5+ (available to all bots as of March 1, 2026).
+ *
+ * @param chatId - Chat ID (must be numeric, not username)
+ * @param draftId - Unique identifier for the draft (changes with same ID are animated)
+ * @param text - Text content to send
+ * @param opts - Optional configuration
+ */
+export async function sendMessageDraftTelegram(
+  chatId: number,
+  draftId: number,
+  text: string,
+  opts: TelegramDraftOpts = {},
+): Promise<{ ok: true }> {
+  const cfg = loadConfig();
+  const account = resolveTelegramAccount({
+    cfg,
+    accountId: opts.accountId,
+  });
+  const token = resolveToken(opts.token, account);
+  const client = resolveTelegramClientOptions(account);
+  const api = opts.api ?? new Bot(token, client ? { client } : undefined).api;
+  const request = createTelegramRetryRunner({
+    retry: opts.retry,
+    configRetry: account.config.retry,
+    verbose: opts.verbose,
+  });
+  const logHttpError = createTelegramHttpLogger(cfg);
+  const requestWithDiag = <T>(fn: () => Promise<T>, label?: string) =>
+    withTelegramApiErrorLogging({
+      operation: label ?? "request",
+      fn: () => request(fn, label),
+    }).catch((err) => {
+      logHttpError(label ?? "request", err);
+      throw err;
+    });
+
+  const textMode = opts.textMode ?? "markdown";
+  const tableMode = resolveMarkdownTableMode({
+    cfg,
+    channel: "telegram",
+    accountId: account.accountId,
+  });
+  const htmlText = renderTelegramHtmlText(text, { textMode, tableMode });
+
+  const draftParams: {
+    chat_id: number;
+    draft_id: number;
+    text: string;
+    parse_mode: "HTML";
+    message_thread_id?: number;
+  } = {
+    chat_id: chatId,
+    draft_id: draftId,
+    text: htmlText,
+    parse_mode: "HTML",
+  };
+
+  if (opts.messageThreadId != null) {
+    draftParams.message_thread_id = opts.messageThreadId;
+  }
+
+  // Check if sendMessageDraft is available (Bot API 9.5+)
+  if (typeof (api as { sendMessageDraft?: unknown }).sendMessageDraft !== "function") {
+    throw new Error(
+      "sendMessageDraft is not available in this Telegram Bot API version (requires 9.5+)",
+    );
+  }
+
+  await requestWithDiag(
+    () =>
+      (
+        api as unknown as { sendMessageDraft: (args: typeof draftParams) => Promise<true> }
+      ).sendMessageDraft(draftParams),
+    "sendMessageDraft",
+  ).catch(async (err) => {
+    // Telegram rejects malformed HTML. Fall back to plain text.
+    const errText = formatErrorMessage(err);
+    if (PARSE_ERR_RE.test(errText)) {
+      if (opts.verbose) {
+        console.warn(`telegram HTML parse failed, retrying as plain text: ${errText}`);
+      }
+      const plainParams = { ...draftParams, text };
+      delete (plainParams as { parse_mode?: string }).parse_mode;
+      return await requestWithDiag(
+        () =>
+          (
+            api as unknown as { sendMessageDraft: (args: typeof draftParams) => Promise<true> }
+          ).sendMessageDraft(plainParams as typeof draftParams),
+        "sendMessageDraft-plain",
+      );
+    }
+    throw err;
+  });
+
+  logVerbose(`[telegram] Sent draft message (draft_id=${draftId}) to chat ${chatId}`);
+  return { ok: true };
+}
+
 export async function sendStickerTelegram(
   to: string,
   fileId: string,
