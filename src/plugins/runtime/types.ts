@@ -120,9 +120,16 @@ type CollectTelegramUnmentionedGroupIds =
 type ProbeTelegram = typeof import("../../telegram/probe.js").probeTelegram;
 type ResolveTelegramToken = typeof import("../../telegram/token.js").resolveTelegramToken;
 type SendMessageTelegram = typeof import("../../telegram/send.js").sendMessageTelegram;
+type SendMessageDraftTelegram = typeof import("../../telegram/send.js").sendMessageDraftTelegram;
 type MonitorTelegramProvider = typeof import("../../telegram/monitor.js").monitorTelegramProvider;
 type TelegramMessageActions =
   typeof import("../../channels/plugins/actions/telegram.js").telegramMessageActions;
+type StartTelegramStreaming =
+  typeof import("../../channels/plugins/streaming/telegram.js").startTelegramStreaming;
+type UpdateTelegramStreaming =
+  typeof import("../../channels/plugins/streaming/telegram.js").updateTelegramStreaming;
+type EndTelegramStreaming =
+  typeof import("../../channels/plugins/streaming/telegram.js").endTelegramStreaming;
 type GetActiveWebListener = typeof import("../../web/active-listener.js").getActiveWebListener;
 type GetWebAuthAgeMs = typeof import("../../web/auth-store.js").getWebAuthAgeMs;
 type LogoutWeb = typeof import("../../web/auth-store.js").logoutWeb;
@@ -272,8 +279,12 @@ export type PluginRuntime = {
       probeTelegram: ProbeTelegram;
       resolveTelegramToken: ResolveTelegramToken;
       sendMessageTelegram: SendMessageTelegram;
+      sendMessageDraftTelegram: SendMessageDraftTelegram;
       monitorTelegramProvider: MonitorTelegramProvider;
       messageActions: TelegramMessageActions;
+      startTelegramStreaming: StartTelegramStreaming;
+      updateTelegramStreaming: UpdateTelegramStreaming;
+      endTelegramStreaming: EndTelegramStreaming;
     };
     whatsapp: {
       getActiveWebListener: GetActiveWebListener;

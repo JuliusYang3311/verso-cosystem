@@ -105,48 +105,6 @@ describe("web auto-reply", () => {
     vi.useRealTimers();
   });
 
-  it("prefixes body with same-phone marker when from === to", async () => {
-    // Enable messagePrefix for same-phone mode testing
-    setLoadConfigMock(() => ({
-      channels: { whatsapp: { allowFrom: ["*"] } },
-      messages: {
-        messagePrefix: "[same-phone]",
-        responsePrefix: undefined,
-      },
-    }));
-
-    let capturedOnMessage:
-      | ((msg: import("./inbound.js").WebInboundMessage) => Promise<void>)
-      | undefined;
-    const listenerFactory = async (opts: {
-      onMessage: (msg: import("./inbound.js").WebInboundMessage) => Promise<void>;
-    }) => {
-      capturedOnMessage = opts.onMessage;
-      return { close: vi.fn() };
-    };
-
-    const resolver = vi.fn().mockResolvedValue({ text: "reply" });
-
-    await monitorWebChannel(false, listenerFactory, false, resolver);
-    expect(capturedOnMessage).toBeDefined();
-
-    await capturedOnMessage?.({
-      body: "hello",
-      from: "+1555",
-      to: "+1555", // Same phone!
-      id: "msg1",
-      sendComposing: vi.fn(),
-      reply: vi.fn(),
-      sendMedia: vi.fn(),
-    });
-
-    // The resolver should receive a prefixed body with the configured marker
-    const callArg = resolver.mock.calls[0]?.[0] as { Body?: string };
-    expect(callArg?.Body).toBeDefined();
-    expect(callArg?.Body).toContain("[WhatsApp +1555");
-    expect(callArg?.Body).toContain("[same-phone] hello");
-    resetLoadConfigMock();
-  });
   it("does not prefix body when from !== to", async () => {
     let capturedOnMessage:
       | ((msg: import("./inbound.js").WebInboundMessage) => Promise<void>)

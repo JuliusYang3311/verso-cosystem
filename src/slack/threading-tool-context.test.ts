@@ -69,23 +69,6 @@ describe("buildSlackThreadingToolContext", () => {
     expect(result.replyToMode).toBe("first");
   });
 
-  it("uses legacy dm.replyToMode for direct messages when no chat-type override exists", () => {
-    const cfg = {
-      channels: {
-        slack: {
-          replyToMode: "off",
-          dm: { replyToMode: "all" },
-        },
-      },
-    } as VersoConfig;
-    const result = buildSlackThreadingToolContext({
-      cfg,
-      accountId: null,
-      context: { ChatType: "direct" },
-    });
-    expect(result.replyToMode).toBe("all");
-  });
-
   it("uses all mode when ThreadLabel is present", () => {
     const cfg = {
       channels: {

@@ -99,6 +99,12 @@ export const telegramPlugin: ChannelPlugin<ResolvedTelegramAccount, TelegramProb
     nativeCommands: true,
     blockStreaming: true,
   },
+  streaming: {
+    blockStreamingCoalesceDefaults: {
+      minChars: 400,
+      idleMs: 800,
+    },
+  },
   reload: { configPrefixes: ["channels.telegram"] },
   configSchema: buildChannelConfigSchema(TelegramConfigSchema),
   config: {

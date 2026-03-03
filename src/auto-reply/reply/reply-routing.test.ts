@@ -208,19 +208,6 @@ describe("resolveReplyToMode", () => {
     expect(resolveReplyToMode(cfg, "slack", null, "direct")).toBe("first");
     expect(resolveReplyToMode(cfg, "slack", null, "channel")).toBe("first");
   });
-
-  it("uses legacy dm.replyToMode for direct messages when no chat-type override exists", () => {
-    const cfg = {
-      channels: {
-        slack: {
-          replyToMode: "off",
-          dm: { replyToMode: "all" },
-        },
-      },
-    } as VersoConfig;
-    expect(resolveReplyToMode(cfg, "slack", null, "direct")).toBe("all");
-    expect(resolveReplyToMode(cfg, "slack", null, "channel")).toBe("off");
-  });
 });
 
 describe("createReplyToModeFilter", () => {

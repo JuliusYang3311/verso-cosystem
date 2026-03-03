@@ -42,6 +42,11 @@ import { resolveCommandAuthorizedFromAuthorizers } from "../../channels/command-
 import { discordMessageActions } from "../../channels/plugins/actions/discord.js";
 import { telegramMessageActions } from "../../channels/plugins/actions/telegram.js";
 import { createWhatsAppLoginTool } from "../../channels/plugins/agent-tools/whatsapp-login.js";
+import {
+  startTelegramStreaming,
+  updateTelegramStreaming,
+  endTelegramStreaming,
+} from "../../channels/plugins/streaming/telegram.js";
 import { recordInboundSession } from "../../channels/session.js";
 import { monitorWebChannel } from "../../channels/web/index.js";
 import { registerMemoryCli } from "../../cli/memory-cli.js";
@@ -102,7 +107,7 @@ import {
 } from "../../telegram/audit.js";
 import { monitorTelegramProvider } from "../../telegram/monitor.js";
 import { probeTelegram } from "../../telegram/probe.js";
-import { sendMessageTelegram } from "../../telegram/send.js";
+import { sendMessageTelegram, sendMessageDraftTelegram } from "../../telegram/send.js";
 import { resolveTelegramToken } from "../../telegram/token.js";
 import { textToSpeechTelephony } from "../../tts/tts.js";
 import { getActiveWebListener } from "../../web/active-listener.js";
@@ -262,8 +267,12 @@ export function createPluginRuntime(): PluginRuntime {
         probeTelegram,
         resolveTelegramToken,
         sendMessageTelegram,
+        sendMessageDraftTelegram,
         monitorTelegramProvider,
         messageActions: telegramMessageActions,
+        startTelegramStreaming,
+        updateTelegramStreaming,
+        endTelegramStreaming,
       },
       whatsapp: {
         getActiveWebListener,
