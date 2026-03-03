@@ -242,8 +242,35 @@ IMPORTANT:
 
 Start now by calling orchestrate with action "create-plan" and orchestrationId "${orchId}".`;
 
-    // Run orchestrator agent with abort monitoring
+    // Run orchestrator agent with abort monitoring and timeout
     logger.info("Running orchestrator agent", { orchId });
+
+    // Activity-based timeout for orchestrator agent (same pattern as workers)
+    const ORCHESTRATOR_TIMEOUT_MS = 600_000; // 10 minutes of inactivity
+    let lastActivityMs = Date.now();
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+    const checkTimeout = () => {
+      const idleMs = Date.now() - lastActivityMs;
+      if (idleMs >= ORCHESTRATOR_TIMEOUT_MS) {
+        return true; // Timed out
+      }
+      // Schedule next check
+      timeoutHandle = setTimeout(checkTimeout, Math.min(30_000, ORCHESTRATOR_TIMEOUT_MS - idleMs));
+      return false;
+    };
+
+    // Start timeout checker
+    timeoutHandle = setTimeout(checkTimeout, ORCHESTRATOR_TIMEOUT_MS);
+
+    // Monitor session activity
+    const originalOnToolUse = session.onToolUse;
+    if (originalOnToolUse) {
+      session.onToolUse = (...args: unknown[]) => {
+        lastActivityMs = Date.now(); // Reset activity timer
+        return originalOnToolUse.apply(session, args);
+      };
+    }
 
     // Set up periodic abort check
     let abortCheckInterval: NodeJS.Timeout | null = null;
@@ -272,6 +299,31 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
       }, 5000);
 
       await session.prompt(orchestratorMessage);
+
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+
+      // Check if we timed out
+      if (checkTimeout()) {
+        logger.error("Orchestrator agent timed out", {
+          orchId,
+          timeoutMs: ORCHESTRATOR_TIMEOUT_MS,
+        });
+        try {
+          await session.abort();
+        } catch {
+          // ignore
+        }
+        throw new Error(
+          `Orchestrator agent timed out after ${ORCHESTRATOR_TIMEOUT_MS}ms of inactivity`,
+        );
+      }
+    } catch (err) {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+      throw err;
     } finally {
       // Clean up abort check interval
       if (abortCheckInterval) {

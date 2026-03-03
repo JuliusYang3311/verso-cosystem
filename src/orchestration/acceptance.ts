@@ -202,10 +202,71 @@ Respond with a JSON object:
         sessionManager: SessionManager.inMemory(workspaceDir),
       });
 
-      const session = created.session;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const session: any = created.session;
 
-      // Run evaluation
-      await session.sendUserMessage(evalPrompt);
+      // Activity-based timeout for acceptance agent (same pattern as workers)
+      const ACCEPTANCE_TIMEOUT_MS = 600_000; // 10 minutes of inactivity
+      let lastActivityMs = Date.now();
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+      const checkTimeout = () => {
+        const idleMs = Date.now() - lastActivityMs;
+        if (idleMs >= ACCEPTANCE_TIMEOUT_MS) {
+          return true; // Timed out
+        }
+        // Schedule next check
+        timeoutHandle = setTimeout(checkTimeout, Math.min(30_000, ACCEPTANCE_TIMEOUT_MS - idleMs));
+        return false;
+      };
+
+      // Start timeout checker
+      timeoutHandle = setTimeout(checkTimeout, ACCEPTANCE_TIMEOUT_MS);
+
+      // Monitor session activity
+      const originalOnToolUse = session.onToolUse;
+      if (originalOnToolUse) {
+        session.onToolUse = (...args: unknown[]) => {
+          lastActivityMs = Date.now(); // Reset activity timer
+          return originalOnToolUse.apply(session, args);
+        };
+      }
+
+      try {
+        // Run evaluation
+        await session.sendUserMessage(evalPrompt);
+
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+
+        // Check if we timed out
+        if (checkTimeout()) {
+          try {
+            await session.abort();
+          } catch {
+            // ignore
+          }
+          // Return failure verdict for timeout
+          verdicts.push({
+            subtaskId: "overall",
+            passed: false,
+            confidence: 100,
+            reasoning: `Acceptance evaluation timed out after ${ACCEPTANCE_TIMEOUT_MS}ms of inactivity`,
+          });
+          return {
+            passed: false,
+            verdicts,
+            summary: `Acceptance evaluation timed out after ${ACCEPTANCE_TIMEOUT_MS / 1000}s of inactivity`,
+            testedAtMs: Date.now(),
+          };
+        }
+      } catch (err) {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+        throw err;
+      }
 
       // Get response from messages
       const messages = session.messages;
@@ -213,8 +274,18 @@ Respond with a JSON object:
       const evalResult =
         lastMessage?.role === "assistant"
           ? lastMessage.content
-              .filter((c) => c.type === "text")
-              .map((c) => ("text" in c ? c.text : ""))
+              .filter(
+                (c: unknown) =>
+                  typeof c === "object" &&
+                  c !== null &&
+                  "type" in c &&
+                  (c as { type: string }).type === "text",
+              )
+              .map((c: unknown) =>
+                typeof c === "object" && c !== null && "text" in c
+                  ? (c as { text: string }).text
+                  : "",
+              )
               .join("")
           : "";
 
