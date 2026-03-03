@@ -210,6 +210,11 @@ Respond with a JSON object:
       let lastActivityMs = Date.now();
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
+      // Tool call loop detection: track recent tool calls to detect infinite loops
+      const toolCallHistory: Array<{ name: string; timestamp: number }> = [];
+      const LOOP_DETECTION_WINDOW = 10; // Check last 10 tool calls
+      const LOOP_DETECTION_THRESHOLD = 8; // If 8 out of 10 are the same tool, it's a loop
+
       const checkTimeout = () => {
         const idleMs = Date.now() - lastActivityMs;
         if (idleMs >= ACCEPTANCE_TIMEOUT_MS) {
@@ -228,6 +233,43 @@ Respond with a JSON object:
       if (originalOnToolUse) {
         session.onToolUse = (...args: unknown[]) => {
           lastActivityMs = Date.now(); // Reset activity timer
+
+          // Track tool call for loop detection
+          const toolName = typeof args[0] === "string" ? args[0] : "unknown";
+          toolCallHistory.push({ name: toolName, timestamp: Date.now() });
+
+          // Keep only recent history
+          if (toolCallHistory.length > LOOP_DETECTION_WINDOW) {
+            toolCallHistory.shift();
+          }
+
+          // Check for loop: if most recent calls are the same tool
+          if (toolCallHistory.length >= LOOP_DETECTION_WINDOW) {
+            const recentTools = toolCallHistory.slice(-LOOP_DETECTION_WINDOW);
+            const toolCounts = new Map<string, number>();
+            for (const call of recentTools) {
+              toolCounts.set(call.name, (toolCounts.get(call.name) || 0) + 1);
+            }
+
+            // Find most frequent tool
+            let maxCount = 0;
+            let maxTool = "";
+            for (const [tool, count] of toolCounts) {
+              if (count > maxCount) {
+                maxCount = count;
+                maxTool = tool;
+              }
+            }
+
+            // If one tool dominates recent calls, likely a loop
+            if (maxCount >= LOOP_DETECTION_THRESHOLD) {
+              // Log warning but don't abort - timeout will catch it if truly stuck
+              console.warn(
+                `[acceptance] Detected potential tool call loop: ${maxTool} (${maxCount}/${LOOP_DETECTION_WINDOW} calls)`,
+              );
+            }
+          }
+
           return originalOnToolUse.apply(session, args);
         };
       }
