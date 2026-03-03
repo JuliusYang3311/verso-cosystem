@@ -355,7 +355,7 @@ export async function resolveReplyDirectives(params: {
   const resolvedReasoningLevel: ReasoningLevel =
     directives.reasoningLevel ??
     (sessionEntry?.reasoningLevel as ReasoningLevel | undefined) ??
-    (resolvedThinkLevel && resolvedThinkLevel !== "off" ? "stream" : "off");
+    "off";
   const resolvedElevatedLevel = elevatedAllowed
     ? (directives.elevatedLevel ??
       (sessionEntry?.elevatedLevel as ElevatedLevel | undefined) ??
