@@ -87,13 +87,16 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
         return;
       }
 
-      // Get main agent session key from orchestrator session key
-      // Format: agent:<agentId>:orch:<orchId> → agent:<agentId>
-      const mainSessionKey = orch.orchestratorSessionKey.split(":orch:")[0];
+      // Get triggering session key (fallback to extracting from orchestratorSessionKey)
+      // If triggeringSessionKey is set, use it (e.g., telegram:chat:123456)
+      // Otherwise, extract from orchestratorSessionKey (agent:<agentId>:orch:<orchId> → agent:<agentId>)
+      const mainSessionKey =
+        orch.triggeringSessionKey || orch.orchestratorSessionKey.split(":orch:")[0];
 
       if (!mainSessionKey) {
         logger.warn("Cannot determine main session key", {
           orchestratorSessionKey: orch.orchestratorSessionKey,
+          triggeringSessionKey: orch.triggeringSessionKey,
         });
         return;
       }

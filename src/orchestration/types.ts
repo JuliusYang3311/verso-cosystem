@@ -69,6 +69,8 @@ export type Orchestration = {
   workspaceDir: string;
   /** The original workspace directory the orchestration was initiated from. */
   sourceWorkspaceDir: string;
+  /** The session key that triggered this orchestration (e.g., telegram:chat:123456, agent:main). */
+  triggeringSessionKey?: string;
   plan?: OrchestrationPlan;
   fixTasks: FixTask[];
   acceptanceResults: AcceptanceResult[];
@@ -103,6 +105,7 @@ export function createOrchestration(params: {
   agentId: string;
   workspaceDir: string;
   sourceWorkspaceDir: string;
+  triggeringSessionKey?: string;
   maxFixCycles?: number;
 }): Orchestration {
   const now = Date.now();
@@ -114,6 +117,7 @@ export function createOrchestration(params: {
     status: "planning",
     workspaceDir: params.workspaceDir,
     sourceWorkspaceDir: params.sourceWorkspaceDir,
+    triggeringSessionKey: params.triggeringSessionKey,
     fixTasks: [],
     acceptanceResults: [],
     maxFixCycles: params.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,

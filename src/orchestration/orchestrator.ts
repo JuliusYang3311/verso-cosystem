@@ -301,7 +301,7 @@ export async function stopOrchestratorDaemon(
  */
 export async function submitOrchestration(
   userPrompt: string,
-  opts?: { cfg?: VersoConfig; agentId?: string },
+  opts?: { cfg?: VersoConfig; agentId?: string; triggeringSessionKey?: string },
 ): Promise<{ orchestrationId: string; daemonStarted: boolean; error?: string }> {
   const cfg = opts?.cfg;
   const agentId = opts?.agentId ?? "main";
@@ -322,6 +322,7 @@ export async function submitOrchestration(
     agentId,
     workspaceDir: "", // Will be set by daemon
     sourceWorkspaceDir: workspace,
+    triggeringSessionKey: opts?.triggeringSessionKey,
     maxFixCycles,
   });
 

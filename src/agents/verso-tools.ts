@@ -187,6 +187,7 @@ export function createVersoTools(options?: {
       createOrchestratorTriggerTool({
         agentId: agentId ?? "main",
         config: options?.config,
+        sessionKey: options?.agentSessionKey,
       }),
     );
   }
