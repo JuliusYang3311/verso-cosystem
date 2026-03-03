@@ -137,9 +137,10 @@ function isPidAlive(pid: number): boolean {
 }
 
 function resolveWorkspace(cfg?: VersoConfig): string {
-  return (
-    cfg?.agents?.defaults?.workspace?.trim() || process.env.OPENCLAW_WORKSPACE || process.cwd()
-  );
+  const workspace =
+    cfg?.agents?.defaults?.workspace?.trim() || process.env.OPENCLAW_WORKSPACE || process.cwd();
+  // Ensure absolute path to prevent issues when daemon cwd changes
+  return path.resolve(workspace);
 }
 
 function countActiveDaemons(): number {
