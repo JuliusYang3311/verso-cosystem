@@ -42,9 +42,6 @@ export function resolveContextWindowInfo(params: {
       : { tokens: Math.floor(params.defaultTokens), source: "default" as const };
 
   const capTokens = normalizePositiveInt(params.cfg?.agents?.defaults?.contextTokens);
-  const maxSessionTokens = normalizePositiveInt(
-    params.cfg?.agents?.defaults?.compaction?.maxSessionTokens,
-  );
 
   let tokens = baseInfo.tokens;
   let source: ContextWindowSource = baseInfo.source;
@@ -52,11 +49,6 @@ export function resolveContextWindowInfo(params: {
   if (capTokens && capTokens < tokens) {
     tokens = capTokens;
     source = "agentContextTokens";
-  }
-
-  if (maxSessionTokens && maxSessionTokens < tokens) {
-    tokens = maxSessionTokens;
-    source = "agentContextTokens"; // Using same source category for simplicity
   }
 
   return { tokens, source };

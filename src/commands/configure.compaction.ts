@@ -4,7 +4,6 @@ import { note } from "../terminal/note.js";
 import { confirm, text } from "./configure.shared.js";
 import { guardCancel } from "./onboard-helpers.js";
 
-const DEFAULT_MAX_SESSION_TOKENS = 64_000;
 const DEFAULT_RESERVE_TOKENS_FLOOR = 8_000;
 const DEFAULT_MEMORY_FLUSH_SOFT_TOKENS = 8_000;
 
@@ -24,31 +23,17 @@ export async function promptCompactionConfig(
     [
       "Compaction settings control when the agent compresses conversation history.",
       "",
-      "• Max session tokens (Soft Limit): Trigger compaction when context exceeds this size.",
       "• Reserve tokens: Buffer kept for new responses during compaction.",
       "• Memory flush: Saves important memories before compaction kicks in.",
+      "",
+      "Note: With dynamic context, the model's native context window is used automatically.",
       "",
       "Docs: https://docs.molt.bot/agents/compaction",
     ].join("\n"),
     "Compaction Settings",
   );
 
-  // 1. Max Session Tokens (Soft Limit)
-  const maxTokensRaw = guardCancel(
-    await text({
-      message: "Max session tokens (Soft Limit)",
-      initialValue: String(existingCompaction?.maxSessionTokens ?? DEFAULT_MAX_SESSION_TOKENS),
-      placeholder: "e.g., 64000 to keep context manageable, or 200000 for large tasks",
-    }),
-    runtime,
-  );
-  const maxSessionTokens = Number.parseInt(String(maxTokensRaw).trim(), 10);
-  const validMaxSessionTokens =
-    Number.isFinite(maxSessionTokens) && maxSessionTokens > 0
-      ? maxSessionTokens
-      : (existingCompaction?.maxSessionTokens ?? DEFAULT_MAX_SESSION_TOKENS);
-
-  // 2. Reserve tokens floor (compaction buffer)
+  // 1. Reserve tokens floor (compaction buffer)
   const reserveTokensRaw = guardCancel(
     await text({
       message: "Compaction buffer (tokens to reserve for new responses)",
@@ -63,7 +48,7 @@ export async function promptCompactionConfig(
       ? reserveTokensFloor
       : (existingCompaction?.reserveTokensFloor ?? DEFAULT_RESERVE_TOKENS_FLOOR);
 
-  // 3. Memory flush enabled
+  // 2. Memory flush enabled
   const memoryFlushEnabled = guardCancel(
     await confirm({
       message: "Enable pre-compaction memory flush? (saves memories before compacting)",
@@ -72,7 +57,7 @@ export async function promptCompactionConfig(
     runtime,
   );
 
-  // 4. Memory flush soft threshold (only if enabled)
+  // 3. Memory flush soft threshold (only if enabled)
   let memoryFlushSoftTokens =
     existingMemoryFlush?.softThresholdTokens ?? DEFAULT_MEMORY_FLUSH_SOFT_TOKENS;
   if (memoryFlushEnabled) {
@@ -96,10 +81,8 @@ export async function promptCompactionConfig(
       ...nextConfig.agents,
       defaults: {
         ...existingDefaults,
-        // contextTokens intentionally NOT set here, relying on model defaults or manual override if really needed.
         compaction: {
           ...existingCompaction,
-          maxSessionTokens: validMaxSessionTokens,
           reserveTokensFloor: validReserveTokens,
           memoryFlush: {
             ...existingMemoryFlush,

@@ -92,17 +92,10 @@ export async function getStatusSummary(): Promise<StatusSummary> {
     defaultModel: DEFAULT_MODEL,
   });
   const configModel = resolved.model ?? DEFAULT_MODEL;
-  const configContextTokens = (() => {
-    const native =
-      cfg.agents?.defaults?.contextTokens ??
-      lookupContextTokens(configModel) ??
-      DEFAULT_CONTEXT_TOKENS;
-    const max = cfg.agents?.defaults?.compaction?.maxSessionTokens;
-    if (typeof max === "number" && max > 0) {
-      return Math.min(native, max);
-    }
-    return native;
-  })();
+  const configContextTokens =
+    cfg.agents?.defaults?.contextTokens ??
+    lookupContextTokens(configModel) ??
+    DEFAULT_CONTEXT_TOKENS;
 
   const now = Date.now();
   const storeCache = new Map<string, Record<string, SessionEntry | undefined>>();
@@ -125,15 +118,9 @@ export async function getStatusSummary(): Promise<StatusSummary> {
         const updatedAt = entry?.updatedAt ?? null;
         const age = updatedAt ? now - updatedAt : null;
         const model = entry?.model ?? configModel ?? null;
-        const configMaxSessionTokens = cfg.agents?.defaults?.compaction?.maxSessionTokens;
         const nativeContextTokens =
           entry?.contextTokens ?? lookupContextTokens(model) ?? configContextTokens ?? null;
-        const contextTokens =
-          typeof configMaxSessionTokens === "number" &&
-          configMaxSessionTokens > 0 &&
-          nativeContextTokens != null
-            ? Math.min(nativeContextTokens, configMaxSessionTokens)
-            : nativeContextTokens;
+        const contextTokens = nativeContextTokens;
 
         const input = entry?.inputTokens ?? 0;
         const output = entry?.outputTokens ?? 0;

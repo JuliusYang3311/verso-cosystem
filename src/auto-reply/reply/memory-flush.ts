@@ -85,18 +85,7 @@ export function resolveMemoryFlushContextWindowTokens(params: {
 }): number {
   const modelContext = lookupContextTokens(params.modelId);
   const agentContext = params.agentCfgContextTokens ?? DEFAULT_CONTEXT_TOKENS;
-  const baseTokens = modelContext ?? agentContext;
-
-  const maxSessionTokens = params.cfg?.agents?.defaults?.compaction?.maxSessionTokens;
-  if (
-    typeof maxSessionTokens === "number" &&
-    maxSessionTokens > 0 &&
-    maxSessionTokens < baseTokens
-  ) {
-    return maxSessionTokens;
-  }
-
-  return baseTokens;
+  return modelContext ?? agentContext;
 }
 
 export function shouldRunMemoryFlush(params: {
