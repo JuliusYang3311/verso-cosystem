@@ -151,14 +151,29 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
           result: injectResult,
         });
       } catch (err) {
-        logger.error("Failed to inject orchestration notification", {
-          error: String(err),
-          errorStack: err instanceof Error ? err.stack : undefined,
-          errorMessage: err instanceof Error ? err.message : undefined,
-          errorName: err instanceof Error ? err.name : undefined,
+        // Log error with multiple separate statements for better visibility
+        logger.error("Failed to inject orchestration notification - Basic info", {
           orchId,
           mainSessionKey,
+        });
+
+        logger.error("Failed to inject orchestration notification - Error details", {
+          errorString: String(err),
+          errorType: typeof err,
+          isError: err instanceof Error,
+        });
+
+        if (err instanceof Error) {
+          logger.error("Failed to inject orchestration notification - Error object", {
+            name: err.name,
+            message: err.message,
+            stack: err.stack,
+          });
+        }
+
+        logger.error("Failed to inject orchestration notification - Notification content", {
           notificationMessage,
+          messageLength: notificationMessage.length,
         });
       }
 
