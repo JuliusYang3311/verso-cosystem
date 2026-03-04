@@ -338,6 +338,13 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
         if (currentOrch?.status === "failed" && currentOrch.error === "Aborted by user") {
           logger.info("Abort detected during execution", { orchId });
           shouldAbort = true;
+
+          // Clear interval first
+          if (abortCheckInterval) {
+            clearInterval(abortCheckInterval);
+            abortCheckInterval = null;
+          }
+
           // Abort session to interrupt the running prompt
           if (session) {
             try {
@@ -350,10 +357,37 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
               });
             }
           }
-          // Clear interval and exit immediately
-          if (abortCheckInterval) {
-            clearInterval(abortCheckInterval);
+
+          // Broadcast abort event
+          try {
+            await broadcastOrchestrationEvent(
+              {
+                type: "orchestration.failed",
+                orchestrationId: orchId,
+                error: "Aborted by user",
+              },
+              opts.config,
+            );
+          } catch (broadcastErr) {
+            logger.warn("Failed to broadcast abort event", {
+              orchId,
+              error: String(broadcastErr),
+            });
           }
+
+          // Cleanup resources before exit
+          try {
+            if (session) {
+              session.dispose();
+            }
+            await cleanupOrchestrationMemory(memoryContext);
+          } catch (cleanupErr) {
+            logger.warn("Error during abort cleanup", {
+              orchId,
+              error: String(cleanupErr),
+            });
+          }
+
           // Exit the daemon process immediately
           logger.info("Daemon exiting due to abort", { orchId });
           process.exit(0);
