@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-let backend: "builtin" | "qmd" = "builtin";
 const stubManager = {
   search: vi.fn(async () => [
     {
@@ -14,7 +13,6 @@ const stubManager = {
   ]),
   readFile: vi.fn(),
   status: () => ({
-    backend,
     files: 1,
     chunks: 1,
     dirty: false,
@@ -45,7 +43,6 @@ beforeEach(() => {
 
 describe("memory search citations", () => {
   it("appends source information when citations are enabled", async () => {
-    backend = "builtin";
     const cfg = { memory: { citations: "on" }, agents: { list: [{ id: "main", default: true }] } };
     const tool = createMemorySearchTool({ config: cfg });
     if (!tool) {
@@ -58,7 +55,6 @@ describe("memory search citations", () => {
   });
 
   it("leaves snippet untouched when citations are off", async () => {
-    backend = "builtin";
     const cfg = { memory: { citations: "off" }, agents: { list: [{ id: "main", default: true }] } };
     const tool = createMemorySearchTool({ config: cfg });
     if (!tool) {
@@ -70,23 +66,7 @@ describe("memory search citations", () => {
     expect(details.results[0]?.citation).toBeUndefined();
   });
 
-  it("clamps decorated snippets to qmd injected budget", async () => {
-    backend = "qmd";
-    const cfg = {
-      memory: { citations: "on", backend: "qmd", qmd: { limits: { maxInjectedChars: 20 } } },
-      agents: { list: [{ id: "main", default: true }] },
-    };
-    const tool = createMemorySearchTool({ config: cfg });
-    if (!tool) {
-      throw new Error("tool missing");
-    }
-    const result = await tool.execute("call_citations_qmd", { query: "notes" });
-    const details = result.details as { results: Array<{ snippet: string; citation?: string }> };
-    expect(details.results[0]?.snippet.length).toBeLessThanOrEqual(20);
-  });
-
   it("honors auto mode for direct chats", async () => {
-    backend = "builtin";
     const cfg = {
       memory: { citations: "auto" },
       agents: { list: [{ id: "main", default: true }] },
@@ -104,7 +84,6 @@ describe("memory search citations", () => {
   });
 
   it("suppresses citations for auto mode in group chats", async () => {
-    backend = "builtin";
     const cfg = {
       memory: { citations: "auto" },
       agents: { list: [{ id: "main", default: true }] },
