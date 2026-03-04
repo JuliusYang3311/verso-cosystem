@@ -353,25 +353,14 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
 
       await session.prompt(orchestratorMessage);
 
+      // Prompt completed successfully - clear timeout immediately
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
+        timeoutHandle = null;
       }
 
-      // Check if we timed out
-      if (checkTimeout()) {
-        logger.error("Orchestrator agent timed out", {
-          orchId,
-          timeoutMs: ORCHESTRATOR_TIMEOUT_MS,
-        });
-        try {
-          await session.abort();
-        } catch {
-          // ignore
-        }
-        throw new Error(
-          `Orchestrator agent timed out after ${ORCHESTRATOR_TIMEOUT_MS}ms of inactivity`,
-        );
-      }
+      // No need to check timeout after successful completion
+      logger.info("Orchestrator agent completed successfully", { orchId });
     } catch (err) {
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);

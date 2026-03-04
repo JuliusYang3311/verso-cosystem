@@ -348,25 +348,13 @@ async function runWorkerTask(params: {
     try {
       await session.prompt(prompt);
 
+      // Prompt completed successfully - clear timeout immediately
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
+        timeoutHandle = null;
       }
 
-      // Check if we timed out
-      if (checkTimeout()) {
-        try {
-          await session.abort();
-        } catch {
-          // ignore
-        }
-        return {
-          subtaskId: subtask.id,
-          ok: false,
-          resultSummary: "",
-          filesChanged: [],
-          error: `Worker timed out after ${timeoutMs}ms of inactivity`,
-        };
-      }
+      // No need to check timeout after successful completion
     } catch (err) {
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);

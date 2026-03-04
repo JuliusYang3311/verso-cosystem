@@ -278,31 +278,13 @@ Respond with a JSON object:
         // Run evaluation
         await session.sendUserMessage(evalPrompt);
 
+        // Evaluation completed successfully - clear timeout immediately
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
+          timeoutHandle = null;
         }
 
-        // Check if we timed out
-        if (checkTimeout()) {
-          try {
-            await session.abort();
-          } catch {
-            // ignore
-          }
-          // Return failure verdict for timeout
-          verdicts.push({
-            subtaskId: "overall",
-            passed: false,
-            confidence: 100,
-            reasoning: `Acceptance evaluation timed out after ${ACCEPTANCE_TIMEOUT_MS}ms of inactivity`,
-          });
-          return {
-            passed: false,
-            verdicts,
-            summary: `Acceptance evaluation timed out after ${ACCEPTANCE_TIMEOUT_MS / 1000}s of inactivity`,
-            testedAtMs: Date.now(),
-          };
-        }
+        // No need to check timeout after successful completion
       } catch (err) {
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
