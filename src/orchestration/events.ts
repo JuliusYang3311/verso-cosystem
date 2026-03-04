@@ -130,10 +130,11 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
         orchId,
         mainSessionKey,
         messageLength: notificationMessage.length,
+        message: notificationMessage,
       });
 
       try {
-        await callGateway({
+        const injectResult = await callGateway({
           method: "chat.inject",
           params: {
             sessionKey: mainSessionKey,
@@ -147,13 +148,17 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
           orchId,
           mainSessionKey,
           type: event.type,
+          result: injectResult,
         });
       } catch (err) {
         logger.error("Failed to inject orchestration notification", {
           error: String(err),
           errorStack: err instanceof Error ? err.stack : undefined,
+          errorMessage: err instanceof Error ? err.message : undefined,
+          errorName: err instanceof Error ? err.name : undefined,
           orchId,
           mainSessionKey,
+          notificationMessage,
         });
       }
 
