@@ -207,9 +207,13 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     const workspaceMode = orch.baseProjectDir
       ? `\n\nWORKSPACE MODE: ENHANCE EXISTING PROJECT
 The workspace contains an existing project copied from: ${orch.baseProjectDir}
-IMPORTANT: Before creating your plan, you MUST explore the existing codebase to understand its structure, patterns, and architecture. Use file reading tools to review key files. Then plan enhancements that build upon the existing code.`
+IMPORTANT: Before creating your plan, you MUST explore the existing codebase to understand its structure, patterns, and architecture. Use file reading tools to review key files. Then plan enhancements that build upon the existing code.
+
+CRITICAL - OUTPUT DIRECTORY: When calling "complete", do NOT specify outputDir. The enhanced project will automatically replace the original project at: ${orch.baseProjectDir}`
       : `\n\nWORKSPACE MODE: BUILD FROM SCRATCH
-The workspace is empty. You will build the project from scratch.`;
+The workspace is empty. You will build the project from scratch.
+
+OUTPUT DIRECTORY: When calling "complete", you MUST specify outputDir (e.g., "./my-app" or "../projects/tool"). This determines where the completed project will be copied.`;
 
     const orchestratorMessage = `${buildOrchestratorSystemPrompt()}
 
