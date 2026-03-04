@@ -1,5 +1,6 @@
 // src/orchestration/events.ts — Orchestration event broadcasting
 
+import type { VersoConfig } from "../config/types.js";
 import type { Orchestration, Subtask } from "./types.js";
 
 export type OrchestrationEvent =
@@ -53,7 +54,10 @@ export function buildOrchestrationSnapshot(orch: Orchestration): OrchestrationSn
  * This function is called from the daemon to notify all connected clients.
  * For completion/failure events, also injects a notification into the main agent session.
  */
-export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Promise<void> {
+export async function broadcastOrchestrationEvent(
+  event: OrchestrationEvent,
+  config?: VersoConfig,
+): Promise<void> {
   const { createSubsystemLogger } = await import("../logging/subsystem.js");
   const logger = createSubsystemLogger("orchestration-events");
 
@@ -61,6 +65,10 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
     type: event.type,
     orchestrationId: "orchestrationId" in event ? event.orchestrationId : undefined,
   });
+
+  // Load config if not provided (for calls from orchestrator-tools)
+  const { loadConfig } = await import("../config/config.js");
+  const effectiveConfig = config ?? loadConfig();
 
   try {
     // Broadcast event via gateway
@@ -72,6 +80,7 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
         payload: event,
       },
       timeoutMs: 5000,
+      config: effectiveConfig,
     });
 
     logger.info("Successfully broadcasted orchestration event via gateway", {
@@ -142,6 +151,7 @@ export async function broadcastOrchestrationEvent(event: OrchestrationEvent): Pr
             label: "orchestration",
           },
           timeoutMs: 5000,
+          config: effectiveConfig,
         });
 
         logger.info("Successfully injected orchestration notification into main session", {

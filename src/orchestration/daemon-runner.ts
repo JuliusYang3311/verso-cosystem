@@ -3,6 +3,7 @@
 // Each daemon runs exactly one orchestration task.
 // Multiple daemons can run concurrently (controlled by maxOrchestrations).
 
+import type { VersoConfig } from "../config/types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { broadcastOrchestrationEvent } from "./events.js";
 import {
@@ -30,6 +31,7 @@ export type OrchestratorDaemonOptions = {
   maxWorkers?: number;
   maxFixCycles?: number;
   verifyCmd?: string;
+  config?: VersoConfig;
 };
 
 /**
@@ -83,11 +85,14 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
   }
 
   // Broadcast orchestration started event
-  await broadcastOrchestrationEvent({
-    type: "orchestration.started",
-    orchestrationId: orch.id,
-    userPrompt: orch.userPrompt,
-  });
+  await broadcastOrchestrationEvent(
+    {
+      type: "orchestration.started",
+      orchestrationId: orch.id,
+      userPrompt: orch.userPrompt,
+    },
+    opts.config,
+  );
 
   // Trigger orchestration:started hook
   const { triggerOrchestrationHook } = await import("./hooks.js");
@@ -407,11 +412,14 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
       await saveOrchestration(orch);
 
       // Broadcast failure event
-      await broadcastOrchestrationEvent({
-        type: "orchestration.failed",
-        orchestrationId: orch.id,
-        error: msg,
-      });
+      await broadcastOrchestrationEvent(
+        {
+          type: "orchestration.failed",
+          orchestrationId: orch.id,
+          error: msg,
+        },
+        opts.config,
+      );
     }
 
     throw err;

@@ -5,11 +5,15 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { loadConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runOrchestratorDaemon } from "./daemon-runner.js";
 
 const logger = createSubsystemLogger("orchestrator-daemon-entry");
+
+// Load config for gateway access
+const config = loadConfig();
 
 const workspaceDir = process.env.ORCHESTRATOR_WORKSPACE || process.cwd();
 const agentId = process.env.ORCHESTRATOR_AGENT_ID || "main";
@@ -68,6 +72,7 @@ runOrchestratorDaemon({
   maxWorkers,
   maxFixCycles,
   verifyCmd,
+  config,
 }).catch((err) => {
   logger.error("Daemon crashed", { orchestrationId, error: String(err) });
   cleanupPidFile();
