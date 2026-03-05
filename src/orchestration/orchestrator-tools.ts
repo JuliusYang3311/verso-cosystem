@@ -134,11 +134,11 @@ OUTPUT DIRECTORY: Results are copied to this directory in the source workspace:
         case "run-acceptance":
           return await handleRunAcceptance(params, opts);
         case "create-fix-tasks":
-          return await handleCreateFixTasks(params);
+          return await handleCreateFixTasks(params, opts);
         case "complete":
-          return await handleComplete(params);
+          return await handleComplete(params, opts);
         case "abort":
-          return await handleAbort(params);
+          return await handleAbort(params, opts);
         default:
           return jsonResult({ error: `Unknown action: ${action}` });
       }
@@ -148,7 +148,7 @@ OUTPUT DIRECTORY: Results are copied to this directory in the source workspace:
 
 // --- Action Handlers ---
 
-async function handleCreatePlan(params: Record<string, unknown>, _opts: OrchestrateToolOptions) {
+async function handleCreatePlan(params: Record<string, unknown>, opts: OrchestrateToolOptions) {
   const planSummary = readStringParam(params, "planSummary", { required: true });
   const orchestrationId = readStringParam(params, "orchestrationId", { required: true });
   const verifyCmd = readStringParam(params, "verifyCmd"); // Optional, determined by orchestrator
@@ -580,7 +580,7 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
   });
 }
 
-async function handleCreateFixTasks(params: Record<string, unknown>) {
+async function handleCreateFixTasks(params: Record<string, unknown>, opts: OrchestrateToolOptions) {
   const orchId = readStringParam(params, "orchestrationId", { required: true });
   const rawFixes = params.fixes;
   if (!Array.isArray(rawFixes) || rawFixes.length === 0) {
@@ -681,7 +681,7 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
   });
 }
 
-async function handleComplete(params: Record<string, unknown>) {
+async function handleComplete(params: Record<string, unknown>, opts: OrchestrateToolOptions) {
   const orchId = readStringParam(params, "orchestrationId", { required: true });
   const summary = readStringParam(params, "summary");
   const outputDir = readStringParam(params, "outputDir");
@@ -779,7 +779,7 @@ async function handleComplete(params: Record<string, unknown>) {
   });
 }
 
-async function handleAbort(params: Record<string, unknown>) {
+async function handleAbort(params: Record<string, unknown>, opts: OrchestrateToolOptions) {
   const orchId = readStringParam(params, "orchestrationId", { required: true });
   const orch = await loadOrchestration(orchId);
   if (!orch) {
