@@ -61,10 +61,12 @@ export async function initOrchestrationMemory(params: {
     // Create isolated instance — not cached, independent lifecycle
     // Uses real agentId to resolve config (embedding, latent factors, MMR, etc.)
     // but workspaceDir points to the orchestration's mission workspace
+    // Enable sessions source to automatically index worker sessions
     const memoryManager = await MemoryIndexManager.createIsolated({
       cfg,
       agentId,
       workspaceDir: memoryDir,
+      sources: ["memory", "sessions"],
     });
 
     if (!memoryManager) {

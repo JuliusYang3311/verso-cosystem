@@ -242,6 +242,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     agentId: string;
     workspaceDir: string;
     providerResult?: EmbeddingProviderResult;
+    sources?: Array<"memory" | "sessions">;
   }): Promise<MemoryIndexManager | null> {
     const { cfg, agentId, workspaceDir } = params;
     const settings = resolveMemorySearchConfig(cfg, agentId);
@@ -252,6 +253,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     // instead of the shared ~/.verso/memory/<agentId>.sqlite
     const isolatedSettings = {
       ...settings,
+      sources: params.sources ?? settings.sources,
       store: {
         ...settings.store,
         path: path.join(workspaceDir, "memory.sqlite"),
