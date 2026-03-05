@@ -177,6 +177,14 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     logger.info("Creating orchestrator agent session", { orchId });
     const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
 
+    // Create persistent session file in orchestration directory
+    const { getOrchestrationSessionFile } = await import("./orchestrator-memory.js");
+    const sessionFile = getOrchestrationSessionFile(
+      orch.sourceWorkspaceDir,
+      orchId,
+      "orchestrator",
+    );
+
     // Use customTools parameter to add orchestrate + web_search + web_fetch + gworkspace tools
     const customToolsList = [
       orchestrateTool,
@@ -192,7 +200,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       modelRegistry,
       model,
       customTools: customToolsList,
-      sessionManager: SessionManager.inMemory(sandboxDir),
+      sessionManager: SessionManager.open(sessionFile),
     });
 
     session = created.session;
@@ -380,7 +388,7 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
             if (session) {
               session.dispose();
             }
-            await cleanupOrchestrationMemory(memoryContext);
+            await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
           } catch (cleanupErr) {
             logger.warn("Error during abort cleanup", {
               orchId,
@@ -469,7 +477,7 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
 
     // Close shared memory
     try {
-      await cleanupOrchestrationMemory(memoryContext);
+      await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
     } catch (err) {
       logger.warn("Failed to close shared memory", { orchId, error: String(err) });
     }

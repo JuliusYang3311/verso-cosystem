@@ -198,6 +198,17 @@ async function runWorkerTask(params: {
     // 3. Create in-memory agent session
     const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
 
+    // Create persistent session file in orchestration directory
+    const { getOrchestrationSessionFile } = await import("./orchestrator-memory.js");
+    const { resolveSourceWorkspaceDir } = await import("./store.js");
+    const sourceWorkspaceDir = resolveSourceWorkspaceDir(missionWorkspaceDir);
+    const sessionFile = getOrchestrationSessionFile(
+      sourceWorkspaceDir,
+      orchestrationId,
+      "worker",
+      subtask.id,
+    );
+
     // Create web search and web fetch tools for workers (same as orchestrator)
     const { createWebSearchTool } = await import("../agents/tools/web-search.js");
     const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
@@ -247,7 +258,7 @@ async function runWorkerTask(params: {
       modelRegistry,
       model,
       customTools: workerTools, // Use customTools to add tools alongside coding tools
-      sessionManager: SessionManager.inMemory(missionWorkspaceDir),
+      sessionManager: SessionManager.open(sessionFile),
     });
     session = created.session;
 

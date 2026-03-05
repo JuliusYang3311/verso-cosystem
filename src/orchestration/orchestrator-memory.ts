@@ -31,6 +31,35 @@ export function createOrchestrationMemoryDir(sourceWorkspaceDir: string, orchId:
 }
 
 /**
+ * Create a temporary sessions directory for an orchestration.
+ * Layout: <sourceWorkspace>/.verso-missions/<orchId>/sessions/
+ */
+export function createOrchestrationSessionsDir(sourceWorkspaceDir: string, orchId: string): string {
+  const sessionsDir = path.join(sourceWorkspaceDir, ".verso-missions", orchId, "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  return sessionsDir;
+}
+
+/**
+ * Get session file path for orchestrator or worker.
+ */
+export function getOrchestrationSessionFile(
+  sourceWorkspaceDir: string,
+  orchId: string,
+  sessionType: "orchestrator" | "worker" | "acceptance",
+  workerId?: string,
+): string {
+  const sessionsDir = createOrchestrationSessionsDir(sourceWorkspaceDir, orchId);
+  if (sessionType === "orchestrator") {
+    return path.join(sessionsDir, `orchestrator-${orchId}.jsonl`);
+  } else if (sessionType === "acceptance") {
+    return path.join(sessionsDir, `acceptance-${orchId}.jsonl`);
+  } else {
+    return path.join(sessionsDir, `worker-${workerId}.jsonl`);
+  }
+}
+
+/**
  * Initialize an isolated memory engine for orchestration.
  *
  * Creates a MemoryIndexManager.createIsolated() instance that:
@@ -62,11 +91,13 @@ export async function initOrchestrationMemory(params: {
     // Uses real agentId to resolve config (embedding, latent factors, MMR, etc.)
     // but workspaceDir points to the orchestration's mission workspace
     // Enable sessions source to automatically index worker sessions
+    const sessionsDir = createOrchestrationSessionsDir(sourceWorkspaceDir, orchId);
     const memoryManager = await MemoryIndexManager.createIsolated({
       cfg,
       agentId,
       workspaceDir: memoryDir,
       sources: ["memory", "sessions"],
+      customSessionsDir: sessionsDir,
     });
 
     if (!memoryManager) {
@@ -94,12 +125,14 @@ export async function initOrchestrationMemory(params: {
 }
 
 /**
- * Cleanup orchestration memory.
- * Closes the isolated memory manager and removes the memory directory.
+ * Cleanup orchestration memory and sessions.
+ * Closes the isolated memory manager and removes the memory and sessions directories.
  * Safe to call — the manager is not in the global cache.
  */
 export async function cleanupOrchestrationMemory(
   memoryContext: OrchestrationMemoryContext,
+  sourceWorkspaceDir?: string,
+  orchId?: string,
 ): Promise<void> {
   const errors: string[] = [];
 
@@ -126,6 +159,21 @@ export async function cleanupOrchestrationMemory(
       const errMsg = `Failed to remove memory directory: ${String(err)}`;
       logger.error(errMsg);
       errors.push(errMsg);
+    }
+  }
+
+  // Remove sessions directory
+  if (sourceWorkspaceDir && orchId) {
+    const sessionsDir = path.join(sourceWorkspaceDir, ".verso-missions", orchId, "sessions");
+    if (fs.existsSync(sessionsDir)) {
+      try {
+        fs.rmSync(sessionsDir, { recursive: true, force: true });
+        logger.info("Removed orchestration sessions directory", { sessionsDir });
+      } catch (err) {
+        const errMsg = `Failed to remove sessions directory: ${String(err)}`;
+        logger.error(errMsg);
+        errors.push(errMsg);
+      }
     }
   }
 

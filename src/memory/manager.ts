@@ -126,6 +126,7 @@ export class MemoryIndexManager implements MemorySearchManager {
   private readonly agentId: string;
   private readonly workspaceDir: string;
   private readonly settings: ResolvedMemorySearchConfig;
+  private readonly customSessionsDir?: string;
   private provider: EmbeddingProvider;
   private readonly requestedProvider:
     | "openai"
@@ -243,6 +244,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     workspaceDir: string;
     providerResult?: EmbeddingProviderResult;
     sources?: Array<"memory" | "sessions">;
+    customSessionsDir?: string;
   }): Promise<MemoryIndexManager | null> {
     const { cfg, agentId, workspaceDir } = params;
     const settings = resolveMemorySearchConfig(cfg, agentId);
@@ -279,6 +281,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       workspaceDir,
       settings: isolatedSettings,
       providerResult,
+      customSessionsDir: params.customSessionsDir,
     });
   }
 
@@ -289,12 +292,14 @@ export class MemoryIndexManager implements MemorySearchManager {
     workspaceDir: string;
     settings: ResolvedMemorySearchConfig;
     providerResult: EmbeddingProviderResult;
+    customSessionsDir?: string;
   }) {
     this.cacheKey = params.cacheKey;
     this.cfg = params.cfg;
     this.agentId = params.agentId;
     this.workspaceDir = params.workspaceDir;
     this.settings = params.settings;
+    this.customSessionsDir = params.customSessionsDir;
     this.provider = params.providerResult.provider;
     this.requestedProvider = params.providerResult.requestedProvider;
     this.fallbackFrom = params.providerResult.fallbackFrom;
@@ -1209,7 +1214,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     needsFullReindex: boolean;
     progress?: MemorySyncProgressState;
   }) {
-    const files = await listSessionFiles(this.agentId);
+    const files = await listSessionFiles(this.agentId, this.customSessionsDir);
     const activePaths = new Set(files.map((file) => sessionPathForFile(file)));
     const indexAll = params.needsFullReindex || this.sessionsDirtyFiles.size === 0;
     log.debug("memory sync: indexing session files", {

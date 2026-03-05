@@ -29,6 +29,17 @@ export function resolveMissionWorkspace(sourceWorkspaceDir: string, orchId: stri
   return path.join(sourceWorkspaceDir, ".verso-missions", orchId);
 }
 
+/**
+ * Resolve the source workspace directory from a mission workspace path.
+ * Reverses resolveMissionWorkspace().
+ * Example: /path/to/project/.verso-missions/abc123 -> /path/to/project
+ */
+export function resolveSourceWorkspaceDir(missionWorkspaceDir: string): string {
+  // Mission workspace format: <sourceWorkspace>/.verso-missions/<orchId>
+  // Remove the last two path segments (.verso-missions/<orchId>)
+  return path.dirname(path.dirname(missionWorkspaceDir));
+}
+
 // --- Mission Workspace ---
 
 /**

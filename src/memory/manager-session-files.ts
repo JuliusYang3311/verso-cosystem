@@ -20,8 +20,11 @@ export type SessionFileEntry = {
   content: string;
 };
 
-export async function listSessionFiles(agentId: string): Promise<string[]> {
-  const dir = resolveSessionTranscriptsDirForAgent(agentId);
+export async function listSessionFiles(
+  agentId: string,
+  customSessionsDir?: string,
+): Promise<string[]> {
+  const dir = customSessionsDir ?? resolveSessionTranscriptsDirForAgent(agentId);
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     return entries

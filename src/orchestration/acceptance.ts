@@ -60,13 +60,21 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
   }
 
   // Step 2: Overall project evaluation against original user task
-  // Use in-memory session for evaluation (like workers do)
+  // Use persistent session for evaluation (stored in orchestration directory)
   const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
   const { resolveAgentModel } = await import("./model-resolver.js");
   const { resolveOpenClawAgentDir } = await import("../agents/agent-paths.js");
+  const { getOrchestrationSessionFile } = await import("./orchestrator-memory.js");
 
   const { model, authStorage, modelRegistry } = await resolveAgentModel();
   const agentDir = resolveOpenClawAgentDir();
+
+  // Create persistent session file in orchestration directory
+  const sessionFile = getOrchestrationSessionFile(
+    orchestration.sourceWorkspaceDir,
+    orchestration.id,
+    "acceptance",
+  );
 
   // Build subtask summary for context
   const subtaskSummary = subtasks
@@ -191,7 +199,7 @@ Respond with a JSON object:
         ...gworkspaceTools,
       ];
 
-      // Create in-memory session for evaluation
+      // Create persistent session for evaluation
       const created = await createAgentSession({
         cwd: workspaceDir,
         agentDir,
@@ -199,7 +207,7 @@ Respond with a JSON object:
         modelRegistry,
         model,
         customTools: acceptanceTools, // Use customTools to add tools alongside coding tools
-        sessionManager: SessionManager.inMemory(workspaceDir),
+        sessionManager: SessionManager.open(sessionFile),
       });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
