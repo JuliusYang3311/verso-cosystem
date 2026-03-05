@@ -84,6 +84,7 @@ export type OrchestrateToolOptions = {
   maxFixCycles?: number;
   maxOrchestrations?: number;
   verifyCmd?: string;
+  config?: import("../config/types.js").VersoConfig;
 };
 
 export function createOrchestrateTool(opts: OrchestrateToolOptions): AnyAgentTool {
@@ -208,10 +209,13 @@ async function handleCreatePlan(params: Record<string, unknown>, _opts: Orchestr
   await saveOrchestration(orch);
 
   // Broadcast status update
-  await broadcastOrchestrationEvent({
-    type: "orchestration.updated",
-    payload: buildOrchestrationSnapshot(orch),
-  });
+  await broadcastOrchestrationEvent(
+    {
+      type: "orchestration.updated",
+      payload: buildOrchestrationSnapshot(orch),
+    },
+    opts.config,
+  );
 
   // Trigger orchestration:plan-created hook
   const { triggerOrchestrationHook } = await import("./hooks.js");
@@ -257,10 +261,13 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
   await saveOrchestration(orch);
 
   // Broadcast status update
-  await broadcastOrchestrationEvent({
-    type: "orchestration.updated",
-    payload: buildOrchestrationSnapshot(orch),
-  });
+  await broadcastOrchestrationEvent(
+    {
+      type: "orchestration.updated",
+      payload: buildOrchestrationSnapshot(orch),
+    },
+    opts.config,
+  );
 
   const maxWorkers = opts.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers;
 
@@ -268,6 +275,7 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
     const results = await runWorkerPool({
       orchestration: orch,
       maxWorkers,
+      config: opts.config,
     });
 
     const completed = results.filter((r) => r.ok).length;
@@ -461,10 +469,13 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
   await saveOrchestration(orch);
 
   // Broadcast status update
-  await broadcastOrchestrationEvent({
-    type: "orchestration.updated",
-    payload: buildOrchestrationSnapshot(orch),
-  });
+  await broadcastOrchestrationEvent(
+    {
+      type: "orchestration.updated",
+      payload: buildOrchestrationSnapshot(orch),
+    },
+    opts.config,
+  );
 
   // Trigger acceptance:started hook
   const { triggerOrchestrationHook } = await import("./hooks.js");
@@ -531,10 +542,13 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
   await saveOrchestration(orch);
 
   // Broadcast status update
-  await broadcastOrchestrationEvent({
-    type: "orchestration.updated",
-    payload: buildOrchestrationSnapshot(orch),
-  });
+  await broadcastOrchestrationEvent(
+    {
+      type: "orchestration.updated",
+      payload: buildOrchestrationSnapshot(orch),
+    },
+    opts.config,
+  );
 
   // Trigger acceptance:completed hook
   await triggerOrchestrationHook("acceptance:completed", {
@@ -645,10 +659,13 @@ async function handleCreateFixTasks(params: Record<string, unknown>) {
   await saveOrchestration(orch);
 
   // Broadcast status update
-  await broadcastOrchestrationEvent({
-    type: "orchestration.updated",
-    payload: buildOrchestrationSnapshot(orch),
-  });
+  await broadcastOrchestrationEvent(
+    {
+      type: "orchestration.updated",
+      payload: buildOrchestrationSnapshot(orch),
+    },
+    opts.config,
+  );
 
   return jsonResult({
     orchestrationId: orchId,
@@ -723,13 +740,16 @@ async function handleComplete(params: Record<string, unknown>) {
   await saveOrchestration(orch);
 
   // Broadcast completion with output path
-  await broadcastOrchestrationEvent({
-    type: "orchestration.completed",
-    orchestrationId: orch.id,
-    outputPath: copyResult.resolvedPath,
-    summary:
-      summary ?? `Orchestration completed. ${orch.plan?.subtasks.length ?? 0} subtasks executed.`,
-  });
+  await broadcastOrchestrationEvent(
+    {
+      type: "orchestration.completed",
+      orchestrationId: orch.id,
+      outputPath: copyResult.resolvedPath,
+      summary:
+        summary ?? `Orchestration completed. ${orch.plan?.subtasks.length ?? 0} subtasks executed.`,
+    },
+    opts.config,
+  );
 
   // Trigger orchestration:completed hook
   const { triggerOrchestrationHook } = await import("./hooks.js");
@@ -788,11 +808,14 @@ async function handleAbort(params: Record<string, unknown>) {
   await saveOrchestration(orch);
 
   // Broadcast abort event
-  await broadcastOrchestrationEvent({
-    type: "orchestration.failed",
-    orchestrationId: orchId,
-    error: "Aborted by user",
-  });
+  await broadcastOrchestrationEvent(
+    {
+      type: "orchestration.failed",
+      orchestrationId: orchId,
+      error: "Aborted by user",
+    },
+    opts.config,
+  );
 
   // Trigger orchestration:failed hook
   const { triggerOrchestrationHook } = await import("./hooks.js");

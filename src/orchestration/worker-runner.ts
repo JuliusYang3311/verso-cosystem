@@ -439,8 +439,9 @@ export async function runWorkerPool(params: {
   maxWorkers: number;
   memoryDir?: string; // Shared memory directory
   timeoutMs?: number;
+  config?: import("../config/types.js").VersoConfig;
 }): Promise<WorkerResult[]> {
-  const { orchestration: orch, maxWorkers, memoryDir, timeoutMs } = params;
+  const { orchestration: orch, maxWorkers, memoryDir, timeoutMs, config } = params;
 
   if (!orch.plan) {
     throw new Error("No plan found");
@@ -509,15 +510,18 @@ export async function runWorkerPool(params: {
       // Task status and startedAtMs already set in claimNext()
       Promise.all([
         saveOrchestration(orch),
-        broadcastOrchestrationEvent({
-          type: "orchestration.subtask",
-          payload: {
-            orchestrationId: orch.id,
-            subtaskId: task.id,
-            status: task.status,
-            title: task.title,
+        broadcastOrchestrationEvent(
+          {
+            type: "orchestration.subtask",
+            payload: {
+              orchestrationId: orch.id,
+              subtaskId: task.id,
+              status: task.status,
+              title: task.title,
+            },
           },
-        }),
+          config,
+        ),
       ]).catch((err) => logger.warn("Failed to save/broadcast task start", { error: String(err) }));
 
       // Trigger worker:started hook
@@ -564,16 +568,19 @@ export async function runWorkerPool(params: {
         // Optimize: Save and broadcast in parallel
         await Promise.all([
           saveOrchestration(orch),
-          broadcastOrchestrationEvent({
-            type: "orchestration.subtask",
-            payload: {
-              orchestrationId: orch.id,
-              subtaskId: task.id,
-              status: task.status,
-              title: task.title,
-              error: task.error,
+          broadcastOrchestrationEvent(
+            {
+              type: "orchestration.subtask",
+              payload: {
+                orchestrationId: orch.id,
+                subtaskId: task.id,
+                status: task.status,
+                title: task.title,
+                error: task.error,
+              },
             },
-          }),
+            config,
+          ),
         ]);
 
         // Trigger worker:completed or worker:failed hook
@@ -602,16 +609,19 @@ export async function runWorkerPool(params: {
 
         await Promise.all([
           saveOrchestration(orch),
-          broadcastOrchestrationEvent({
-            type: "orchestration.subtask",
-            payload: {
-              orchestrationId: orch.id,
-              subtaskId: task.id,
-              status: task.status,
-              title: task.title,
-              error: task.error,
+          broadcastOrchestrationEvent(
+            {
+              type: "orchestration.subtask",
+              payload: {
+                orchestrationId: orch.id,
+                subtaskId: task.id,
+                status: task.status,
+                title: task.title,
+                error: task.error,
+              },
             },
-          }),
+            config,
+          ),
         ]);
 
         // Trigger worker:failed hook for unhandled exceptions

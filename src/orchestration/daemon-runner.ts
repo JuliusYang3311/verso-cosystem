@@ -126,6 +126,11 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
 
     // Create orchestrate tool (pass sandboxDir instead of missionDir)
     logger.info("Creating orchestrate tool", { orchId });
+
+    // Load config for gateway communication
+    const { loadConfig } = await import("../config/config.js");
+    const config = loadConfig();
+
     const orchestrateTool = createOrchestrateTool({
       agentSessionKey: opts.agentSessionKey,
       agentId: opts.agentId,
@@ -134,13 +139,12 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       maxFixCycles: opts.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
       maxOrchestrations: 1, // Single task per daemon
       verifyCmd: opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
+      config: opts.config,
     });
 
     // Create web search and web fetch tools for orchestrator
     const { createWebSearchTool } = await import("../agents/tools/web-search.js");
     const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
-    const { loadConfig } = await import("../config/config.js");
-    const config = loadConfig();
     const webSearchTool = createWebSearchTool({ config, sandboxed: false });
     const webFetchTool = createWebFetchTool({ config, sandboxed: false });
 
