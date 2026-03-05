@@ -54,7 +54,7 @@ const AUTO_VIDEO_KEY_PROVIDERS = ["google"] as const;
 const DEFAULT_IMAGE_MODELS: Record<string, string> = {
   openai: "gpt-5-mini",
   anthropic: "claude-opus-4-6",
-  google: "gemini-3-flash-preview",
+  google: "gemini-3.1-flash-lite-preview",
   minimax: "MiniMax-VL-01",
 };
 

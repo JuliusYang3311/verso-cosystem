@@ -187,7 +187,7 @@ CLI 模板还可以使用：
 **图片**
 
 - 如果支持图片，优先使用你的活动模型。
-- 良好的默认值：`openai/gpt-5.2`、`anthropic/claude-opus-4-5`、`google/gemini-3-pro-preview`。
+- 良好的默认值：`openai/gpt-5.2`、`anthropic/claude-opus-4-5`、`google/gemini-3.1-pro-preview`。
 
 **音频**
 
@@ -197,7 +197,7 @@ CLI 模板还可以使用：
 
 **视频**
 
-- `google/gemini-3-flash-preview`（快速）、`google/gemini-3-pro-preview`（更丰富）。
+- `google/gemini-3.1-flash-lite-preview`（快速）、`google/gemini-3.1-pro-preview`（更丰富）。
 - CLI 回退：`gemini` CLI（支持对视频/音频使用 `read_file`）。
 
 ## 附件策略
@@ -222,7 +222,7 @@ CLI 模板还可以使用：
         { provider: "openai", model: "gpt-5.2", capabilities: ["image"] },
         {
           provider: "google",
-          model: "gemini-3-flash-preview",
+          model: "gemini-3.1-flash-lite-preview",
           capabilities: ["image", "audio", "video"],
         },
         {
@@ -270,7 +270,7 @@ CLI 模板还可以使用：
         enabled: true,
         maxChars: 500,
         models: [
-          { provider: "google", model: "gemini-3-flash-preview" },
+          { provider: "google", model: "gemini-3.1-flash-lite-preview" },
           {
             type: "cli",
             command: "gemini",
@@ -330,7 +330,7 @@ CLI 模板还可以使用：
         models: [
           {
             provider: "google",
-            model: "gemini-3-pro-preview",
+            model: "gemini-3.1-pro-preview",
             capabilities: ["image", "video", "audio"],
           },
         ],
@@ -339,7 +339,7 @@ CLI 模板还可以使用：
         models: [
           {
             provider: "google",
-            model: "gemini-3-pro-preview",
+            model: "gemini-3.1-pro-preview",
             capabilities: ["image", "video", "audio"],
           },
         ],
@@ -348,7 +348,7 @@ CLI 模板还可以使用：
         models: [
           {
             provider: "google",
-            model: "gemini-3-pro-preview",
+            model: "gemini-3.1-pro-preview",
             capabilities: ["image", "video", "audio"],
           },
         ],

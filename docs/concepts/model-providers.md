@@ -78,7 +78,7 @@ Verso ships with the pi‑ai catalog. These providers require **no**
 
 - Provider: `google`
 - Auth: `GEMINI_API_KEY`
-- Example model: `google/gemini-3-pro-preview`
+- Example model: `google/gemini-3.1-pro-preview`
 - CLI: `verso onboard --auth-choice gemini-api-key`
 
 ### Google Vertex, Antigravity, and Gemini CLI

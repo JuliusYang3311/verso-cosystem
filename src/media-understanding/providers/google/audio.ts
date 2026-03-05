@@ -3,7 +3,7 @@ import { normalizeGoogleModelId } from "../../../agents/models-config.providers.
 import { fetchWithTimeoutGuarded, normalizeBaseUrl, readErrorResponse } from "../shared.js";
 
 export const DEFAULT_GOOGLE_AUDIO_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-const DEFAULT_GOOGLE_AUDIO_MODEL = "gemini-3-flash-preview";
+const DEFAULT_GOOGLE_AUDIO_MODEL = "gemini-3.1-flash-lite-preview";
 const DEFAULT_GOOGLE_AUDIO_PROMPT = "Transcribe the audio.";
 
 function resolveModel(model?: string): string {

@@ -149,7 +149,7 @@ x-i18n:
       video: {
         enabled: true,
         maxBytes: 52428800,
-        models: [{ provider: "google", model: "gemini-3-flash-preview" }],
+        models: [{ provider: "google", model: "gemini-3.1-flash-lite-preview" }],
       },
     },
   },

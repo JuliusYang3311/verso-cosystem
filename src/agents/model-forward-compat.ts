@@ -29,7 +29,7 @@ export function resolveGemini3ForwardCompatModel(
   modelId: string,
   modelRegistry: ModelRegistry,
 ): Model<Api> | undefined {
-  if (modelId !== "gemini-3-flash-preview" && modelId !== "gemini-3-pro-preview") {
+  if (modelId !== "gemini-3.1-flash-lite-preview" && modelId !== "gemini-3.1-pro-preview") {
     return undefined;
   }
 
@@ -51,7 +51,7 @@ export function resolveGemini3ForwardCompatModel(
           ? "https://generativelanguage.googleapis.com/v1beta"
           : "https://cloudcode-pa.googleapis.com",
       contextWindow: 1048576,
-      reasoning: modelId === "gemini-3-pro-preview",
+      reasoning: modelId === "gemini-3.1-pro-preview",
     } as Model<Api>);
   }
 
@@ -64,7 +64,9 @@ export function resolveGemini3ForwardCompatModel(
     return normalizeModelCompat({
       id: modelId,
       name:
-        modelId === "gemini-3-pro-preview" ? "Gemini 3 Pro (Preview)" : "Gemini 3 Flash (Preview)",
+        modelId === "gemini-3.1-pro-preview"
+          ? "Gemini 3 Pro (Preview)"
+          : "Gemini 3 Flash (Preview)",
       provider: normalizedProvider,
       api:
         normalizedProvider === "google"
@@ -76,7 +78,7 @@ export function resolveGemini3ForwardCompatModel(
         normalizedProvider === "google"
           ? "https://generativelanguage.googleapis.com/v1beta"
           : "https://cloudcode-pa.googleapis.com",
-      reasoning: modelId === "gemini-3-pro-preview",
+      reasoning: modelId === "gemini-3.1-pro-preview",
       input: ["text", "image"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: 1048576,

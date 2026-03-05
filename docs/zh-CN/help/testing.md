@@ -230,10 +230,10 @@ OPENCLAW_LIVE_CLI_BACKEND=1 \
   - `OPENCLAW_LIVE_GATEWAY_MODELS="openai/gpt-5.2" pnpm test:live src/gateway/gateway-models.profiles.live.test.ts`
 
 - 跨多个提供商的工具调用：
-  - `OPENCLAW_LIVE_GATEWAY_MODELS="openai/gpt-5.2,anthropic/claude-opus-4-5,google/gemini-3-flash-preview,zai/glm-4.7,minimax/minimax-m2.1" pnpm test:live src/gateway/gateway-models.profiles.live.test.ts`
+  - `OPENCLAW_LIVE_GATEWAY_MODELS="openai/gpt-5.2,anthropic/claude-opus-4-5,google/gemini-3.1-flash-lite-preview,zai/glm-4.7,minimax/minimax-m2.1" pnpm test:live src/gateway/gateway-models.profiles.live.test.ts`
 
 - Google 专项（Gemini API 密钥 + Antigravity）：
-  - Gemini（API 密钥）：`OPENCLAW_LIVE_GATEWAY_MODELS="google/gemini-3-flash-preview" pnpm test:live src/gateway/gateway-models.profiles.live.test.ts`
+  - Gemini（API 密钥）：`OPENCLAW_LIVE_GATEWAY_MODELS="google/gemini-3.1-flash-lite-preview" pnpm test:live src/gateway/gateway-models.profiles.live.test.ts`
   - Antigravity（OAuth）：`OPENCLAW_LIVE_GATEWAY_MODELS="google-antigravity/claude-opus-4-6-thinking,google-antigravity/gemini-3-pro-high" pnpm test:live src/gateway/gateway-models.profiles.live.test.ts`
 
 注意：
@@ -256,13 +256,13 @@ OPENCLAW_LIVE_CLI_BACKEND=1 \
 - OpenAI（非 Codex）：`openai/gpt-5.2`（可选：`openai/gpt-5.1`）
 - OpenAI Codex：`openai-codex/gpt-5.2`（可选：`openai-codex/gpt-5.2-codex`）
 - Anthropic：`anthropic/claude-opus-4-5`（或 `anthropic/claude-sonnet-4-5`）
-- Google（Gemini API）：`google/gemini-3-pro-preview` 和 `google/gemini-3-flash-preview`（避免较旧的 Gemini 2.x 模型）
+- Google（Gemini API）：`google/gemini-3.1-pro-preview` 和 `google/gemini-3.1-flash-lite-preview`（避免较旧的 Gemini 2.x 模型）
 - Google（Antigravity）：`google-antigravity/claude-opus-4-6-thinking` 和 `google-antigravity/gemini-3-flash`
 - Z.AI（GLM）：`zai/glm-4.7`
 - MiniMax：`minimax/minimax-m2.1`
 
 运行带工具 + 图像的 Gateway 网关冒烟测试：
-`OPENCLAW_LIVE_GATEWAY_MODELS="openai/gpt-5.2,openai-codex/gpt-5.2,anthropic/claude-opus-4-5,google/gemini-3-pro-preview,google/gemini-3-flash-preview,google-antigravity/claude-opus-4-6-thinking,google-antigravity/gemini-3-flash,zai/glm-4.7,minimax/minimax-m2.1" pnpm test:live src/gateway/gateway-models.profiles.live.test.ts`
+`OPENCLAW_LIVE_GATEWAY_MODELS="openai/gpt-5.2,openai-codex/gpt-5.2,anthropic/claude-opus-4-5,google/gemini-3.1-pro-preview,google/gemini-3.1-flash-lite-preview,google-antigravity/claude-opus-4-6-thinking,google-antigravity/gemini-3-flash,zai/glm-4.7,minimax/minimax-m2.1" pnpm test:live src/gateway/gateway-models.profiles.live.test.ts`
 
 ### 基线：工具调用（Read + 可选 Exec）
 
@@ -270,7 +270,7 @@ OPENCLAW_LIVE_CLI_BACKEND=1 \
 
 - OpenAI：`openai/gpt-5.2`（或 `openai/gpt-5-mini`）
 - Anthropic：`anthropic/claude-opus-4-5`（或 `anthropic/claude-sonnet-4-5`）
-- Google：`google/gemini-3-flash-preview`（或 `google/gemini-3-pro-preview`）
+- Google：`google/gemini-3.1-flash-lite-preview`（或 `google/gemini-3.1-pro-preview`）
 - Z.AI（GLM）：`zai/glm-4.7`
 - MiniMax：`minimax/minimax-m2.1`
 

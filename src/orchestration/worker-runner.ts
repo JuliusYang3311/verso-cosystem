@@ -471,6 +471,9 @@ export async function runWorkerPool(params: {
         const task = subtaskById.get(id);
         if (task && task.status === "pending") {
           claimed.add(id);
+          // Immediately mark as running to prevent other workers from claiming
+          task.status = "running";
+          task.startedAtMs = Date.now();
           return task;
         }
       }
@@ -485,6 +488,9 @@ export async function runWorkerPool(params: {
         const task = subtaskById.get(nextId);
         if (task) {
           claimed.add(nextId);
+          // Immediately mark as running to prevent other workers from claiming
+          task.status = "running";
+          task.startedAtMs = Date.now();
           return task;
         }
       }
@@ -500,9 +506,7 @@ export async function runWorkerPool(params: {
         break;
       }
 
-      task.status = "running";
-      task.startedAtMs = Date.now();
-      // Optimize: Save and broadcast in parallel (non-blocking)
+      // Task status and startedAtMs already set in claimNext()
       Promise.all([
         saveOrchestration(orch),
         broadcastOrchestrationEvent({

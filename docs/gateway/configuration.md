@@ -1517,8 +1517,8 @@ is already present in `agents.defaults.models`:
 - `sonnet` -> `anthropic/claude-sonnet-4-5`
 - `gpt` -> `openai/gpt-5.2`
 - `gpt-mini` -> `openai/gpt-5-mini`
-- `gemini` -> `google/gemini-3-pro-preview`
-- `gemini-flash` -> `google/gemini-3-flash-preview`
+- `gemini` -> `google/gemini-3.1-pro-preview`
+- `gemini-flash` -> `google/gemini-3.1-flash-lite-preview`
 
 If you configure the same alias name (case-insensitive) yourself, your value wins (defaults never override).
 
@@ -1894,7 +1894,7 @@ of `every`, keep `HEARTBEAT.md` tiny, and/or choose a cheaper `model`.
 - Each `models[]` entry:
   - Provider entry (`type: "provider"` or omitted):
     - `provider`: API provider id (`openai`, `anthropic`, `google`/`gemini`, `groq`, etc).
-    - `model`: model id override (required for image; defaults to `gpt-4o-mini-transcribe`/`whisper-large-v3-turbo` for audio providers, and `gemini-3-flash-preview` for video).
+    - `model`: model id override (required for image; defaults to `gpt-4o-mini-transcribe`/`whisper-large-v3-turbo` for audio providers, and `gemini-3.1-flash-lite-preview` for video).
     - `profile` / `preferredProfile`: auth profile selection.
   - CLI entry (`type: "cli"`):
     - `command`: executable to run.
@@ -1927,7 +1927,7 @@ Example:
       video: {
         enabled: true,
         maxBytes: 52428800,
-        models: [{ provider: "google", model: "gemini-3-flash-preview" }],
+        models: [{ provider: "google", model: "gemini-3.1-flash-lite-preview" }],
       },
     },
   },

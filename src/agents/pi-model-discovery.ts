@@ -87,10 +87,10 @@ export function discoverModels(authStorage: AuthStorage, agentDir: string): Mode
   registry.find = (provider: string, modelId: string): Model<Api> | undefined => {
     const original = originalFind(provider, modelId);
     if (original) {
-      if (modelId === "gemini-3-flash-preview") {
+      if (modelId === "gemini-3.1-flash-lite-preview") {
         return { ...original, contextWindow: 1048576 };
       }
-      if (modelId === "gemini-3-pro-preview") {
+      if (modelId === "gemini-3.1-pro-preview") {
         return { ...original, contextWindow: 1048576, reasoning: true };
       }
       if (modelId === "gpt-5.3" || modelId === "gpt-5.3-codex") {
@@ -104,18 +104,18 @@ export function discoverModels(authStorage: AuthStorage, agentDir: string): Mode
       }
       return original;
     }
-    if (modelId === "gemini-3-flash-preview" || modelId === "gemini-3-pro-preview") {
+    if (modelId === "gemini-3.1-flash-lite-preview" || modelId === "gemini-3.1-pro-preview") {
       const isGoogle = provider === "google";
       return {
         id: modelId,
         name:
-          modelId === "gemini-3-pro-preview"
+          modelId === "gemini-3.1-pro-preview"
             ? "Gemini 3 Pro (Preview)"
             : "Gemini 3 Flash (Preview)",
         provider: provider,
         api: isGoogle ? "google-generative-ai" : "google-gemini-cli",
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-        reasoning: modelId === "gemini-3-pro-preview",
+        reasoning: modelId === "gemini-3.1-pro-preview",
         input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 1048576,

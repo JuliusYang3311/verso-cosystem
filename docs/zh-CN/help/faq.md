@@ -1948,8 +1948,8 @@ Model "provider/model" is not allowed. Use /model to list available models.
 - `sonnet` → `anthropic/claude-sonnet-4-5`
 - `gpt` → `openai/gpt-5.2`
 - `gpt-mini` → `openai/gpt-5-mini`
-- `gemini` → `google/gemini-3-pro-preview`
-- `gemini-flash` → `google/gemini-3-flash-preview`
+- `gemini` → `google/gemini-3.1-pro-preview`
+- `gemini-flash` → `google/gemini-3.1-flash-lite-preview`
 
 如果你设置了同名的自定义别名，你的值优先。
 

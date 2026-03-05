@@ -147,18 +147,18 @@ verso models list | grep venice
 
 ### Anonymized Models (10) — Via Venice Proxy
 
-| Model ID                 | Original          | Context (tokens) | Features          |
-| ------------------------ | ----------------- | ---------------- | ----------------- |
-| `claude-opus-45`         | Claude Opus 4.5   | 202k             | Reasoning, vision |
-| `claude-sonnet-45`       | Claude Sonnet 4.5 | 202k             | Reasoning, vision |
-| `openai-gpt-52`          | GPT-5.2           | 262k             | Reasoning         |
-| `openai-gpt-52-codex`    | GPT-5.2 Codex     | 262k             | Reasoning, vision |
-| `gemini-3-pro-preview`   | Gemini 3 Pro      | 202k             | Reasoning, vision |
-| `gemini-3-flash-preview` | Gemini 3 Flash    | 262k             | Reasoning, vision |
-| `grok-41-fast`           | Grok 4.1 Fast     | 262k             | Reasoning, vision |
-| `grok-code-fast-1`       | Grok Code Fast 1  | 262k             | Reasoning, code   |
-| `kimi-k2-thinking`       | Kimi K2 Thinking  | 262k             | Reasoning         |
-| `minimax-m21`            | MiniMax M2.1      | 202k             | Reasoning         |
+| Model ID                        | Original          | Context (tokens) | Features          |
+| ------------------------------- | ----------------- | ---------------- | ----------------- |
+| `claude-opus-45`                | Claude Opus 4.5   | 202k             | Reasoning, vision |
+| `claude-sonnet-45`              | Claude Sonnet 4.5 | 202k             | Reasoning, vision |
+| `openai-gpt-52`                 | GPT-5.2           | 262k             | Reasoning         |
+| `openai-gpt-52-codex`           | GPT-5.2 Codex     | 262k             | Reasoning, vision |
+| `gemini-3.1-pro-preview`        | Gemini 3 Pro      | 202k             | Reasoning, vision |
+| `gemini-3.1-flash-lite-preview` | Gemini 3 Flash    | 262k             | Reasoning, vision |
+| `grok-41-fast`                  | Grok 4.1 Fast     | 262k             | Reasoning, vision |
+| `grok-code-fast-1`              | Grok Code Fast 1  | 262k             | Reasoning, code   |
+| `kimi-k2-thinking`              | Kimi K2 Thinking  | 262k             | Reasoning         |
+| `minimax-m21`                   | MiniMax M2.1      | 202k             | Reasoning         |
 
 ## Model Discovery
 

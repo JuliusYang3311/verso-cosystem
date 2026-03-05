@@ -154,18 +154,18 @@ openclaw models list | grep venice
 
 ### 匿名化模型（10 个）— 通过 Venice 代理
 
-| 模型 ID                  | 原始模型          | 上下文（token） | 特性       |
-| ------------------------ | ----------------- | --------------- | ---------- |
-| `claude-opus-45`         | Claude Opus 4.5   | 202k            | 推理，视觉 |
-| `claude-sonnet-45`       | Claude Sonnet 4.5 | 202k            | 推理，视觉 |
-| `openai-gpt-52`          | GPT-5.2           | 262k            | 推理       |
-| `openai-gpt-52-codex`    | GPT-5.2 Codex     | 262k            | 推理，视觉 |
-| `gemini-3-pro-preview`   | Gemini 3 Pro      | 202k            | 推理，视觉 |
-| `gemini-3-flash-preview` | Gemini 3 Flash    | 262k            | 推理，视觉 |
-| `grok-41-fast`           | Grok 4.1 Fast     | 262k            | 推理，视觉 |
-| `grok-code-fast-1`       | Grok Code Fast 1  | 262k            | 推理，编程 |
-| `kimi-k2-thinking`       | Kimi K2 Thinking  | 262k            | 推理       |
-| `minimax-m21`            | MiniMax M2.1      | 202k            | 推理       |
+| 模型 ID                         | 原始模型          | 上下文（token） | 特性       |
+| ------------------------------- | ----------------- | --------------- | ---------- |
+| `claude-opus-45`                | Claude Opus 4.5   | 202k            | 推理，视觉 |
+| `claude-sonnet-45`              | Claude Sonnet 4.5 | 202k            | 推理，视觉 |
+| `openai-gpt-52`                 | GPT-5.2           | 262k            | 推理       |
+| `openai-gpt-52-codex`           | GPT-5.2 Codex     | 262k            | 推理，视觉 |
+| `gemini-3.1-pro-preview`        | Gemini 3 Pro      | 202k            | 推理，视觉 |
+| `gemini-3.1-flash-lite-preview` | Gemini 3 Flash    | 262k            | 推理，视觉 |
+| `grok-41-fast`                  | Grok 4.1 Fast     | 262k            | 推理，视觉 |
+| `grok-code-fast-1`              | Grok Code Fast 1  | 262k            | 推理，编程 |
+| `kimi-k2-thinking`              | Kimi K2 Thinking  | 262k            | 推理       |
+| `minimax-m21`                   | MiniMax M2.1      | 202k            | 推理       |
 
 ## 模型发现
 

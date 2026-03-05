@@ -10,7 +10,7 @@ const describeLive = LIVE && GEMINI_KEY ? describe : describe.skip;
 describeLive("gemini live switch", () => {
   it("handles unsigned tool calls from Antigravity when switching to Gemini 3", async () => {
     const now = Date.now();
-    const model = getModel("google", "gemini-3-pro-preview");
+    const model = getModel("google", "gemini-3.1-pro-preview");
 
     const res = await completeSimple(
       model,

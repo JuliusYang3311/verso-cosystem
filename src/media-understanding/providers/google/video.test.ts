@@ -94,9 +94,11 @@ describe("describeGeminiVideo", () => {
       fetchFn,
     });
 
-    expect(result.model).toBe("gemini-3-pro-preview");
+    expect(result.model).toBe("gemini-3.1-pro-preview");
     expect(result.text).toBe("first\nsecond");
-    expect(seenUrl).toBe("https://example.com/v1beta/models/gemini-3-pro-preview:generateContent");
+    expect(seenUrl).toBe(
+      "https://example.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
+    );
     expect(seenInit?.method).toBe("POST");
     expect(seenInit?.signal).toBeInstanceOf(AbortSignal);
 
