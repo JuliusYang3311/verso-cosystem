@@ -58,9 +58,11 @@ export async function resolveAgentModel(): Promise<ResolvedModel> {
 
   if (!resolveResult.model || resolveResult.error) {
     const errorMsg = resolveResult.error ?? "Model resolution returned undefined";
+    const availableModels = resolveResult.modelRegistry.getAvailable();
+    const providers = [...new Set(availableModels.map((m) => m.provider))];
     throw new Error(
       `Failed to resolve model ${provider}/${modelId}: ${errorMsg}\n` +
-        `Available providers: ${Array.from(resolveResult.modelRegistry.listProviders()).join(", ")}\n` +
+        `Available providers: ${providers.join(", ")}\n` +
         `Check your verso config or ORCHESTRATOR_MODEL env var.`,
     );
   }
