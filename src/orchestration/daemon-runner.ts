@@ -437,13 +437,11 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
       }
 
       // Debug: Check if agent actually did anything
-      const transcript = session.getTranscript();
-      const toolCalls = transcript.filter(
-        (entry: any) => entry.role === "assistant" && entry.toolUse,
-      );
+      const messages = session.messages;
+      const toolCalls = messages.filter((msg: any) => msg.role === "assistant" && msg.toolUse);
       logger.info("Orchestrator agent completed successfully", {
         orchId,
-        transcriptLength: transcript.length,
+        messagesCount: messages.length,
         toolCallCount: toolCalls.length,
       });
     } catch (err) {
