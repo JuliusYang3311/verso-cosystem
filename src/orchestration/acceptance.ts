@@ -3,6 +3,12 @@
 import { execSync } from "node:child_process";
 import type { AcceptanceResult, AcceptanceVerdict, Orchestration } from "./types.js";
 
+const logger = {
+  info: (...args: unknown[]) => console.log("[orchestration-acceptance]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestration-acceptance]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestration-acceptance]", ...args),
+};
+
 export type AcceptanceTestParams = {
   orchestration: Orchestration;
   workspaceDir: string;
@@ -19,12 +25,6 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
   const { orchestration, workspaceDir, verifyCmd } = params;
   const subtasks = orchestration.plan?.subtasks ?? [];
   const verdicts: AcceptanceVerdict[] = [];
-
-  const logger = {
-    info: (...args: unknown[]) => console.log("[orchestration-acceptance]", ...args),
-    warn: (...args: unknown[]) => console.warn("[orchestration-acceptance]", ...args),
-    error: (...args: unknown[]) => console.error("[orchestration-acceptance]", ...args),
-  };
 
   // Step 1: Run mechanical verify command (optional - skip if empty)
   let verifyPassed = true;

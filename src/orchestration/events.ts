@@ -3,6 +3,12 @@
 import type { VersoConfig } from "../config/types.js";
 import type { Orchestration, Subtask } from "./types.js";
 
+const logger = {
+  info: (...args: unknown[]) => console.log("[orchestration-events]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestration-events]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestration-events]", ...args),
+};
+
 export type OrchestrationEvent =
   | { type: "orchestration.started"; orchestrationId: string; userPrompt: string }
   | {
@@ -58,12 +64,6 @@ export async function broadcastOrchestrationEvent(
   event: OrchestrationEvent,
   config?: VersoConfig,
 ): Promise<void> {
-  const logger = {
-    info: (...args: unknown[]) => console.log("[orchestration-events]", ...args),
-    warn: (...args: unknown[]) => console.warn("[orchestration-events]", ...args),
-    error: (...args: unknown[]) => console.error("[orchestration-events]", ...args),
-  };
-
   logger.info("Broadcasting orchestration event", {
     type: event.type,
     orchestrationId: "orchestrationId" in event ? event.orchestrationId : undefined,
