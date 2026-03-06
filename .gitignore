@@ -1,19 +1,64 @@
+# Dependencies
 node_modules
 **/node_modules/
-.env
-docker-compose.extra.yml
-dist
+.pnpm-store
 pnpm-lock.yaml
 bun.lock
 bun.lockb
+
+# Build outputs
+dist
 coverage
-__pycache__/
-*.pyc
+*.bun-build
+**/*.bun-build
 .tsbuildinfo
-.pnpm-store
-.worktrees/
+tsconfig.tsbuildinfo
+bin/
+Core/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*[Oo]auth*.json
+auth-profiles.json
+
+# OS files
 .DS_Store
 **/.DS_Store
+Thumbs.db
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.worktrees/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+**/tmp/
+**/temp/
+build.log
+build_full.log
+output.log
+trading_decisions.log
+viap_report_003.json
+
+# Test outputs
 ui/src/ui/__screenshots__/
 ui/playwright-report/
 ui/test-results/
@@ -23,33 +68,20 @@ apps/android/.gradle/
 apps/android/app/build/
 apps/android/.cxx/
 
-# Bun build artifacts
-*.bun-build
+# iOS/macOS build artifacts
 apps/macos/.build/
-apps/shared/VersoKit/.build/
-**/ModuleCache/
-bin/
-bin/clawdbot-mac
-bin/docs-list
 apps/macos/.build-local/
 apps/macos/.swiftpm/
+apps/shared/VersoKit/.build/
 apps/shared/VersoKit/.swiftpm/
-Core/
 apps/ios/*.xcodeproj/
 apps/ios/*.xcworkspace/
 apps/ios/.swiftpm/
-vendor/
 apps/ios/Verso.xcodeproj/
 apps/ios/Verso.xcodeproj/**
 apps/macos/.build/**
-**/*.bun-build
 apps/ios/*.xcfilelist
-
-# Vendor build artifacts
-vendor/a2ui/renderers/lit/dist/
-src/canvas-host/a2ui/*.bundle.js
-src/canvas-host/a2ui/*.map
-.bundle.hash
+**/ModuleCache/
 
 # fastlane (iOS)
 apps/ios/fastlane/README.md
@@ -59,49 +91,55 @@ apps/ios/fastlane/screenshots/
 apps/ios/fastlane/test_output/
 apps/ios/fastlane/logs/
 apps/ios/fastlane/.env
-
-# fastlane build artifacts (local)
 apps/ios/*.ipa
 apps/ios/*.dSYM.zip
-
-# provisioning profiles (local)
 apps/ios/*.mobileprovision
+
+# Vendor build artifacts
+vendor/
+vendor/a2ui/renderers/lit/dist/
+src/canvas-host/a2ui/*.bundle.js
+src/canvas-host/a2ui/*.map
+.bundle.hash
 
 # Local untracked files
 .local/
+local/
 IDENTITY.md
 USER.md
 Soul.md
 contributing.md
 security.md
-*[Oo]auth*.json
-.tgz
 MEMORY.md
 
-
-# local tooling
+# Local tooling
 .serena/
+.serena/cache/
 
 # Agent credentials and memory (NEVER COMMIT)
 /memory/
 .agent/*.json
 !.agent/workflows/
-local/
+.agents/
+
+# Media files
 video_generation/
 skills/storage/cache_videos/
-.serena/cache/
 *.mp4
 *.mp3
 *.wav
 *.mov
 *.pkl
+
+# Project specific
 Crypto/
 resume/
+Swabble/
 skills/novel-writer/projects/
 skills/novel-writer/material/
 skills/novel-writer/style/
 
-# Large cache files (prevent accidental commits)
+# Cache and database files
 **/*cache*/
 **/*.cache
 **/cache/
@@ -113,8 +151,7 @@ skills/novel-writer/style/
 **/*.db-wal
 **/*.sqlite
 **/*.sqlite3
-**/*.log
-**/*.tmp
-**/*.temp
-**/tmp/
-**/temp/
+
+# Docker
+docker-compose.extra.yml
+
