@@ -32,9 +32,9 @@ let outboxWorkerInterval: NodeJS.Timeout | null = null;
  * Get the outbox directory path.
  */
 function getOutboxDir(): string {
-  const { getVersoDir } = require("../config/paths.js");
-  const versoDir = getVersoDir();
-  const outboxDir = path.join(versoDir, "orchestration-outbox");
+  const { resolveStateDir } = require("../config/paths.js");
+  const stateDir = resolveStateDir();
+  const outboxDir = path.join(stateDir, "orchestration-outbox");
   fs.mkdirSync(outboxDir, { recursive: true });
   return outboxDir;
 }
