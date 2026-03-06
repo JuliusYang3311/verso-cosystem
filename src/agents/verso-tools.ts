@@ -190,6 +190,8 @@ export function createVersoTools(options?: {
         agentId: agentId ?? "main",
         config: options?.config,
         sessionKey: options?.chatSessionKey ?? options?.agentSessionKey,
+        provider: options?.currentModel?.provider,
+        model: options?.currentModel?.model,
       }),
     );
   }

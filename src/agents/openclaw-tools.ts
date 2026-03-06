@@ -111,6 +111,8 @@ export function createOpenClawTools(options?: {
     ? createOrchestratorTriggerTool({
         agentId: agentId ?? "main",
         config: options?.config,
+        provider: options?.currentModel?.provider,
+        model: options?.currentModel?.model,
       })
     : null;
 

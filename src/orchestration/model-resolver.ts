@@ -54,16 +54,18 @@ export async function resolveAgentModel(): Promise<ResolvedModel> {
   }
 
   const agentDir = process.env.ORCHESTRATOR_AGENT_DIR || resolveAgentDir(cfg, "main");
-  const { model, error, authStorage, modelRegistry } = resolveModel(
-    provider,
-    modelId,
-    agentDir,
-    cfg,
-  );
+  const resolveResult = resolveModel(provider, modelId, agentDir, cfg);
 
-  if (!model || error) {
-    throw new Error(`Failed to resolve model ${provider}/${modelId}: ${error ?? "unknown"}`);
+  if (!resolveResult.model || resolveResult.error) {
+    const errorMsg = resolveResult.error ?? "Model resolution returned undefined";
+    throw new Error(
+      `Failed to resolve model ${provider}/${modelId}: ${errorMsg}\n` +
+        `Available providers: ${Array.from(resolveResult.modelRegistry.listProviders()).join(", ")}\n` +
+        `Check your verso config or ORCHESTRATOR_MODEL env var.`,
+    );
   }
+
+  const { model, authStorage, modelRegistry } = resolveResult;
 
   // Bridge verso's auth into pi-coding-agent's AuthStorage
   // This allows custom providers (e.g. "newapi") to work correctly

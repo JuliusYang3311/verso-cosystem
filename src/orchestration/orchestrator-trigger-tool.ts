@@ -26,6 +26,8 @@ export type OrchestratorTriggerToolOptions = {
   agentId: string;
   config?: VersoConfig;
   sessionKey?: string;
+  provider?: string;
+  model?: string;
 };
 
 /**
@@ -81,6 +83,8 @@ WORKFLOW:
               agentId: opts.agentId,
               triggeringSessionKey: opts.sessionKey,
               baseProjectDir,
+              provider: opts.provider,
+              model: opts.model,
             });
             return jsonResult({
               success: true,

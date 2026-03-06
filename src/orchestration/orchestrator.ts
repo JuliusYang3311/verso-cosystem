@@ -41,6 +41,8 @@ export type OrchestratorDaemonOptions = {
   agentId?: string;
   orchestrationId: string;
   userPrompt: string;
+  provider?: string;
+  model?: string;
 };
 
 function ensureLogsDir(): string {
@@ -243,6 +245,9 @@ export async function startOrchestratorDaemon(
     // Open log file for daemon output
     const logFd = fs.openSync(logPath, "a");
 
+    // Build model slug from calling session's provider/model (like evolver)
+    const modelSlug = opts.provider && opts.model ? `${opts.provider}/${opts.model}` : undefined;
+
     const child = spawn(process.execPath, [scriptPath], {
       detached: true,
       stdio: ["ignore", logFd, logFd], // Redirect stdout and stderr to log file
@@ -255,6 +260,7 @@ export async function startOrchestratorDaemon(
         ORCHESTRATOR_MAX_FIX_CYCLES: String(maxFixCycles),
         ORCHESTRATOR_VERIFY_CMD: verifyCmd,
         ORCHESTRATOR_ORCHESTRATION_ID: orchestrationId, // Pass orchestration ID
+        ...(modelSlug ? { ORCHESTRATOR_MODEL: modelSlug } : {}),
       },
     });
     child.unref();
@@ -307,6 +313,8 @@ export async function submitOrchestration(
     triggeringSessionKey?: string;
     chatSessionKey?: string;
     baseProjectDir?: string;
+    provider?: string;
+    model?: string;
   },
 ): Promise<{ orchestrationId: string; daemonStarted: boolean; error?: string }> {
   const cfg = opts?.cfg;
@@ -375,6 +383,8 @@ export async function submitOrchestration(
     agentId,
     orchestrationId,
     userPrompt,
+    provider: opts?.provider,
+    model: opts?.model,
   });
 
   if (!startResult.started) {

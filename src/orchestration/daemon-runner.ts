@@ -203,15 +203,29 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     });
 
     // Use in-memory session to avoid state pollution from previous runs
-    const created = await createAgentSession({
-      cwd: sandboxDir, // Work in shared sandbox
-      agentDir,
-      authStorage,
-      modelRegistry,
-      model,
-      customTools: customToolsList,
-      sessionManager: SessionManager.create(),
-    });
+    let created;
+    try {
+      created = await createAgentSession({
+        cwd: sandboxDir, // Work in shared sandbox
+        agentDir,
+        authStorage,
+        modelRegistry,
+        model,
+        customTools: customToolsList,
+        sessionManager: SessionManager.create(),
+      });
+    } catch (err) {
+      logger.error("Failed to create agent session", {
+        orchId,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+        cwd: sandboxDir,
+        agentDir,
+        modelProvider: model?.provider,
+        modelId: model?.id,
+      });
+      throw err;
+    }
 
     session = created.session;
     logger.info("Orchestrator agent session created", { orchId });
