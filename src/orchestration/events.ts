@@ -135,7 +135,6 @@ export async function broadcastOrchestrationEvent(
             params: {
               sessionKey: "agent:main:main",
               message: notificationMessage,
-              role: "user",
             },
             timeoutMs: 10000,
             config: effectiveConfig,
