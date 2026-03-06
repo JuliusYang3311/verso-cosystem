@@ -25,7 +25,6 @@ const OrchestratorTriggerSchema = Type.Object({
 export type OrchestratorTriggerToolOptions = {
   agentId: string;
   config?: VersoConfig;
-  notificationSessionKey?: string;
   provider?: string;
   model?: string;
 };
@@ -81,7 +80,6 @@ WORKFLOW:
             const result = await submitOrchestration(userPrompt, {
               cfg: opts.config,
               agentId: opts.agentId,
-              triggeringSessionKey: opts.notificationSessionKey,
               baseProjectDir,
               provider: opts.provider,
               model: opts.model,

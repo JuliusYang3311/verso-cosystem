@@ -15,7 +15,6 @@ import type { ClientToolDefinition } from "./params.js";
 export type EmbeddedRunAttemptParams = {
   sessionId: string;
   sessionKey?: string;
-  chatSessionKey?: string;
   agentId?: string;
   messageChannel?: string;
   messageProvider?: string;

@@ -313,8 +313,6 @@ export async function submitOrchestration(
   opts?: {
     cfg?: VersoConfig;
     agentId?: string;
-    triggeringSessionKey?: string;
-    chatSessionKey?: string;
     baseProjectDir?: string;
     provider?: string;
     model?: string;
@@ -338,18 +336,6 @@ export async function submitOrchestration(
       : path.resolve(workspace, opts.baseProjectDir)
     : undefined;
 
-  // Hardcode notification target to main agent's main session
-  // All orchestration completion notifications go to agent:main:main
-  const chatSessionKey = "agent:main:main";
-
-  // Log resolved session keys for debugging
-  logger.info("Orchestration session keys resolved", {
-    orchestrationId,
-    chatSessionKey,
-    triggeringSessionKey: opts?.triggeringSessionKey,
-    orchestratorSessionKey: `agent:${agentId}:orch:${orchestrationId}`,
-  });
-
   // Create orchestration record
   const orchestration = createOrchestration({
     id: orchestrationId,
@@ -358,8 +344,6 @@ export async function submitOrchestration(
     agentId,
     workspaceDir: "", // Will be set by daemon
     sourceWorkspaceDir: workspace,
-    triggeringSessionKey: opts?.triggeringSessionKey,
-    chatSessionKey,
     baseProjectDir,
     maxFixCycles,
   });

@@ -20,7 +20,6 @@ export type ClientToolDefinition = {
 export type RunEmbeddedPiAgentParams = {
   sessionId: string;
   sessionKey?: string;
-  chatSessionKey?: string;
   agentId?: string;
   messageChannel?: string;
   messageProvider?: string;

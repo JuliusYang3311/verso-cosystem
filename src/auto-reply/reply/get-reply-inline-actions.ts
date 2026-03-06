@@ -173,7 +173,6 @@ export async function handleInlineActions(params: {
 
       const tools = createVersoTools({
         agentSessionKey: sessionKey,
-        chatSessionKey: ctx.SessionKey,
         agentChannel: channel,
         agentAccountId: (ctx as { AccountId?: string }).AccountId,
         agentTo: ctx.OriginatingTo ?? ctx.To,
