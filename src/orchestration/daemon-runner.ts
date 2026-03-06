@@ -476,13 +476,68 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
     if (session) {
       try {
         session.dispose();
-      } catch {
-        // ignore
+        logger.info("Session disposed", { orchId });
+      } catch (err) {
+        logger.warn("Error disposing session", { orchId, error: String(err) });
       }
     }
 
-    // Wait a moment for any in-flight writes to complete
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // Wait for session to drain (all pending writes complete)
+    // Instead of fixed sleep, check if SessionManager has drained
+    logger.info("Waiting for session writes to drain", { orchId });
+
+    // Poll for session file stability (no size changes = writes complete)
+    const { getOrchestrationSessionFile } = await import("./orchestrator-memory.js");
+    const sessionFile = getOrchestrationSessionFile(
+      orch?.sourceWorkspaceDir || opts.workspaceDir,
+      orchId,
+      "orchestrator",
+    );
+
+    let lastSize = -1;
+    let stableCount = 0;
+    const maxWaitMs = 5000; // Max 5 seconds
+    const checkIntervalMs = 100;
+    const requiredStableChecks = 3; // File size must be stable for 3 consecutive checks
+    const startWaitMs = Date.now();
+
+    while (Date.now() - startWaitMs < maxWaitMs) {
+      try {
+        const stats = fs.statSync(sessionFile);
+        const currentSize = stats.size;
+
+        if (currentSize === lastSize) {
+          stableCount++;
+          if (stableCount >= requiredStableChecks) {
+            logger.info("Session file stable, writes drained", {
+              orchId,
+              waitedMs: Date.now() - startWaitMs,
+              fileSize: currentSize,
+            });
+            break;
+          }
+        } else {
+          stableCount = 0;
+          lastSize = currentSize;
+        }
+      } catch (err) {
+        // File doesn't exist or can't be read - consider it drained
+        logger.info("Session file not accessible, assuming drained", {
+          orchId,
+          error: String(err),
+        });
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, checkIntervalMs));
+    }
+
+    if (Date.now() - startWaitMs >= maxWaitMs) {
+      logger.warn("Session drain timeout reached, proceeding with cleanup", {
+        orchId,
+        timeoutMs: maxWaitMs,
+      });
+    }
 
     // Close shared memory and cleanup sessions directory
     try {
@@ -491,7 +546,9 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
         orch = await loadOrchestration(orchId);
       }
       if (orch) {
+        logger.info("Starting memory cleanup", { orchId });
         await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
+        logger.info("Memory cleanup completed", { orchId });
       }
     } catch (err) {
       logger.warn("Failed to close shared memory", { orchId, error: String(err) });

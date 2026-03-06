@@ -167,5 +167,14 @@ export async function startGatewaySidecars(params: {
     }, 750);
   }
 
+  // Start orchestration notification outbox worker
+  try {
+    const { startOutboxWorker } = await import("../orchestration/notification-outbox.js");
+    startOutboxWorker(params.cfg);
+    params.logHooks.info("orchestration notification outbox worker started");
+  } catch (err) {
+    params.logHooks.error(`failed to start outbox worker: ${String(err)}`);
+  }
+
   return { browserControl, pluginServices };
 }

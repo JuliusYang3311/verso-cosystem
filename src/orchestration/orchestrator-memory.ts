@@ -167,15 +167,62 @@ export async function cleanupOrchestrationMemory(
     const sessionsDir = path.join(sourceWorkspaceDir, ".verso-missions", orchId, "sessions");
     if (fs.existsSync(sessionsDir)) {
       try {
+        // Additional wait to ensure all file handles are closed
+        // This is a safety net after the drain check in daemon-runner
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
         // Use force: true to ignore errors if files are still being written
         fs.rmSync(sessionsDir, { recursive: true, force: true });
         logger.info("Removed orchestration sessions directory", { sessionsDir });
       } catch (err) {
-        // Don't treat this as fatal - session may still be writing
-        logger.warn("Failed to remove sessions directory (non-fatal)", {
-          error: String(err),
-          sessionsDir,
-        });
+        // Check if it's ENOENT (already deleted) - that's fine
+        const isENOENT = err && typeof err === "object" && "code" in err && err.code === "ENOENT";
+
+        if (isENOENT) {
+          logger.info("Sessions directory already removed", { sessionsDir });
+        } else {
+          // Check if it's EBUSY or EPERM (file in use) - retry once after delay
+          const isFileBusy =
+            err &&
+            typeof err === "object" &&
+            "code" in err &&
+            (err.code === "EBUSY" || err.code === "EPERM");
+
+          if (isFileBusy) {
+            logger.warn("Sessions directory busy, retrying after delay", {
+              error: err instanceof Error ? err.message : JSON.stringify(err),
+              errorCode: err.code,
+              sessionsDir,
+            });
+
+            // Wait longer and retry once
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            try {
+              fs.rmSync(sessionsDir, { recursive: true, force: true });
+              logger.info("Removed orchestration sessions directory (retry succeeded)", {
+                sessionsDir,
+              });
+            } catch (retryErr) {
+              // Final failure - log but don't throw
+              logger.warn("Failed to remove sessions directory after retry (non-fatal)", {
+                error: String(retryErr),
+                errorCode:
+                  retryErr && typeof retryErr === "object" && "code" in retryErr
+                    ? retryErr.code
+                    : undefined,
+                sessionsDir,
+              });
+            }
+          } else {
+            // Other error - log but don't throw
+            logger.warn("Failed to remove sessions directory (non-fatal)", {
+              error: String(err),
+              errorCode: err && typeof err === "object" && "code" in err ? err.code : undefined,
+              sessionsDir,
+            });
+          }
+        }
         // Don't add to errors array - this is expected if session is still active
       }
     }

@@ -68,6 +68,15 @@ export function createGatewayCloseHandler(params: {
       await params.pluginServices.stop().catch(() => {});
     }
     await stopGmailWatcher();
+
+    // Stop orchestration notification outbox worker
+    try {
+      const { stopOutboxWorker } = await import("../orchestration/notification-outbox.js");
+      stopOutboxWorker();
+    } catch {
+      /* ignore */
+    }
+
     params.cron.stop();
     params.heartbeatRunner.stop();
     for (const timer of params.nodePresenceTimers.values()) {

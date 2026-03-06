@@ -315,6 +315,26 @@ export async function submitOrchestration(
   // Generate orchestration ID
   const orchestrationId = `orch-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
+  // Validate triggeringSessionKey early (before creating orchestration)
+  const orchestratorSessionKey = `agent:${agentId}:orch:${orchestrationId}`;
+
+  if (opts?.triggeringSessionKey) {
+    const { validateSessionKey } = await import("./session-key-validation.js");
+    const validation = validateSessionKey(opts.triggeringSessionKey, {
+      orchestrationId,
+      orchestratorSessionKey,
+    });
+
+    if (!validation.valid) {
+      logger.warn("Invalid triggeringSessionKey provided at submission", {
+        orchestrationId,
+        triggeringSessionKey: opts.triggeringSessionKey,
+        reason: validation.reason,
+      });
+      // Log warning but don't fail - we'll try to extract from orchestratorSessionKey later
+    }
+  }
+
   // Get orchestration config
   const orchConfig = cfg?.agents?.list?.find((a) => a.id === agentId)?.orchestration;
   const maxFixCycles = orchConfig?.maxFixCycles ?? 30;
@@ -330,7 +350,7 @@ export async function submitOrchestration(
   const orchestration = createOrchestration({
     id: orchestrationId,
     userPrompt,
-    orchestratorSessionKey: `agent:${agentId}:orch:${orchestrationId}`,
+    orchestratorSessionKey,
     agentId,
     workspaceDir: "", // Will be set by daemon
     sourceWorkspaceDir: workspace,
