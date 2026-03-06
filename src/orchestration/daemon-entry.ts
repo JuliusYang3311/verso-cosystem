@@ -28,6 +28,17 @@ if (!orchestrationId) {
   process.exit(1);
 }
 
+logger.info("Orchestrator daemon starting", {
+  orchestrationId,
+  workspaceDir,
+  agentId,
+  maxWorkers,
+  maxFixCycles,
+  gatewayPort: config.gateway?.port,
+  gatewayMode: config.gateway?.mode,
+  gatewayBind: config.gateway?.bind,
+});
+
 // Helper to clean up PID file on exit
 function cleanupPidFile() {
   try {
@@ -54,14 +65,6 @@ process.on("SIGINT", () => {
   logger.info("Received SIGINT, cleaning up", { orchestrationId });
   cleanupPidFile();
   process.exit(0);
-});
-
-logger.info("Orchestrator daemon starting", {
-  orchestrationId,
-  workspaceDir,
-  agentId,
-  maxWorkers,
-  maxFixCycles,
 });
 
 runOrchestratorDaemon({
