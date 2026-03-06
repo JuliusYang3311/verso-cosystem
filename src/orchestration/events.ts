@@ -73,6 +73,8 @@ export async function broadcastOrchestrationEvent(
   try {
     // Broadcast event via gateway
     const { callGateway } = await import("../gateway/call.js");
+    const { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } =
+      await import("../utils/message-channel.js");
     await callGateway({
       method: "orchestration.broadcast",
       params: {
@@ -81,6 +83,9 @@ export async function broadcastOrchestrationEvent(
       },
       timeoutMs: 5000,
       config: effectiveConfig,
+      clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+      clientDisplayName: "orchestrator",
+      mode: GATEWAY_CLIENT_MODES.BACKEND,
     });
 
     logger.info("Successfully broadcasted orchestration event via gateway", {
@@ -143,6 +148,8 @@ export async function broadcastOrchestrationEvent(
       });
 
       try {
+        const { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } =
+          await import("../utils/message-channel.js");
         const injectResult = await callGateway({
           method: "chat.inject",
           params: {
@@ -152,6 +159,9 @@ export async function broadcastOrchestrationEvent(
           },
           timeoutMs: 5000,
           config: effectiveConfig,
+          clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+          clientDisplayName: "orchestrator",
+          mode: GATEWAY_CLIENT_MODES.BACKEND,
         });
 
         logger.info("Successfully injected orchestration notification into main session", {
