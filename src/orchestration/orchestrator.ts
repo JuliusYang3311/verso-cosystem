@@ -305,6 +305,7 @@ export async function submitOrchestration(
     cfg?: VersoConfig;
     agentId?: string;
     triggeringSessionKey?: string;
+    chatSessionKey?: string;
     baseProjectDir?: string;
   },
 ): Promise<{ orchestrationId: string; daemonStarted: boolean; error?: string }> {
@@ -326,6 +327,32 @@ export async function submitOrchestration(
       : path.resolve(workspace, opts.baseProjectDir)
     : undefined;
 
+  // Validate chatSessionKey: must be a real chat session, not agent:main
+  let chatSessionKey = opts?.chatSessionKey;
+  if (
+    !chatSessionKey ||
+    chatSessionKey === "agent:main" ||
+    chatSessionKey.startsWith("agent:main:")
+  ) {
+    // Try to extract from triggeringSessionKey
+    const triggeringKey = opts?.triggeringSessionKey;
+    if (
+      triggeringKey &&
+      triggeringKey !== "agent:main" &&
+      !triggeringKey.startsWith("agent:main:")
+    ) {
+      chatSessionKey = triggeringKey;
+    } else {
+      // No valid chat session key - log warning
+      logger.warn("No valid chatSessionKey provided for orchestration", {
+        orchestrationId,
+        triggeringSessionKey: opts?.triggeringSessionKey,
+        chatSessionKey: opts?.chatSessionKey,
+      });
+      chatSessionKey = undefined;
+    }
+  }
+
   // Create orchestration record
   const orchestration = createOrchestration({
     id: orchestrationId,
@@ -335,6 +362,7 @@ export async function submitOrchestration(
     workspaceDir: "", // Will be set by daemon
     sourceWorkspaceDir: workspace,
     triggeringSessionKey: opts?.triggeringSessionKey,
+    chatSessionKey,
     baseProjectDir,
     maxFixCycles,
   });

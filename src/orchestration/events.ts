@@ -99,7 +99,7 @@ export async function broadcastOrchestrationEvent(
 
       logger.info("Processing completion/failure event", { orchId, type: event.type });
 
-      // Load orchestration to get the main session key
+      // Load orchestration to get the chat session key
       const { loadOrchestration } = await import("./store.js");
       const orch = await loadOrchestration(orchId);
 
@@ -108,104 +108,78 @@ export async function broadcastOrchestrationEvent(
         return;
       }
 
-      // Get triggering session key (fallback to extracting from orchestratorSessionKey)
-      // If triggeringSessionKey is set, use it (e.g., telegram:chat:123456)
-      // Otherwise, extract from orchestratorSessionKey (agent:<agentId>:orch:<orchId> → agent:<agentId>)
-      const mainSessionKey =
-        orch.triggeringSessionKey || orch.orchestratorSessionKey.split(":orch:")[0];
+      // Use chatSessionKey if available, otherwise skip notification
+      const chatSessionKey = orch.chatSessionKey;
 
-      logger.info("Determined main session key", {
-        orchId,
-        mainSessionKey,
-        orchestratorSessionKey: orch.orchestratorSessionKey,
-        triggeringSessionKey: orch.triggeringSessionKey,
-      });
-
-      if (!mainSessionKey) {
-        logger.warn("Cannot determine main session key", {
+      if (!chatSessionKey) {
+        logger.warn("No valid chatSessionKey - skipping notification", {
+          orchId,
           orchestratorSessionKey: orch.orchestratorSessionKey,
           triggeringSessionKey: orch.triggeringSessionKey,
         });
-        return;
-      }
-
-      // Inject notification message into main agent session
-      let notificationMessage = "";
-      if (event.type === "orchestration.completed") {
-        const outputPath = "outputPath" in event ? event.outputPath : undefined;
-        const summary = "summary" in event ? event.summary : "Orchestration completed";
-        notificationMessage = `🎉 Orchestration ${orchId} completed successfully!\n\n${summary}${outputPath ? `\n\nOutput: ${outputPath}` : ""}`;
+        // Continue to process queue even if notification fails
       } else {
-        const error = "error" in event ? event.error : "Unknown error";
-        notificationMessage = `❌ Orchestration ${orchId} failed.\n\nError: ${error}`;
-      }
-
-      logger.info("Injecting notification into main session", {
-        orchId,
-        mainSessionKey,
-        messageLength: notificationMessage.length,
-        message: notificationMessage,
-      });
-
-      try {
-        const { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } =
-          await import("../utils/message-channel.js");
-
-        logger.info("Attempting to inject notification", {
+        logger.info("Using chatSessionKey for notification", {
           orchId,
-          mainSessionKey,
-          messagePreview: notificationMessage.substring(0, 100),
-          gatewayPort: effectiveConfig.gateway?.port,
+          chatSessionKey,
         });
 
-        const injectResult = await callGateway({
-          method: "chat.inject",
-          params: {
-            sessionKey: mainSessionKey,
-            message: notificationMessage,
-            label: "orchestration",
-          },
-          timeoutMs: 5000,
-          config: effectiveConfig,
-          clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
-          clientDisplayName: "orchestrator",
-          mode: GATEWAY_CLIENT_MODES.BACKEND,
-        });
-
-        logger.info("Successfully injected orchestration notification", {
-          orchId,
-          mainSessionKey,
-          type: event.type,
-          result: injectResult,
-        });
-      } catch (err) {
-        // Extract detailed error information
-        const errorDetails: Record<string, unknown> = {
-          orchId,
-          mainSessionKey,
-          orchestratorSessionKey: orch.orchestratorSessionKey,
-          triggeringSessionKey: orch.triggeringSessionKey,
-          gatewayPort: effectiveConfig.gateway?.port,
-          gatewayMode: effectiveConfig.gateway?.mode,
-          errorString: String(err),
-        };
-
-        if (err && typeof err === "object") {
-          if ("message" in err) {
-            errorDetails.errorMessage = err.message;
-          }
-          if ("code" in err) {
-            errorDetails.errorCode = err.code;
-          }
-          if ("stack" in err && typeof err.stack === "string") {
-            errorDetails.errorStack = err.stack.split("\n").slice(0, 5).join("\n");
-          }
+        // Inject notification message into chat session
+        let notificationMessage = "";
+        if (event.type === "orchestration.completed") {
+          const outputPath = "outputPath" in event ? event.outputPath : undefined;
+          const summary = "summary" in event ? event.summary : "Orchestration completed";
+          notificationMessage = `🎉 Orchestration ${orchId} completed successfully!\n\n${summary}${outputPath ? `\n\nOutput: ${outputPath}` : ""}`;
+        } else {
+          const error = "error" in event ? event.error : "Unknown error";
+          notificationMessage = `❌ Orchestration ${orchId} failed.\n\nError: ${error}`;
         }
 
-        logger.error("Failed to inject orchestration notification", errorDetails);
+        logger.info("Injecting notification into chat session", {
+          orchId,
+          chatSessionKey,
+          messageLength: notificationMessage.length,
+        });
 
-        // Don't throw - notification failure should not crash the daemon
-        // The orchestration result is already saved to disk
+        try {
+          const { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } =
+            await import("../utils/message-channel.js");
+
+          logger.info("Attempting to inject notification", {
+            orchId,
+            chatSessionKey,
+            messagePreview: notificationMessage.substring(0, 100),
+            gatewayPort: effectiveConfig.gateway?.port,
+          });
+
+          const injectResult = await callGateway({
+            method: "chat.inject",
+            params: {
+              sessionKey: chatSessionKey,
+              message: notificationMessage,
+              label: "orchestration",
+            },
+            timeoutMs: 5000,
+            config: effectiveConfig,
+            clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+            clientDisplayName: "orchestrator",
+            mode: GATEWAY_CLIENT_MODES.BACKEND,
+          });
+
+          logger.info("Successfully injected orchestration notification", {
+            orchId,
+            chatSessionKey,
+            type: event.type,
+            result: injectResult,
+          });
+        } catch (err) {
+          logger.error("Failed to inject orchestration notification", {
+            orchId,
+            chatSessionKey,
+            error: String(err),
+          });
+          // Don't throw - notification failure should not crash the daemon
+        }
       }
 
       // Process queue: start next orchestration if any

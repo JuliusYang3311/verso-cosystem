@@ -82,6 +82,8 @@ export type Orchestration = {
   sourceWorkspaceDir: string;
   /** The session key that triggered this orchestration (e.g., telegram:chat:123456, agent:main). */
   triggeringSessionKey?: string;
+  /** The real chat session key for notification delivery (must be a valid chat.inject target). */
+  chatSessionKey?: string;
   /** Base project directory to enhance (if provided, copied to sandbox before orchestration starts). */
   baseProjectDir?: string;
   plan?: OrchestrationPlan;
@@ -119,6 +121,7 @@ export function createOrchestration(params: {
   workspaceDir: string;
   sourceWorkspaceDir: string;
   triggeringSessionKey?: string;
+  chatSessionKey?: string;
   baseProjectDir?: string;
   maxFixCycles?: number;
 }): Orchestration {
@@ -132,6 +135,7 @@ export function createOrchestration(params: {
     workspaceDir: params.workspaceDir,
     sourceWorkspaceDir: params.sourceWorkspaceDir,
     triggeringSessionKey: params.triggeringSessionKey,
+    chatSessionKey: params.chatSessionKey,
     baseProjectDir: params.baseProjectDir,
     fixTasks: [],
     acceptanceResults: [],

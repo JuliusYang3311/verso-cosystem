@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { ChannelSettings } from "./channel-settings";
 import { GeneralSettings } from "./general-settings";
-import { ProviderSettings } from "./provider-settings";
+import { ProviderSettingsCliBased } from "./provider-settings-cli-based";
 
 type SettingsTab = "general" | "provider" | "channels";
 
@@ -43,7 +43,7 @@ export const SettingsPanel: React.FC = () => {
 
         <div className="settings-content">
           {activeTab === "general" && <GeneralSettings />}
-          {activeTab === "provider" && <ProviderSettings />}
+          {activeTab === "provider" && <ProviderSettingsCliBased />}
           {activeTab === "channels" && <ChannelSettings />}
         </div>
       </div>
