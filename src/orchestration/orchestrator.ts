@@ -364,6 +364,14 @@ export async function submitOrchestration(
     }
   }
 
+  // Log resolved session keys for debugging
+  logger.info("Orchestration session keys resolved", {
+    orchestrationId,
+    chatSessionKey,
+    triggeringSessionKey: opts?.triggeringSessionKey,
+    orchestratorSessionKey: `agent:${agentId}:orch:${orchestrationId}`,
+  });
+
   // Create orchestration record
   const orchestration = createOrchestration({
     id: orchestrationId,

@@ -113,7 +113,7 @@ export function createOpenClawTools(options?: {
     ? createOrchestratorTriggerTool({
         agentId: agentId ?? "main",
         config: options?.config,
-        sessionKey: options?.chatSessionKey ?? options?.agentSessionKey,
+        notificationSessionKey: options?.chatSessionKey ?? options?.agentSessionKey,
         provider: options?.currentModel?.provider,
         model: options?.currentModel?.model,
       })

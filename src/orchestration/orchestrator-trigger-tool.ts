@@ -9,6 +9,12 @@ import type { VersoConfig } from "../config/types.js";
 import { jsonResult, readStringParam } from "../agents/tools/common.js";
 import { getOrchestratorStatus, submitOrchestration } from "./orchestrator.js";
 
+const logger = {
+  info: (...args: unknown[]) => console.log("[orchestrator-trigger-tool]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestrator-trigger-tool]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestrator-trigger-tool]", ...args),
+};
+
 const OrchestratorTriggerSchema = Type.Object({
   action: Type.Union([Type.Literal("submit"), Type.Literal("status")]),
   userPrompt: Type.Optional(
@@ -25,7 +31,7 @@ const OrchestratorTriggerSchema = Type.Object({
 export type OrchestratorTriggerToolOptions = {
   agentId: string;
   config?: VersoConfig;
-  sessionKey?: string;
+  notificationSessionKey?: string;
   provider?: string;
   model?: string;
 };
@@ -77,11 +83,16 @@ WORKFLOW:
         case "submit": {
           const userPrompt = readStringParam(params, "userPrompt", { required: true });
           const baseProjectDir = readStringParam(params, "baseProjectDir");
+          logger.info("Submitting orchestration", {
+            notificationSessionKey: opts.notificationSessionKey,
+            agentId: opts.agentId,
+            hasBaseProjectDir: !!baseProjectDir,
+          });
           try {
             const result = await submitOrchestration(userPrompt, {
               cfg: opts.config,
               agentId: opts.agentId,
-              triggeringSessionKey: opts.sessionKey,
+              triggeringSessionKey: opts.notificationSessionKey,
               baseProjectDir,
               provider: opts.provider,
               model: opts.model,

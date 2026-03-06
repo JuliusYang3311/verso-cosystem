@@ -195,6 +195,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     // Debug: Log all parameters before creating session
     logger.info("Creating agent session with parameters", {
       orchId,
+      sessionKey: opts.agentSessionKey,
       cwd: sandboxDir,
       agentDir,
       hasAuthStorage: !!authStorage,
@@ -215,7 +216,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
         modelRegistry,
         model,
         customTools: customToolsList,
-        sessionManager: SessionManager.create(sandboxDir),
+        sessionManager: SessionManager.create(sandboxDir, opts.agentSessionKey),
       });
     } catch (err) {
       logger.error("Failed to create agent session", {
