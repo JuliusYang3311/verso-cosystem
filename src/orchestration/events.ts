@@ -165,12 +165,15 @@ export async function broadcastOrchestrationEvent(
         logger.error("Failed to inject orchestration notification - Basic info", {
           orchId,
           mainSessionKey,
+          gatewayPort: effectiveConfig.gateway?.port,
+          gatewayMode: effectiveConfig.gateway?.mode,
         });
 
         logger.error("Failed to inject orchestration notification - Error details", {
           errorString: String(err),
           errorType: typeof err,
           isError: err instanceof Error,
+          errorConstructor: err?.constructor?.name,
         });
 
         if (err instanceof Error) {
@@ -178,6 +181,7 @@ export async function broadcastOrchestrationEvent(
             name: err.name,
             message: err.message,
             stack: err.stack,
+            cause: err.cause,
           });
         }
 
@@ -185,6 +189,9 @@ export async function broadcastOrchestrationEvent(
           notificationMessage,
           messageLength: notificationMessage.length,
         });
+
+        // Don't throw - notification failure should not crash the daemon
+        // The orchestration result is already saved to disk
       }
 
       // Process queue: start next orchestration if any

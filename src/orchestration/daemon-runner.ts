@@ -470,16 +470,18 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
 
     throw err;
   } finally {
-    // Cleanup
+    // Cleanup - dispose session first and wait for pending writes
     if (session) {
       try {
         session.dispose();
+        // Wait a bit for any pending async writes to complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
       } catch {
         // ignore
       }
     }
 
-    // Close shared memory
+    // Close shared memory and cleanup sessions directory
     try {
       await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
     } catch (err) {
