@@ -556,7 +556,7 @@ export async function runWorkerPool(params: {
             orchestrationId: orch.id,
           });
           try {
-            ensureDependenciesInstalled(orch.workspaceDir);
+            ensureDependenciesInstalled(sandboxDir);
           } catch (err) {
             logger.warn("Failed to install dependencies after worker completion", {
               subtaskId: task.id,

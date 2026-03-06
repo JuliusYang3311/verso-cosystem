@@ -397,3 +397,43 @@ export async function submitOrchestration(
 
   return { orchestrationId, daemonStarted: true };
 }
+
+/**
+ * Get current orchestrator status including active daemons and queue length.
+ */
+export type OrchestratorStatus = {
+  activeDaemons: number;
+  maxOrchestrations: number;
+  queueLength: number;
+  activeOrchestrationIds: string[];
+};
+
+export function getOrchestratorStatus(cfg?: VersoConfig, agentId?: string): OrchestratorStatus {
+  const orchConfig = cfg?.agents?.list?.find((a) => a.id === (agentId ?? "main"))?.orchestration;
+  const maxOrchestrations = orchConfig?.maxOrchestrations ?? 2;
+  const queue = loadQueue();
+
+  // Get active orchestration IDs
+  const logsDir = ensureLogsDir();
+  const files = fs.readdirSync(logsDir);
+  const activeIds: string[] = [];
+
+  for (const file of files) {
+    if (file.startsWith("orchestrator-") && file.endsWith(".pid")) {
+      const pidPath = path.join(logsDir, file);
+      const pid = readPid(pidPath);
+      if (pid && isPidAlive(pid)) {
+        // Extract orchestration ID from filename: orchestrator-{id}.pid
+        const orchId = file.slice("orchestrator-".length, -".pid".length);
+        activeIds.push(orchId);
+      }
+    }
+  }
+
+  return {
+    activeDaemons: activeIds.length,
+    maxOrchestrations,
+    queueLength: queue.length,
+    activeOrchestrationIds: activeIds,
+  };
+}

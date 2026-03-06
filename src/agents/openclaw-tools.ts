@@ -23,6 +23,8 @@ export function createOpenClawTools(options?: {
   sandboxBrowserBridgeUrl?: string;
   allowHostBrowserControl?: boolean;
   agentSessionKey?: string;
+  /** Real chat session key for orchestration notifications (e.g., telegram:chat:123456). */
+  chatSessionKey?: string;
   agentChannel?: GatewayMessageChannel;
   agentAccountId?: string;
   /** Delivery target (e.g. telegram:group:123:topic:456) for topic/thread routing. */
@@ -111,6 +113,7 @@ export function createOpenClawTools(options?: {
     ? createOrchestratorTriggerTool({
         agentId: agentId ?? "main",
         config: options?.config,
+        sessionKey: options?.chatSessionKey ?? options?.agentSessionKey,
         provider: options?.currentModel?.provider,
         model: options?.currentModel?.model,
       })

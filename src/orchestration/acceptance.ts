@@ -2,6 +2,9 @@
 
 import { execSync } from "node:child_process";
 import type { AcceptanceResult, AcceptanceVerdict, Orchestration } from "./types.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
+
+const logger = createSubsystemLogger("orchestration-acceptance");
 
 export type AcceptanceTestParams = {
   orchestration: Orchestration;
@@ -272,9 +275,11 @@ Respond with a JSON object:
             // If one tool dominates recent calls, likely a loop
             if (maxCount >= LOOP_DETECTION_THRESHOLD) {
               // Log warning but don't abort - timeout will catch it if truly stuck
-              console.warn(
-                `[acceptance] Detected potential tool call loop: ${maxTool} (${maxCount}/${LOOP_DETECTION_WINDOW} calls)`,
-              );
+              logger.warn("Detected potential tool call loop in acceptance agent", {
+                tool: maxTool,
+                count: maxCount,
+                window: LOOP_DETECTION_WINDOW,
+              });
             }
           }
 

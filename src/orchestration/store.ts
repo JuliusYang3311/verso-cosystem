@@ -194,10 +194,12 @@ export async function listOrchestrations(): Promise<Orchestration[]> {
       }
     } catch (err) {
       // Skip corrupt files, log warning
-      console.warn(`Skipping corrupt orchestration file: ${file}`, err);
+      const { createSubsystemLogger } = await import("../logging/subsystem.js");
+      const logger = createSubsystemLogger("orchestration-store");
+      logger.warn("Skipping corrupt orchestration file", { file, error: String(err) });
     }
   }
-  return results.toSorted((a, b) => b.updatedAtMs - a.updatedAtMs);
+  return results.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
 }
 
 export async function updateOrchestration(

@@ -106,13 +106,15 @@ export async function broadcastOrchestrationEvent(
       if (!orch) {
         logger.warn("Cannot send notification: orchestration not found", { orchId });
       } else {
-        // Use triggeringSessionKey to extract channel and target
-        const triggeringKey = orch.triggeringSessionKey;
+        // Use chatSessionKey (validated real chat session) with fallback to triggeringSessionKey
+        // chatSessionKey is guaranteed to be a valid chat session (not agent:main)
+        const sessionKey = orch.chatSessionKey || orch.triggeringSessionKey;
 
-        if (triggeringKey) {
+        if (sessionKey) {
           logger.info("Sending notification via message.send", {
             orchId,
-            triggeringSessionKey: triggeringKey,
+            sessionKey,
+            usingChatSessionKey: !!orch.chatSessionKey,
           });
 
           // Build notification message
@@ -126,9 +128,9 @@ export async function broadcastOrchestrationEvent(
             notificationMessage = `❌ Orchestration ${orchId} failed.\n\nError: ${error}`;
           }
 
-          // Parse triggeringSessionKey to extract channel and target
+          // Parse sessionKey to extract channel and target
           // Format: channel:type:target (e.g., telegram:chat:123456, wecom:user:userid)
-          const parts = triggeringKey.split(":");
+          const parts = sessionKey.split(":");
           if (parts.length >= 3) {
             const channel = parts[0];
             const target = parts.slice(2).join(":"); // Handle targets with colons
@@ -174,13 +176,13 @@ export async function broadcastOrchestrationEvent(
               });
             }
           } else {
-            logger.warn("Invalid triggeringSessionKey format - cannot parse channel/target", {
+            logger.warn("Invalid sessionKey format - cannot parse channel/target", {
               orchId,
-              triggeringSessionKey: triggeringKey,
+              sessionKey,
             });
           }
         } else {
-          logger.warn("No triggeringSessionKey available for notification", {
+          logger.warn("No chatSessionKey or triggeringSessionKey available for notification", {
             orchId,
           });
         }

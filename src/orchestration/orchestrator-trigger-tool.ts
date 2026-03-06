@@ -7,7 +7,7 @@ import { Type } from "@sinclair/typebox";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import type { VersoConfig } from "../config/types.js";
 import { jsonResult, readStringParam } from "../agents/tools/common.js";
-import { submitOrchestration } from "./orchestrator.js";
+import { getOrchestratorStatus, submitOrchestration } from "./orchestrator.js";
 
 const OrchestratorTriggerSchema = Type.Object({
   action: Type.Union([Type.Literal("submit"), Type.Literal("status")]),
@@ -100,6 +100,30 @@ WORKFLOW:
               success: false,
               error: String(err),
               message: `Failed to submit orchestration: ${String(err)}`,
+            });
+          }
+        }
+
+        case "status": {
+          try {
+            const status = getOrchestratorStatus(opts.config, opts.agentId);
+            const message =
+              status.activeDaemons === 0
+                ? "No orchestrator daemons are currently running."
+                : `${status.activeDaemons} orchestrator daemon${status.activeDaemons > 1 ? "s" : ""} running (max: ${status.maxOrchestrations}).${status.queueLength > 0 ? ` ${status.queueLength} orchestration${status.queueLength > 1 ? "s" : ""} queued.` : ""}`;
+            return jsonResult({
+              success: true,
+              activeDaemons: status.activeDaemons,
+              maxOrchestrations: status.maxOrchestrations,
+              queueLength: status.queueLength,
+              activeOrchestrationIds: status.activeOrchestrationIds,
+              message,
+            });
+          } catch (err) {
+            return jsonResult({
+              success: false,
+              error: String(err),
+              message: `Failed to get orchestrator status: ${String(err)}`,
             });
           }
         }
