@@ -189,6 +189,12 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       "orchestrator",
     );
 
+    // Delete old session file to ensure fresh start
+    if (fs.existsSync(sessionFile)) {
+      fs.unlinkSync(sessionFile);
+      logger.info("Deleted old orchestrator session file", { orchId, sessionFile });
+    }
+
     // Use customTools parameter to add orchestrate + web_search + web_fetch + gworkspace tools
     const customToolsList = [
       orchestrateTool,
