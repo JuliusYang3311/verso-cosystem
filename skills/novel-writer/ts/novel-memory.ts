@@ -9,7 +9,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import type { EmbeddingProvider, EmbeddingProviderResult } from "../../../src/memory/embeddings.js";
-import type { MemoryChunk } from "../../../src/memory/internal.js";
 import type { EmbeddingContext } from "../../../src/memory/manager-embeddings.js";
 import type { SearchRowResult } from "../../../src/memory/manager-search.js";
 import type { VectorState } from "../../../src/memory/manager-vectors.js";
@@ -406,10 +405,12 @@ export class NovelMemoryStore {
     try {
       queryVec = await embedQueryWithTimeout(ctx, query);
     } catch (err) {
-      console.error(`[novel-memory] query embedding failed, falling back to FTS-only: ${err}`);
+      console.error(
+        `[novel-memory] query embedding failed, falling back to FTS-only: ${String(err)}`,
+      );
       queryVec = [];
     }
-    const hasVector = queryVec.length > 0 && queryVec.some((v) => v !== 0);
+    const hasVector = queryVec.some((v) => v !== 0);
 
     // Load context params for MMR + latent factor settings
     const ctxParams = await loadContextParams();

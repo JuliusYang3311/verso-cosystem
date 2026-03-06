@@ -144,7 +144,7 @@ export function applyCharacterPatch(characters: AnyObj, patch: AnyObj): AnyObj {
 }
 
 export function applyWorldPatch(world: AnyObj, patch: AnyObj): AnyObj {
-  const data: AnyObj = { ...(world.world ?? {}) };
+  const data: AnyObj = { ...world.world };
   const protectedKeys = new Set<string>(world.protected_keys ?? []);
 
   const add = patch.add ?? {};
@@ -394,7 +394,7 @@ export async function applyPatch(opts: ApplyPatchOpts): Promise<ApplyResult> {
 
       console.error(`Timeline entry indexed: ${virtualPath}`);
     } catch (err) {
-      console.error(`Warning: timeline auto-index failed: ${err}`);
+      console.error(`Warning: timeline auto-index failed: ${String(err)}`);
       // Non-fatal — JSON memory is already saved
     }
 
@@ -418,7 +418,7 @@ export async function applyPatch(opts: ApplyPatchOpts): Promise<ApplyResult> {
     return { status: "ok", state };
   } catch (err) {
     // --- Rollback on failure ---
-    console.error(`Patch failed, rolling back: ${err}`);
+    console.error(`Patch failed, rolling back: ${String(err)}`);
     saveJson(charPath, charBackup);
     saveJson(worldPath, worldBackup);
     saveJson(plotPath, plotBackup);

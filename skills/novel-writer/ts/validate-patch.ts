@@ -135,7 +135,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const result = validatePatch({ project: values.project, patch: patchData });
     console.log(JSON.stringify(result));
   } catch (err) {
-    console.error(`Validation failed: ${err instanceof Error ? err.message : err}`);
+    console.error(`Validation failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 }

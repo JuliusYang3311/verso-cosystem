@@ -412,7 +412,9 @@ function flushMessageBuffer(
         "消息已合并到第一条回复中。",
         THINKING_PLACEHOLDER,
       );
-      streamManager.finishStream(extraId).then(() => unregisterActiveStream(streamKey, extraId));
+      void streamManager
+        .finishStream(extraId)
+        .then(() => unregisterActiveStream(streamKey, extraId));
     }
   }
 

@@ -53,27 +53,29 @@ async function withEnvOverride<T>(
   }
 }
 
-vi.mock(
-  new URL("../../gateway/call.ts", new URL("./gateway-cli/call.ts", import.meta.url)).href,
-  async (importOriginal) => {
-    const mod = await importOriginal();
-    return {
-      ...mod,
-      callGateway: (opts: unknown) => callGateway(opts),
-      randomIdempotencyKey: () => "rk_test",
-    };
-  },
-);
+vi.mock("../gateway/call.js", async (importOriginal) => {
+  const mod = await importOriginal();
+  return {
+    ...mod,
+    callGateway: (opts: unknown) => callGateway(opts),
+    randomIdempotencyKey: () => "rk_test",
+  };
+});
 
 vi.mock("../gateway/server.js", () => ({
   startGatewayServer: (port: number, opts?: unknown) => startGatewayServer(port, opts),
 }));
 
-vi.mock("../globals.js", () => ({
-  info: (msg: string) => msg,
-  isVerbose: () => false,
-  setVerbose: (enabled: boolean) => setVerbose(enabled),
-}));
+vi.mock("../globals.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    info: (msg: string) => msg,
+    danger: (msg: string) => msg,
+    isVerbose: () => false,
+    setVerbose: (enabled: boolean) => setVerbose(enabled),
+  };
+});
 
 vi.mock("../runtime.js", () => ({
   defaultRuntime,
@@ -112,20 +114,28 @@ vi.mock("../commands/gateway-status.js", () => ({
   gatewayStatusCommand: (opts: unknown) => gatewayStatusCommand(opts),
 }));
 
+vi.mock("../progress.js", () => ({
+  withProgress: async (_opts: unknown, fn: () => Promise<unknown>) => await fn(),
+}));
+
 describe("gateway-cli coverage", () => {
   it("registers call/health commands and routes to callGateway", async () => {
     runtimeLogs.length = 0;
     runtimeErrors.length = 0;
     callGateway.mockClear();
+    callGateway.mockResolvedValueOnce({ ok: true });
 
     const { registerGatewayCli } = await import("./gateway-cli.js");
     const program = new Command();
     program.exitOverride();
     registerGatewayCli(program);
 
-    await program.parseAsync(["gateway", "call", "health", "--params", '{"x":1}', "--json"], {
-      from: "user",
-    });
+    await program.parseAsync(
+      ["gateway", "call", "health", "--params", '{"x":1}', "--json", "--token", "test-token"],
+      {
+        from: "user",
+      },
+    );
 
     expect(callGateway).toHaveBeenCalledTimes(1);
     expect(runtimeLogs.join("\n")).toContain('"ok": true');

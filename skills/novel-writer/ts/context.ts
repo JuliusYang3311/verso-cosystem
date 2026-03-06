@@ -156,7 +156,7 @@ export async function assembleContext(opts: AssembleContextOpts): Promise<Contex
         }));
         styleStore.close();
       } catch (err) {
-        console.error(`style search failed: ${err}`);
+        console.error(`style search failed: ${String(err)}`);
       }
     }
 
@@ -175,7 +175,7 @@ export async function assembleContext(opts: AssembleContextOpts): Promise<Contex
         }));
         tlStore.close();
       } catch (err) {
-        console.error(`timeline search failed: ${err}`);
+        console.error(`timeline search failed: ${String(err)}`);
       }
     }
   }

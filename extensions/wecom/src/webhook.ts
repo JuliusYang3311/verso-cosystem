@@ -1,4 +1,4 @@
-import type { WecomHandleResult, WecomInboundMessage } from "./types.js";
+import type { WecomHandleResult } from "./types.js";
 import { WecomCrypto } from "./crypto.js";
 import { WECOM_DUPLICATE } from "./types.js";
 

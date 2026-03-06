@@ -10,7 +10,6 @@ import { stylePromptHint, stylePromptMessage, stylePromptTitle } from "../termin
 export const CONFIGURE_WIZARD_SECTIONS = [
   "workspace",
   "model",
-  "router",
   "browser",
   "nodehost",
   "compaction",
@@ -45,7 +44,6 @@ export const CONFIGURE_SECTION_OPTIONS: Array<{
 }> = [
   { value: "workspace", label: "Workspace", hint: "Set workspace + sessions" },
   { value: "model", label: "Model", hint: "Pick provider + credentials" },
-  { value: "router", label: "Router", hint: "Smart model routing by task type" },
   { value: "browser", label: "Browser", hint: "Headless browser & snapshot settings" },
   { value: "nodehost", label: "Node Host", hint: "Browser proxy for remote agents" },
   {

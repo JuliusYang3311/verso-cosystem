@@ -45,7 +45,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
   logger.info("Starting orchestration task", { orchId });
 
   // Load orchestration
-  const orch = await loadOrchestration(orchId);
+  let orch = await loadOrchestration(orchId);
   if (!orch) {
     logger.error("Orchestration not found", { orchId });
     throw new Error(`Orchestration ${orchId} not found`);
@@ -392,7 +392,9 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
             if (session) {
               session.dispose();
             }
-            await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
+            if (orch) {
+              await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
+            }
           } catch (cleanupErr) {
             logger.warn("Error during abort cleanup", {
               orchId,
@@ -484,7 +486,13 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
 
     // Close shared memory and cleanup sessions directory
     try {
-      await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
+      // Reload orch in case it's undefined
+      if (!orch) {
+        orch = await loadOrchestration(orchId);
+      }
+      if (orch) {
+        await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
+      }
     } catch (err) {
       logger.warn("Failed to close shared memory", { orchId, error: String(err) });
     }

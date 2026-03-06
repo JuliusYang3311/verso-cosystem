@@ -1,4 +1,4 @@
-import type { ChannelOnboardingAdapter, VersoConfig, WizardPrompter } from "verso/plugin-sdk";
+import type { ChannelOnboardingAdapter, WizardPrompter } from "verso/plugin-sdk";
 import { DEFAULT_ACCOUNT_ID } from "verso/plugin-sdk";
 import type { WecomConfig } from "./types.js";
 import { WecomCrypto } from "./crypto.js";

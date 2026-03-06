@@ -146,7 +146,7 @@ export async function revertChapterMemory(project: string, chapter: number): Pro
       store.close();
       reverted.push("timeline_embeddings: cleared");
     } catch (err) {
-      console.error(`Warning: timeline embedding cleanup failed: ${err}`);
+      console.error(`Warning: timeline embedding cleanup failed: ${String(err)}`);
     }
   }
 

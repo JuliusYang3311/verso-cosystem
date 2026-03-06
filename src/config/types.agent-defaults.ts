@@ -5,7 +5,6 @@ import type {
   HumanDelayConfig,
   TypingMode,
 } from "./types.base.js";
-import type { RouterConfig } from "./types.router.js";
 import type {
   SandboxBrowserSettings,
   SandboxDockerSettings,
@@ -145,8 +144,6 @@ export type AgentDefaultsConfig = {
   dynamicContext?: boolean;
   /** Vector memory search configuration (per-agent overrides supported). */
   memorySearch?: MemorySearchConfig;
-  /** Smart model router configuration. */
-  router?: RouterConfig;
   /** Default thinking level when no /think directive is present. */
   thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   /** Default verbose level when no /verbose directive is present. */

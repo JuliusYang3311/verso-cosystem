@@ -41,7 +41,7 @@ export async function addTypingIndicator(params: {
     return { messageId, reactionId };
   } catch (err) {
     // Silently fail - typing indicator is not critical
-    console.log(`[feishu] failed to add typing indicator: ${err}`);
+    console.log(`[feishu] failed to add typing indicator: ${String(err)}`);
     return { messageId, reactionId: null };
   }
 }
@@ -75,6 +75,6 @@ export async function removeTypingIndicator(params: {
     });
   } catch (err) {
     // Silently fail - cleanup is not critical
-    console.log(`[feishu] failed to remove typing indicator: ${err}`);
+    console.log(`[feishu] failed to remove typing indicator: ${String(err)}`);
   }
 }

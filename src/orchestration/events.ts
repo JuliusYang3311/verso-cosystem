@@ -150,6 +150,14 @@ export async function broadcastOrchestrationEvent(
       try {
         const { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } =
           await import("../utils/message-channel.js");
+
+        logger.info("Attempting to inject notification", {
+          orchId,
+          mainSessionKey,
+          messagePreview: notificationMessage.substring(0, 100),
+          gatewayPort: effectiveConfig.gateway?.port,
+        });
+
         const injectResult = await callGateway({
           method: "chat.inject",
           params: {
@@ -164,41 +172,37 @@ export async function broadcastOrchestrationEvent(
           mode: GATEWAY_CLIENT_MODES.BACKEND,
         });
 
-        logger.info("Successfully injected orchestration notification into main session", {
+        logger.info("Successfully injected orchestration notification", {
           orchId,
           mainSessionKey,
           type: event.type,
           result: injectResult,
         });
       } catch (err) {
-        // Log error with multiple separate statements for better visibility
-        logger.error("Failed to inject orchestration notification - Basic info", {
+        // Extract detailed error information
+        const errorDetails: Record<string, unknown> = {
           orchId,
           mainSessionKey,
+          orchestratorSessionKey: orch.orchestratorSessionKey,
+          triggeringSessionKey: orch.triggeringSessionKey,
           gatewayPort: effectiveConfig.gateway?.port,
           gatewayMode: effectiveConfig.gateway?.mode,
-        });
-
-        logger.error("Failed to inject orchestration notification - Error details", {
           errorString: String(err),
-          errorType: typeof err,
-          isError: err instanceof Error,
-          errorConstructor: err?.constructor?.name,
-        });
+        };
 
-        if (err instanceof Error) {
-          logger.error("Failed to inject orchestration notification - Error object", {
-            name: err.name,
-            message: err.message,
-            stack: err.stack,
-            cause: err.cause,
-          });
+        if (err && typeof err === "object") {
+          if ("message" in err) {
+            errorDetails.errorMessage = err.message;
+          }
+          if ("code" in err) {
+            errorDetails.errorCode = err.code;
+          }
+          if ("stack" in err && typeof err.stack === "string") {
+            errorDetails.errorStack = err.stack.split("\n").slice(0, 5).join("\n");
+          }
         }
 
-        logger.error("Failed to inject orchestration notification - Notification content", {
-          notificationMessage,
-          messageLength: notificationMessage.length,
-        });
+        logger.error("Failed to inject orchestration notification", errorDetails);
 
         // Don't throw - notification failure should not crash the daemon
         // The orchestration result is already saved to disk

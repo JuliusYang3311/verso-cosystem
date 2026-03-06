@@ -25,5 +25,12 @@
     }
   },
   "include": ["src/**/*", "ui/**/*", "extensions/**/*", "skills/novel-writer/ts/**/*"],
-  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "extensions/**/*.test.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.test.ts",
+    "extensions/**/*.test.ts",
+    "src/app/**/*",
+    "apps/desktop/**/*"
+  ]
 }

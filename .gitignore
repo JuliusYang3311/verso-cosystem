@@ -83,6 +83,9 @@ apps/macos/.build/**
 apps/ios/*.xcfilelist
 **/ModuleCache/
 
+# Desktop app (Electron)
+apps/
+
 # fastlane (iOS)
 apps/ios/fastlane/README.md
 apps/ios/fastlane/report.xml

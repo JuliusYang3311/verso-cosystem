@@ -372,7 +372,9 @@ export async function writeChapter(opts: WriteChapterOpts): Promise<WriteResult>
       initChanges = await initProjectMemory(project, outline, llm);
       console.error(`Memory initialized: ${initChanges.join("; ")}`);
     } catch (err) {
-      console.error(`WARNING: initProjectMemory failed, continuing without initial memory: ${err}`);
+      console.error(
+        `WARNING: initProjectMemory failed, continuing without initial memory: ${String(err)}`,
+      );
       // Ensure project dirs exist so we don't crash later
       projectDir(project);
     }

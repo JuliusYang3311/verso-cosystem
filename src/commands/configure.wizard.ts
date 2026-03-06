@@ -25,7 +25,6 @@ import { promptGatewayConfig } from "./configure.gateway.js";
 import { promptGoogleConfig } from "./configure.google.js";
 import { promptMoltbookConfig } from "./configure.moltbook.js";
 import { promptNodeHostConfig } from "./configure.nodehost.js";
-import { promptRouterConfig } from "./configure.router.js";
 import {
   CONFIGURE_SECTION_OPTIONS,
   confirm,
@@ -337,10 +336,6 @@ export async function runConfigureWizard(
         nextConfig = await promptThinkingConfig(nextConfig, runtime);
       }
 
-      if (selected.includes("router")) {
-        nextConfig = await promptRouterConfig(nextConfig, runtime);
-      }
-
       if (selected.includes("browser")) {
         nextConfig = await promptBrowserConfig(nextConfig, runtime);
       }
@@ -496,11 +491,6 @@ export async function runConfigureWizard(
 
         if (choice === "thinking") {
           nextConfig = await promptThinkingConfig(nextConfig, runtime);
-          await persistConfig();
-        }
-
-        if (choice === "router") {
-          nextConfig = await promptRouterConfig(nextConfig, runtime);
           await persistConfig();
         }
 

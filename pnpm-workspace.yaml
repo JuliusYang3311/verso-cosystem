@@ -3,6 +3,7 @@ packages:
   - ui
   - packages/*
   - extensions/*
+  - apps/desktop
 
 onlyBuiltDependencies:
   - "@lydell/node-pty"

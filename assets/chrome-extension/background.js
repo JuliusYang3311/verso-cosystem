@@ -141,19 +141,6 @@ async function maybeOpenHelpOnce() {
   }
 }
 
-function requestFromRelay(command) {
-  const id = command.id
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject })
-    try {
-      sendToRelay(command)
-    } catch (err) {
-      pending.delete(id)
-      reject(err instanceof Error ? err : new Error(String(err)))
-    }
-  })
-}
-
 async function onRelayMessage(text) {
   /** @type {any} */
   let msg

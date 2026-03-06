@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.0
 // Package manifest for the Verso macOS companion (menu bar app + IPC library).
 
 import PackageDescription
@@ -16,17 +16,16 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/orchetect/MenuBarExtraAccess", exact: "1.2.2"),
-        .package(url: "https://github.com/swiftlang/swift-subprocess.git", from: "0.1.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.8.0"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.8.1"),
-        .package(url: "https://github.com/steipete/Peekaboo.git", branch: "main"),
         .package(path: "../shared/VersoKit"),
-        .package(path: "../../Swabble"),
+        .package(path: "../shared/OpenClawKit"),
     ],
     targets: [
         .target(
             name: "VersoIPC",
             dependencies: [],
+            path: "Sources/OpenClawIPC",
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),
             ]),
@@ -35,7 +34,7 @@ let package = Package(
             dependencies: [
                 .product(name: "VersoKit", package: "VersoKit"),
             ],
-            path: "Sources/VersoDiscovery",
+            path: "Sources/OpenClawDiscovery",
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),
             ]),
@@ -47,14 +46,12 @@ let package = Package(
                 .product(name: "VersoKit", package: "VersoKit"),
                 .product(name: "VersoChatUI", package: "VersoKit"),
                 .product(name: "VersoProtocol", package: "VersoKit"),
-                .product(name: "SwabbleKit", package: "swabble"),
+                .product(name: "OpenClawKit", package: "OpenClawKit"),
                 .product(name: "MenuBarExtraAccess", package: "MenuBarExtraAccess"),
-                .product(name: "Subprocess", package: "swift-subprocess"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Sparkle", package: "Sparkle"),
-                .product(name: "PeekabooBridge", package: "Peekaboo"),
-                .product(name: "PeekabooAutomationKit", package: "Peekaboo"),
             ],
+            path: "Sources/OpenClaw",
             exclude: [
                 "Resources/Info.plist",
             ],
@@ -72,7 +69,7 @@ let package = Package(
                 .product(name: "VersoKit", package: "VersoKit"),
                 .product(name: "VersoProtocol", package: "VersoKit"),
             ],
-            path: "Sources/VersoMacCLI",
+            path: "Sources/OpenClawMacCLI",
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),
             ]),
@@ -83,7 +80,7 @@ let package = Package(
                 "Verso",
                 "VersoDiscovery",
                 .product(name: "VersoProtocol", package: "VersoKit"),
-                .product(name: "SwabbleKit", package: "swabble"),
+                .product(name: "OpenClawKit", package: "OpenClawKit"),
             ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),

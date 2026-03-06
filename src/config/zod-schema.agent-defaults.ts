@@ -106,15 +106,6 @@ export const AgentDefaultsSchema = z
       .strict()
       .optional(),
     persistence: z.enum(["persistent", "transient", "singleton"]).optional(),
-    router: z
-      .object({
-        enabled: z.boolean().optional(),
-        classifierModel: z.string().optional(),
-        classificationTimeoutMs: z.number().int().positive().optional(),
-        thinking: z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
     thinkingDefault: z
       .union([
         z.literal("off"),
