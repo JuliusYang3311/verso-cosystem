@@ -167,12 +167,16 @@ export async function cleanupOrchestrationMemory(
     const sessionsDir = path.join(sourceWorkspaceDir, ".verso-missions", orchId, "sessions");
     if (fs.existsSync(sessionsDir)) {
       try {
+        // Use force: true to ignore errors if files are still being written
         fs.rmSync(sessionsDir, { recursive: true, force: true });
         logger.info("Removed orchestration sessions directory", { sessionsDir });
       } catch (err) {
-        const errMsg = `Failed to remove sessions directory: ${String(err)}`;
-        logger.error(errMsg);
-        errors.push(errMsg);
+        // Don't treat this as fatal - session may still be writing
+        logger.warn("Failed to remove sessions directory (non-fatal)", {
+          error: String(err),
+          sessionsDir,
+        });
+        // Don't add to errors array - this is expected if session is still active
       }
     }
   }
