@@ -92,7 +92,7 @@ export async function broadcastOrchestrationEvent(
       type: event.type,
     });
 
-    // For completion/failure events, enqueue notification for async delivery
+    // For completion/failure events, inject a notification into the main agent session
     // AND process the queue to start the next orchestration
     if (event.type === "orchestration.completed" || event.type === "orchestration.failed") {
       const orchId = event.orchestrationId;
@@ -104,28 +104,32 @@ export async function broadcastOrchestrationEvent(
       const orch = await loadOrchestration(orchId);
 
       if (!orch) {
-        logger.warn("Cannot enqueue notification: orchestration not found", { orchId });
+        logger.warn("Cannot inject notification: orchestration not found", { orchId });
         return;
       }
 
-      // Resolve target session key using validation logic
-      const { resolveTargetSessionKey } = await import("./session-key-validation.js");
-      const targetSessionKey = resolveTargetSessionKey({
-        triggeringSessionKey: orch.triggeringSessionKey,
+      // Get triggering session key (fallback to extracting from orchestratorSessionKey)
+      // If triggeringSessionKey is set, use it (e.g., telegram:chat:123456)
+      // Otherwise, extract from orchestratorSessionKey (agent:<agentId>:orch:<orchId> → agent:<agentId>)
+      const mainSessionKey =
+        orch.triggeringSessionKey || orch.orchestratorSessionKey.split(":orch:")[0];
+
+      logger.info("Determined main session key", {
+        orchId,
+        mainSessionKey,
         orchestratorSessionKey: orch.orchestratorSessionKey,
-        orchestrationId: orchId,
+        triggeringSessionKey: orch.triggeringSessionKey,
       });
 
-      if (!targetSessionKey) {
-        logger.warn("No valid target session key - cannot enqueue notification", {
-          orchId,
+      if (!mainSessionKey) {
+        logger.warn("Cannot determine main session key", {
           orchestratorSessionKey: orch.orchestratorSessionKey,
           triggeringSessionKey: orch.triggeringSessionKey,
         });
         return;
       }
 
-      // Build notification message
+      // Inject notification message into main agent session
       let notificationMessage = "";
       if (event.type === "orchestration.completed") {
         const outputPath = "outputPath" in event ? event.outputPath : undefined;
@@ -136,28 +140,72 @@ export async function broadcastOrchestrationEvent(
         notificationMessage = `❌ Orchestration ${orchId} failed.\n\nError: ${error}`;
       }
 
-      // Enqueue notification for async delivery with retry
+      logger.info("Injecting notification into main session", {
+        orchId,
+        mainSessionKey,
+        messageLength: notificationMessage.length,
+        message: notificationMessage,
+      });
+
       try {
-        const { enqueueNotification } = await import("./notification-outbox.js");
-        const taskId = enqueueNotification({
-          orchestrationId: orchId,
-          targetSessionKey,
-          message: notificationMessage,
+        const { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } =
+          await import("../utils/message-channel.js");
+
+        logger.info("Attempting to inject notification", {
+          orchId,
+          mainSessionKey,
+          messagePreview: notificationMessage.substring(0, 100),
+          gatewayPort: effectiveConfig.gateway?.port,
         });
 
-        logger.info("Enqueued orchestration notification for delivery", {
+        const injectResult = await callGateway({
+          method: "chat.inject",
+          params: {
+            sessionKey: mainSessionKey,
+            message: notificationMessage,
+            label: "orchestration",
+          },
+          timeoutMs: 5000,
+          config: effectiveConfig,
+          clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+          clientDisplayName: "orchestrator",
+          mode: GATEWAY_CLIENT_MODES.BACKEND,
+        });
+
+        logger.info("Successfully injected orchestration notification", {
           orchId,
-          targetSessionKey,
-          taskId,
+          mainSessionKey,
           type: event.type,
+          result: injectResult,
         });
       } catch (err) {
-        logger.error("Failed to enqueue orchestration notification", {
+        // Extract detailed error information
+        const errorDetails: Record<string, unknown> = {
           orchId,
-          targetSessionKey,
-          error: String(err),
-        });
+          mainSessionKey,
+          orchestratorSessionKey: orch.orchestratorSessionKey,
+          triggeringSessionKey: orch.triggeringSessionKey,
+          gatewayPort: effectiveConfig.gateway?.port,
+          gatewayMode: effectiveConfig.gateway?.mode,
+          errorString: String(err),
+        };
+
+        if (err && typeof err === "object") {
+          if ("message" in err) {
+            errorDetails.errorMessage = err.message;
+          }
+          if ("code" in err) {
+            errorDetails.errorCode = err.code;
+          }
+          if ("stack" in err && typeof err.stack === "string") {
+            errorDetails.errorStack = err.stack.split("\n").slice(0, 5).join("\n");
+          }
+        }
+
+        logger.error("Failed to inject orchestration notification", errorDetails);
+
         // Don't throw - notification failure should not crash the daemon
+        // The orchestration result is already saved to disk
       }
 
       // Process queue: start next orchestration if any
