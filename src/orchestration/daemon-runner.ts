@@ -181,20 +181,6 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     logger.info("Creating orchestrator agent session", { orchId });
     const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
 
-    // Create persistent session file in orchestration directory
-    const { getOrchestrationSessionFile } = await import("./orchestrator-memory.js");
-    const sessionFile = getOrchestrationSessionFile(
-      orch.sourceWorkspaceDir,
-      orchId,
-      "orchestrator",
-    );
-
-    // Delete old session file to ensure fresh start
-    if (fs.existsSync(sessionFile)) {
-      fs.unlinkSync(sessionFile);
-      logger.info("Deleted old orchestrator session file", { orchId, sessionFile });
-    }
-
     // Use customTools parameter to add orchestrate + web_search + web_fetch + gworkspace tools
     const customToolsList = [
       orchestrateTool,
@@ -203,6 +189,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       ...gworkspaceTools,
     ];
 
+    // Use in-memory session to avoid state pollution from previous runs
     const created = await createAgentSession({
       cwd: sandboxDir, // Work in shared sandbox
       agentDir,
@@ -210,7 +197,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       modelRegistry,
       model,
       customTools: customToolsList,
-      sessionManager: SessionManager.open(sessionFile),
+      sessionManager: SessionManager.create(),
     });
 
     session = created.session;
@@ -422,8 +409,14 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
         timeoutHandle = null;
       }
 
-      // No need to check timeout after successful completion
-      logger.info("Orchestrator agent completed successfully", { orchId });
+      // Debug: Check if agent actually did anything
+      const transcript = session.getTranscript();
+      const toolCalls = transcript.filter((entry) => entry.role === "assistant" && entry.toolUse);
+      logger.info("Orchestrator agent completed successfully", {
+        orchId,
+        transcriptLength: transcript.length,
+        toolCallCount: toolCalls.length,
+      });
     } catch (err) {
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
