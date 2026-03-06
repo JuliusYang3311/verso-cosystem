@@ -236,7 +236,7 @@ export async function startOrchestratorDaemon(
     }
 
     const workspace = resolveWorkspace(cfg);
-    const agentSessionKey = `agent:${agentId}`;
+    const agentSessionKey = `agent:${agentId}:orch:${orchestrationId}`;
 
     // Get orchestration config
     const maxWorkers = orchConfig?.maxWorkers ?? 4;
@@ -338,31 +338,9 @@ export async function submitOrchestration(
       : path.resolve(workspace, opts.baseProjectDir)
     : undefined;
 
-  // Validate chatSessionKey: must be a real chat session, not agent:main
-  let chatSessionKey = opts?.chatSessionKey;
-  if (
-    !chatSessionKey ||
-    chatSessionKey === "agent:main" ||
-    chatSessionKey.startsWith("agent:main:")
-  ) {
-    // Try to extract from triggeringSessionKey
-    const triggeringKey = opts?.triggeringSessionKey;
-    if (
-      triggeringKey &&
-      triggeringKey !== "agent:main" &&
-      !triggeringKey.startsWith("agent:main:")
-    ) {
-      chatSessionKey = triggeringKey;
-    } else {
-      // No valid chat session key - log warning
-      logger.warn("No valid chatSessionKey provided for orchestration", {
-        orchestrationId,
-        triggeringSessionKey: opts?.triggeringSessionKey,
-        chatSessionKey: opts?.chatSessionKey,
-      });
-      chatSessionKey = undefined;
-    }
-  }
+  // Hardcode notification target to main agent's main session
+  // All orchestration completion notifications go to agent:main:main
+  const chatSessionKey = "agent:main:main";
 
   // Log resolved session keys for debugging
   logger.info("Orchestration session keys resolved", {

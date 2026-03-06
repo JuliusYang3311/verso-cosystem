@@ -216,7 +216,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
         modelRegistry,
         model,
         customTools: customToolsList,
-        sessionManager: SessionManager.create(sandboxDir, opts.agentSessionKey),
+        sessionManager: SessionManager.create(sandboxDir),
       });
     } catch (err) {
       logger.error("Failed to create agent session", {
