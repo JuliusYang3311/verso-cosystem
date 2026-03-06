@@ -4,7 +4,6 @@
 // Multiple daemons can run concurrently (controlled by maxOrchestrations).
 
 import type { VersoConfig } from "../config/types.js";
-import { createSubsystemLogger } from "../logging/subsystem.js";
 import { broadcastOrchestrationEvent } from "./events.js";
 import {
   initOrchestrationMemory,
@@ -21,7 +20,11 @@ import {
 } from "./store.js";
 import { ORCHESTRATION_DEFAULTS } from "./types.js";
 
-const logger = createSubsystemLogger("orchestrator-daemon");
+const logger = {
+  info: (...args: unknown[]) => console.log("[orchestrator-daemon]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestrator-daemon]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestrator-daemon]", ...args),
+};
 
 export type OrchestratorDaemonOptions = {
   workspaceDir: string;

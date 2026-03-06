@@ -7,10 +7,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
-import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runOrchestratorDaemon } from "./daemon-runner.js";
 
-const logger = createSubsystemLogger("orchestrator-daemon-entry");
+const logger = {
+  info: (...args: unknown[]) => console.log("[orchestrator-daemon-entry]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestrator-daemon-entry]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestrator-daemon-entry]", ...args),
+};
 
 // Load config for gateway access
 const config = loadConfig();

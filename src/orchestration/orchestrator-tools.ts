@@ -3,7 +3,6 @@
 import { Type } from "@sinclair/typebox";
 import { stringEnum } from "../agents/schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "../agents/tools/common.js";
-import { createSubsystemLogger } from "../logging/subsystem.js";
 import { broadcastOrchestrationEvent, buildOrchestrationSnapshot } from "./events.js";
 import {
   saveOrchestration,
@@ -20,7 +19,11 @@ import {
 } from "./types.js";
 import { runWorkerPool } from "./worker-runner.js";
 
-const logger = createSubsystemLogger("orchestrator-tools");
+const logger = {
+  info: (...args: unknown[]) => console.log("[orchestrator-tools]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestrator-tools]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestrator-tools]", ...args),
+};
 
 const ORCHESTRATE_ACTIONS = [
   "create-plan",

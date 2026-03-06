@@ -11,9 +11,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { MemoryIndexManager } from "../memory/manager.js";
-import { createSubsystemLogger } from "../logging/subsystem.js";
 
-const logger = createSubsystemLogger("orchestrator-memory");
+const logger = {
+  info: (...args: unknown[]) => console.log("[orchestrator-memory]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestrator-memory]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestrator-memory]", ...args),
+};
 
 export type OrchestrationMemoryContext = {
   memoryDir: string;

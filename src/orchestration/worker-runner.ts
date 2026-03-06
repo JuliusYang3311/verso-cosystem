@@ -4,14 +4,17 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Orchestration, Subtask } from "./types.js";
-import { createSubsystemLogger } from "../logging/subsystem.js";
 import { broadcastOrchestrationEvent } from "./events.js";
 import { resolveAgentModel } from "./model-resolver.js";
 import { saveOrchestration } from "./store.js";
 import { isSubtaskReady } from "./types.js";
 import { buildWorkerSystemPrompt } from "./worker-prompt.js";
 
-const logger = createSubsystemLogger("orchestration-worker");
+const logger = {
+  info: (...args: unknown[]) => console.log("[orchestration-worker]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestration-worker]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestration-worker]", ...args),
+};
 
 const DEFAULT_WORKER_TIMEOUT_MS = 600_000; // 10 minutes of inactivity per task
 

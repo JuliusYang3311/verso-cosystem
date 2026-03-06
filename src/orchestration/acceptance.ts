@@ -20,9 +20,11 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
   const subtasks = orchestration.plan?.subtasks ?? [];
   const verdicts: AcceptanceVerdict[] = [];
 
-  // Lazy import to avoid circular dependency issues
-  const { createSubsystemLogger } = await import("../logging/subsystem.js");
-  const logger = createSubsystemLogger("orchestration-acceptance");
+  const logger = {
+    info: (...args: unknown[]) => console.log("[orchestration-acceptance]", ...args),
+    warn: (...args: unknown[]) => console.warn("[orchestration-acceptance]", ...args),
+    error: (...args: unknown[]) => console.error("[orchestration-acceptance]", ...args),
+  };
 
   // Step 1: Run mechanical verify command (optional - skip if empty)
   let verifyPassed = true;

@@ -9,11 +9,14 @@ import fs from "node:fs";
 import path from "node:path";
 import type { VersoConfig } from "../config/types.js";
 import { resolveStateDir } from "../config/paths.js";
-import { createSubsystemLogger } from "../logging/subsystem.js";
 import { saveOrchestration } from "./store.js";
 import { createOrchestration } from "./types.js";
 
-const logger = createSubsystemLogger("orchestrator-daemon-manager");
+const logger = {
+  info: (...args: unknown[]) => console.log("[orchestrator-daemon-manager]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestrator-daemon-manager]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestrator-daemon-manager]", ...args),
+};
 
 type QueuedOrchestration = {
   orchestrationId: string;

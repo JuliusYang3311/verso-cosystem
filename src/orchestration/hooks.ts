@@ -2,9 +2,12 @@
 
 import type { Orchestration, Subtask, AcceptanceResult } from "./types.js";
 import type { WorkerResult } from "./worker-runner.js";
-import { createSubsystemLogger } from "../logging/subsystem.js";
 
-const logger = createSubsystemLogger("orchestration-hooks");
+const logger = {
+  debug: (...args: unknown[]) => console.debug("[orchestration-hooks]", ...args),
+  warn: (...args: unknown[]) => console.warn("[orchestration-hooks]", ...args),
+  error: (...args: unknown[]) => console.error("[orchestration-hooks]", ...args),
+};
 
 /**
  * Orchestration lifecycle hook types.

@@ -58,8 +58,11 @@ export async function broadcastOrchestrationEvent(
   event: OrchestrationEvent,
   config?: VersoConfig,
 ): Promise<void> {
-  const { createSubsystemLogger } = await import("../logging/subsystem.js");
-  const logger = createSubsystemLogger("orchestration-events");
+  const logger = {
+    info: (...args: unknown[]) => console.log("[orchestration-events]", ...args),
+    warn: (...args: unknown[]) => console.warn("[orchestration-events]", ...args),
+    error: (...args: unknown[]) => console.error("[orchestration-events]", ...args),
+  };
 
   logger.info("Broadcasting orchestration event", {
     type: event.type,
