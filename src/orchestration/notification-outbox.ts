@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { VersoConfig } from "../config/types.js";
+import { resolveStateDir } from "../config/paths.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
 const logger = createSubsystemLogger("orchestration-outbox");
@@ -32,7 +33,6 @@ let outboxWorkerInterval: NodeJS.Timeout | null = null;
  * Get the outbox directory path.
  */
 function getOutboxDir(): string {
-  const { resolveStateDir } = require("../config/paths.js");
   const stateDir = resolveStateDir();
   const outboxDir = path.join(stateDir, "orchestration-outbox");
   fs.mkdirSync(outboxDir, { recursive: true });
