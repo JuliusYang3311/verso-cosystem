@@ -38,6 +38,8 @@ export function createVersoTools(options?: {
   sandboxBrowserBridgeUrl?: string;
   allowHostBrowserControl?: boolean;
   agentSessionKey?: string;
+  /** Real chat session key for orchestration notifications (e.g., telegram:chat:123456). */
+  chatSessionKey?: string;
   agentChannel?: GatewayMessageChannel;
   agentAccountId?: string;
   /** Delivery target (e.g. telegram:group:123:topic:456) for topic/thread routing. */
@@ -187,7 +189,7 @@ export function createVersoTools(options?: {
       createOrchestratorTriggerTool({
         agentId: agentId ?? "main",
         config: options?.config,
-        sessionKey: options?.agentSessionKey,
+        sessionKey: options?.chatSessionKey ?? options?.agentSessionKey,
       }),
     );
   }
