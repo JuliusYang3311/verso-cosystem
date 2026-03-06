@@ -2,9 +2,6 @@
 
 import { execSync } from "node:child_process";
 import type { AcceptanceResult, AcceptanceVerdict, Orchestration } from "./types.js";
-import { createSubsystemLogger } from "../logging/subsystem.js";
-
-const logger = createSubsystemLogger("orchestration-acceptance");
 
 export type AcceptanceTestParams = {
   orchestration: Orchestration;
@@ -22,6 +19,10 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
   const { orchestration, workspaceDir, verifyCmd } = params;
   const subtasks = orchestration.plan?.subtasks ?? [];
   const verdicts: AcceptanceVerdict[] = [];
+
+  // Lazy import to avoid circular dependency issues
+  const { createSubsystemLogger } = await import("../logging/subsystem.js");
+  const logger = createSubsystemLogger("orchestration-acceptance");
 
   // Step 1: Run mechanical verify command (optional - skip if empty)
   let verifyPassed = true;
