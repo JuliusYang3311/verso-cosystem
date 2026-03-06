@@ -189,6 +189,19 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       ...gworkspaceTools,
     ];
 
+    // Debug: Log all parameters before creating session
+    logger.info("Creating agent session with parameters", {
+      orchId,
+      cwd: sandboxDir,
+      agentDir,
+      hasAuthStorage: !!authStorage,
+      hasModelRegistry: !!modelRegistry,
+      hasModel: !!model,
+      modelProvider: model?.provider,
+      modelId: model?.id,
+      customToolsCount: customToolsList.length,
+    });
+
     // Use in-memory session to avoid state pollution from previous runs
     const created = await createAgentSession({
       cwd: sandboxDir, // Work in shared sandbox
