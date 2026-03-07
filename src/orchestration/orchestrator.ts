@@ -243,7 +243,7 @@ export async function startOrchestratorDaemon(
     const maxFixCycles = orchConfig?.maxFixCycles ?? 30;
     const verifyCmd = orchConfig?.verifyCmd ?? "";
 
-    const scriptPath = path.join(process.cwd(), "dist", "orchestration", "daemon-entry.js");
+    const scriptPath = path.join(workspace, "dist", "orchestration", "daemon-entry.js");
 
     // Open log file for daemon output
     const logFd = fs.openSync(logPath, "a");

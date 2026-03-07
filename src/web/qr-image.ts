@@ -1,4 +1,6 @@
+// @ts-ignore - Internal qrcode-terminal module without type definitions
 import QRCodeModule from "qrcode-terminal/vendor/QRCode/index.js";
+// @ts-ignore - Internal qrcode-terminal module without type definitions
 import QRErrorCorrectLevelModule from "qrcode-terminal/vendor/QRCode/QRErrorCorrectLevel.js";
 import { encodePngRgba, fillPixel } from "../media/png-encode.js";
 

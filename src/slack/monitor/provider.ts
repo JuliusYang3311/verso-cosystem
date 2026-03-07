@@ -22,6 +22,7 @@ import { registerSlackMonitorEvents } from "./events.js";
 import { createSlackMessageHandler } from "./message-handler.js";
 import { registerSlackMonitorSlashCommands } from "./slash.js";
 
+// @ts-ignore - Type conversion for Bun/Node ESM/CJS compatibility (Node 25.x compat issue)
 const slackBoltModule = SlackBolt as typeof import("@slack/bolt") & {
   default?: typeof import("@slack/bolt");
 };

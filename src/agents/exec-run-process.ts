@@ -180,6 +180,7 @@ export async function runExecProcess(opts: {
   } else if (opts.usePty) {
     const { shell, args: shellArgs } = getShellConfig();
     try {
+      // @ts-ignore - Package exports issue: @lydell/node-pty types exist but not properly exported in package.json
       const ptyModule = (await import("@lydell/node-pty")) as unknown as {
         spawn?: PtySpawn;
         default?: { spawn?: PtySpawn };

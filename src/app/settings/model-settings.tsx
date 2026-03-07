@@ -32,6 +32,8 @@ type ProviderConfig = {
 
 type ModelConfig = {
   primary?: string;
+  fallback?: string[];
+  enabledModels?: string[];
   providers: ProviderConfig[];
   models?: Record<
     string,
@@ -107,8 +109,15 @@ const PROVIDERS: Provider[] = [
     defaultBaseUrl: "http://localhost:11434",
   },
   {
-    id: "custom",
-    name: "Custom Provider",
+    id: "custom-anthropic",
+    name: "Custom Anthropic-compatible",
+    icon: "🔧",
+    requiresAuth: true,
+    supportsCustomEndpoint: true,
+  },
+  {
+    id: "custom-openai",
+    name: "Custom OpenAI-compatible",
     icon: "🔧",
     requiresAuth: true,
     supportsCustomEndpoint: true,
@@ -118,6 +127,7 @@ const PROVIDERS: Provider[] = [
 export const ModelSettings: React.FC = () => {
   const [config, setConfig] = useState<ModelConfig>({
     providers: [],
+    enabledModels: [],
   });
   const [availableModels, setAvailableModels] = useState<ModelEntry[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
@@ -137,9 +147,21 @@ export const ModelSettings: React.FC = () => {
       if (rawConfig && typeof rawConfig === "object") {
         const modelConfig: ModelConfig = {
           primary: rawConfig.agents?.defaults?.model?.primary || rawConfig.agents?.defaults?.model,
+          fallback: rawConfig.agents?.defaults?.model?.fallback || [],
+          enabledModels: [],
           providers: [],
           models: rawConfig.agents?.defaults?.models || {},
         };
+
+        // Calculate enabledModels from primary + fallback
+        const enabledSet = new Set<string>();
+        if (modelConfig.primary) {
+          enabledSet.add(modelConfig.primary);
+        }
+        if (modelConfig.fallback) {
+          modelConfig.fallback.forEach((m) => enabledSet.add(m));
+        }
+        modelConfig.enabledModels = Array.from(enabledSet);
 
         // Extract providers from config
         const providers = rawConfig.agents?.defaults?.providers || {};
@@ -155,6 +177,11 @@ export const ModelSettings: React.FC = () => {
         }
 
         setConfig(modelConfig);
+
+        // Auto-load available models if providers are configured
+        if (modelConfig.providers.length > 0) {
+          await loadAvailableModels();
+        }
       }
     } catch (error) {
       console.error("Failed to load config:", error);
@@ -165,7 +192,7 @@ export const ModelSettings: React.FC = () => {
     setIsLoadingModels(true);
     try {
       // Call gateway to get model catalog
-      const response = await fetch("http://localhost:3000/api/models/catalog");
+      const response = await fetch("http://localhost:18789/api/models/catalog");
       if (response.ok) {
         const catalog = await response.json();
         setAvailableModels(catalog);
@@ -217,6 +244,28 @@ export const ModelSettings: React.FC = () => {
     setConfig({ ...config, primary: modelRef });
   };
 
+  const handleToggleModel = (modelRef: string) => {
+    const enabledModels = config.enabledModels || [];
+    const isEnabled = enabledModels.includes(modelRef);
+
+    if (isEnabled) {
+      // Disable model
+      const newEnabled = enabledModels.filter((m) => m !== modelRef);
+      setConfig({
+        ...config,
+        enabledModels: newEnabled,
+        // If disabling the primary model, clear primary
+        primary: config.primary === modelRef ? undefined : config.primary,
+      });
+    } else {
+      // Enable model
+      setConfig({
+        ...config,
+        enabledModels: [...enabledModels, modelRef],
+      });
+    }
+  };
+
   const handleSaveConfig = async () => {
     setIsSaving(true);
     setSaveMessage("");
@@ -235,6 +284,10 @@ export const ModelSettings: React.FC = () => {
         };
       }
 
+      // Calculate fallback models (enabled models excluding primary)
+      const enabledModels = config.enabledModels || [];
+      const fallback = enabledModels.filter((m) => m !== config.primary);
+
       const updatedConfig = {
         ...existingConfig,
         agents: {
@@ -242,7 +295,10 @@ export const ModelSettings: React.FC = () => {
           defaults: {
             ...existingConfig.agents?.defaults,
             model: config.primary
-              ? { primary: config.primary }
+              ? {
+                  primary: config.primary,
+                  ...(fallback.length > 0 && { fallback }),
+                }
               : existingConfig.agents?.defaults?.model,
             providers,
             models: config.models || {},
@@ -322,6 +378,79 @@ export const ModelSettings: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Available Models - Enable/Disable */}
+      {config.providers.length > 0 && (
+        <div className="section">
+          <div className="section-header">
+            <h3>Available Models</h3>
+            <button
+              className="btn-secondary"
+              onClick={() => void loadAvailableModels()}
+              disabled={isLoadingModels}
+            >
+              {isLoadingModels ? "Loading..." : "Refresh Models"}
+            </button>
+          </div>
+
+          {isLoadingModels ? (
+            <div className="loading">Loading available models...</div>
+          ) : availableModels.length === 0 ? (
+            <div className="empty-state">
+              <p>No models available</p>
+              <p className="help-text">Models will appear here after configuring providers</p>
+            </div>
+          ) : (
+            <div className="model-list">
+              {availableModels.map((model) => {
+                const modelRef = formatModelRef(model.provider, model.id);
+                const isEnabled = (config.enabledModels || []).includes(modelRef);
+                const isPrimary = config.primary === modelRef;
+                return (
+                  <div
+                    key={modelRef}
+                    className={`model-item ${isEnabled ? "enabled" : ""} ${isPrimary ? "primary" : ""}`}
+                  >
+                    <label className="model-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={isEnabled}
+                        onChange={() => handleToggleModel(modelRef)}
+                      />
+                      <div className="model-info">
+                        <h4>{model.name || model.id}</h4>
+                        <span className="model-ref">{modelRef}</span>
+                      </div>
+                    </label>
+                    <div className="model-meta">
+                      {model.contextWindow && (
+                        <span className="badge">
+                          {formatContextWindow(model.contextWindow)} ctx
+                        </span>
+                      )}
+                      {model.reasoning && <span className="badge">reasoning</span>}
+                      {isPrimary && <span className="badge primary">PRIMARY</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Fallback Models Display */}
+          {config.enabledModels && config.enabledModels.length > 0 && (
+            <div className="fallback-info">
+              <h4>Enabled Models: {config.enabledModels.length}</h4>
+              {config.primary && config.enabledModels.length > 1 && (
+                <p className="help-text">
+                  Fallback models:{" "}
+                  {config.enabledModels.filter((m) => m !== config.primary).join(", ")}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Configured Providers */}
       <div className="section">

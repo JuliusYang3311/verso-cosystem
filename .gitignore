@@ -83,8 +83,10 @@ apps/macos/.build/**
 apps/ios/*.xcfilelist
 **/ModuleCache/
 
-# Desktop app (Electron)
-apps/
+# Desktop app (Electron) build outputs
+apps/electron/dist/
+apps/electron/out/
+apps/electron/node_modules/
 
 # fastlane (iOS)
 apps/ios/fastlane/README.md
@@ -118,6 +120,15 @@ MEMORY.md
 # Local tooling
 .serena/
 .serena/cache/
+.claude/
+
+# Bundled binaries
+/node
+
+# Debug/test scripts
+verso-*.cjs
+verso-*.js
+!src/**/verso-*.js
 
 # Agent credentials and memory (NEVER COMMIT)
 /memory/

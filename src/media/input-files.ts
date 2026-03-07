@@ -200,6 +200,7 @@ async function extractPdfContent(params: {
 }): Promise<{ text: string; images: InputImageContent[] }> {
   const { buffer, limits } = params;
   const { getDocument } = await loadPdfJsModule();
+  // @ts-ignore - disableWorker is a valid option but not in the type definitions
   const pdf = await getDocument({
     data: new Uint8Array(buffer),
     disableWorker: true,

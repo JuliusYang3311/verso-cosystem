@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Verso</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <div id="sidebar">
+      <div id="sidebar-header">
+        <h1>VERSO</h1>
+      </div>
+      <div id="nav">
+        <div class="nav-item active" data-section="chat">Chat</div>
+        <div class="nav-item" data-section="overview">Overview</div>
+        <div class="nav-item" data-section="orchestration">Orchestration</div>
+        <div class="nav-item" data-section="channels">Channels</div>
+        <div class="nav-item" data-section="sessions">Sessions</div>
+        <div class="nav-item" data-section="cron">Cron Jobs</div>
+        <div class="nav-item" data-section="instances">Instances</div>
+        <div class="nav-item" data-section="usage">Usage</div>
+        <div class="nav-item" data-section="settings">Settings</div>
+      </div>
+    </div>
+
+    <div id="content">
+      <div id="main-content">
+
+        <!-- Chat Section -->
+        <div class="section active" id="chat">
+          <div class="chat-container">
+            <div class="chat-header">
+              <div class="chat-header-left">
+                <select id="chat-session-select" class="chat-session-select">
+                  <option value="agent:main:main">agent:main:main</option>
+                </select>
+                <button class="btn btn-small btn-secondary" id="chat-refresh-btn" title="Refresh history">Refresh</button>
+              </div>
+              <div class="chat-header-right">
+                <button class="btn btn-small btn-danger" id="chat-abort-btn" style="display:none;">Abort</button>
+              </div>
+            </div>
+            <div id="chat-messages" class="chat-messages">
+              <div class="chat-empty">Select a session and start chatting</div>
+            </div>
+            <div class="chat-input-area">
+              <textarea id="chat-input" class="chat-input" placeholder="Type a message..." rows="1"></textarea>
+              <button class="btn" id="chat-send-btn">Send</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Overview Section -->
+        <div class="section" id="overview">
+          <div class="card">
+            <h2>Gateway Overview</h2>
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-label">Status</div>
+                <div class="stat-value" id="overview-status">Loading...</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Active Sessions</div>
+                <div class="stat-value" id="overview-sessions">0</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Connected Channels</div>
+                <div class="stat-value" id="overview-channels">0</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Connected Devices</div>
+                <div class="stat-value" id="overview-devices">0</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Agents</h2>
+            <div id="overview-agents">Loading...</div>
+          </div>
+
+          <div class="card">
+            <h2>Recent Activity</h2>
+            <div id="overview-activity">Loading...</div>
+          </div>
+        </div>
+
+        <!-- Orchestration Section -->
+        <div class="section" id="orchestration">
+          <div class="card">
+            <div class="section-header">
+              <h2>Orchestration</h2>
+              <button class="btn btn-small" id="orch-refresh-btn">Refresh</button>
+            </div>
+            <p class="section-desc">Multi-agent task orchestration</p>
+            <div id="orchestration-list"></div>
+          </div>
+        </div>
+
+        <!-- Channels Section -->
+        <div class="section" id="channels">
+          <div class="card">
+            <div class="section-header">
+              <h2>Channels Status</h2>
+              <button class="btn btn-small" id="channels-refresh-btn">Refresh</button>
+            </div>
+            <p class="section-desc">Active communication channels</p>
+            <div id="channels-list"></div>
+          </div>
+        </div>
+
+        <!-- Sessions Section -->
+        <div class="section" id="sessions">
+          <div class="card" id="sessions-list-card">
+            <div class="section-header">
+              <h2>Sessions</h2>
+              <button class="btn btn-small" id="sessions-refresh-btn">Refresh</button>
+            </div>
+            <p class="section-desc">Inspect and manage sessions</p>
+            <div id="sessions-list"></div>
+          </div>
+          <div class="card" id="session-detail-card" style="display:none;">
+            <div class="section-header">
+              <h2 id="session-detail-title">Session Detail</h2>
+              <button class="btn btn-small btn-secondary" id="session-back-btn">Back to List</button>
+            </div>
+            <div class="session-detail-actions">
+              <button class="btn btn-small btn-secondary" id="session-reset-btn">Reset</button>
+              <button class="btn btn-small btn-secondary" id="session-compact-btn">Compact</button>
+              <button class="btn btn-small btn-danger" id="session-delete-btn">Delete</button>
+            </div>
+            <div id="session-detail-info" class="session-info"></div>
+            <h3 style="margin-top:16px;margin-bottom:12px;">Message History</h3>
+            <div id="session-detail-messages" class="session-messages"></div>
+          </div>
+        </div>
+
+        <!-- Cron Section -->
+        <div class="section" id="cron">
+          <div class="card">
+            <div class="section-header">
+              <h2>Cron Jobs</h2>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-small" id="cron-add-btn">+ Add Job</button>
+                <button class="btn btn-small btn-secondary" id="cron-refresh-btn">Refresh</button>
+              </div>
+            </div>
+            <div id="cron-status-info" class="cron-status-bar"></div>
+            <div id="cron-list"></div>
+          </div>
+        </div>
+
+        <!-- Instances Section -->
+        <div class="section" id="instances">
+          <div class="card">
+            <div class="section-header">
+              <h2>Nodes & Devices</h2>
+              <button class="btn btn-small" id="instances-refresh-btn">Refresh</button>
+            </div>
+            <h3 style="margin-bottom:12px;">Connected Nodes</h3>
+            <div id="nodes-list"></div>
+            <h3 style="margin-top:24px;margin-bottom:12px;">Device Pairings</h3>
+            <div id="devices-list"></div>
+            <h3 style="margin-top:24px;margin-bottom:12px;">Presence</h3>
+            <div id="presence-list"></div>
+          </div>
+        </div>
+
+        <!-- Usage Section -->
+        <div class="section" id="usage">
+          <div class="card">
+            <div class="section-header">
+              <h2>Usage & Costs</h2>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <select id="usage-period" class="input-small">
+                  <option value="7">Last 7 days</option>
+                  <option value="14">Last 14 days</option>
+                  <option value="30" selected>Last 30 days</option>
+                  <option value="90">Last 90 days</option>
+                </select>
+                <button class="btn btn-small" id="usage-refresh-btn">Refresh</button>
+              </div>
+            </div>
+            <div id="usage-totals" class="stats-grid"></div>
+            <h3 style="margin-top:24px;margin-bottom:12px;">Per Session</h3>
+            <div id="usage-sessions"></div>
+          </div>
+        </div>
+
+        <!-- Settings Section -->
+        <div class="section" id="settings">
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <h2 style="margin:0;">Settings</h2>
+              <button class="btn" onclick="saveAllSettings()" id="save-all-settings-btn">Save All Settings</button>
+            </div>
+            <div class="settings-tabs">
+              <button class="btn btn-small settings-tab active" data-tab="general-tab">General</button>
+              <button class="btn btn-small settings-tab" data-tab="providers-tab">Models & Providers</button>
+              <button class="btn btn-small settings-tab" data-tab="channels-tab">Channels</button>
+              <button class="btn btn-small settings-tab" data-tab="memory-tab">Memory</button>
+              <button class="btn btn-small settings-tab" data-tab="browser-tab">Browser</button>
+              <button class="btn btn-small settings-tab" data-tab="evolver-tab">Evolver</button>
+              <button class="btn btn-small settings-tab" data-tab="webtools-tab">Web Tools</button>
+              <button class="btn btn-small settings-tab" data-tab="config-tab">Raw Config</button>
+            </div>
+
+            <!-- General Tab -->
+            <div class="settings-panel active" id="general-tab">
+              <h3>General</h3>
+              <div class="form-group">
+                <label>Workspace Directory</label>
+                <input type="text" id="general-workspace" placeholder="e.g. /Users/you/projects/verso">
+                <small class="hint">The verso project workspace root. Used by evolver, orchestration, and agents.</small>
+              </div>
+              <div class="form-group">
+                <label>Gateway Port</label>
+                <input type="text" id="general-gateway-port" placeholder="18789" disabled style="color:#888;">
+                <small class="hint">Gateway listens on this port (change requires restart)</small>
+              </div>
+            </div>
+
+            <!-- Providers Tab -->
+            <div class="settings-panel" id="providers-tab">
+              <h3>Providers</h3>
+              <p class="section-desc">Manage AI providers and their models</p>
+              <div id="providers-container"></div>
+              <button class="btn" onclick="showProviderSelectionModal()" style="margin-top:16px;">+ Add Provider</button>
+            </div>
+
+            <!-- Channels Tab -->
+            <div class="settings-panel" id="channels-tab">
+              <h3>Channel Configuration</h3>
+              <p class="section-desc">Configure messaging channel tokens</p>
+              <div id="channels-config-container"></div>
+            </div>
+
+            <!-- Memory Tab -->
+            <div class="settings-panel" id="memory-tab">
+              <h3>Memory & Embeddings</h3>
+              <div class="form-group">
+                <label class="checkbox-label"><span>Enable Memory Search</span><input type="checkbox" id="memory-enabled"></label>
+              </div>
+              <div class="form-group">
+                <label>Embedding Provider</label>
+                <select id="embedding-provider" onchange="onEmbeddingProviderChange()">
+                  <option value="openai">OpenAI</option>
+                  <option value="voyage">Voyage AI</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="local">Local</option>
+                </select>
+              </div>
+              <div class="form-group" id="embedding-model-group">
+                <label>Embedding Model</label>
+                <select id="embedding-model">
+                  <option value="text-embedding-3-small">text-embedding-3-small</option>
+                  <option value="text-embedding-3-large">text-embedding-3-large</option>
+                </select>
+              </div>
+              <div class="form-group" id="embedding-api-key-group">
+                <label>API Key</label>
+                <input type="password" id="embedding-api-key" placeholder="Enter API key">
+              </div>
+            </div>
+
+            <!-- Browser Tab -->
+            <div class="settings-panel" id="browser-tab">
+              <h3>Browser Settings</h3>
+              <div class="form-group">
+                <label class="checkbox-label"><span>Enable Browser</span><input type="checkbox" id="browser-enabled"></label>
+              </div>
+              <div class="form-group">
+                <label class="checkbox-label"><span>Headless Mode</span><input type="checkbox" id="browser-headless"></label>
+              </div>
+            </div>
+
+            <!-- Evolver Tab -->
+            <div class="settings-panel" id="evolver-tab">
+              <h3>Evolver</h3>
+              <p class="section-desc">Self-evolving code agent — copies target files to sandbox, modifies them, then deploys back</p>
+              <div class="form-group">
+                <label class="checkbox-label"><span>Enable Evolver</span><input type="checkbox" id="evolver-enabled" onchange="toggleEvolver()"></label>
+                <small class="hint">Start or stop the evolver daemon. Status: <strong id="evolver-status" style="color:#888;">Unknown</strong></small>
+              </div>
+              <div class="form-group">
+                <label class="checkbox-label"><span>Review Mode</span><input type="checkbox" id="evolver-review"></label>
+                <small class="hint">Require manual review before deploying changes from sandbox</small>
+              </div>
+            </div>
+
+            <!-- Web Tools Tab -->
+            <div class="settings-panel" id="webtools-tab">
+              <h3>Web Tools</h3>
+              <div class="form-group">
+                <label class="checkbox-label"><span>Enable Web Search</span><input type="checkbox" id="web-enabled"></label>
+              </div>
+              <div class="form-group">
+                <label>Brave Search API Key</label>
+                <input type="password" id="brave-api-key" placeholder="Enter Brave API key">
+              </div>
+            </div>
+
+            <!-- Raw Config Tab -->
+            <div class="settings-panel" id="config-tab">
+              <h3>Raw Configuration</h3>
+              <p class="section-desc">Edit verso.json directly (advanced)</p>
+              <textarea id="config-editor" class="config-editor" rows="20"></textarea>
+              <div style="display:flex;gap:8px;margin-top:12px;">
+                <button class="btn" id="config-save-btn">Save Config</button>
+                <button class="btn btn-secondary" id="config-reload-btn">Reload</button>
+              </div>
+              <div id="config-status" style="margin-top:8px;font-size:13px;"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div id="status">
+        <div class="status-indicator" id="status-dot"></div>
+        <span id="status-text">Gateway: Connecting...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cron Add/Edit Modal -->
+  <div id="cron-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Add Cron Job</div>
+        <button class="modal-close" onclick="closeCronModal()">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>Label</label>
+        <input type="text" id="cron-label" placeholder="My scheduled task">
+      </div>
+      <div class="form-group">
+        <label>Schedule (cron expression)</label>
+        <input type="text" id="cron-schedule" placeholder="*/30 * * * *">
+        <small class="hint">e.g. "*/30 * * * *" = every 30 min, "0 9 * * *" = daily at 9am</small>
+      </div>
+      <div class="form-group">
+        <label>Message</label>
+        <textarea id="cron-message" rows="3" placeholder="What should the agent do?"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Timezone (optional)</label>
+        <input type="text" id="cron-timezone" placeholder="America/New_York">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeCronModal()">Cancel</button>
+        <button class="btn" id="cron-save-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Orchestration Detail Modal -->
+  <div id="orch-modal" class="modal">
+    <div class="modal-content" style="max-width:700px;">
+      <div class="modal-header">
+        <div class="modal-title">Orchestration Detail</div>
+        <button class="modal-close" onclick="closeOrchModal()">&times;</button>
+      </div>
+      <div id="orch-detail-content"></div>
+    </div>
+  </div>
+
+  <!-- Provider Selection Modal -->
+  <div id="provider-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Select Provider Type</div>
+        <button class="modal-close" onclick="closeProviderModal()">&times;</button>
+      </div>
+      <div id="provider-options"></div>
+    </div>
+  </div>
+
+  <!-- Model Selection Modal -->
+  <div id="model-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Select Models</div>
+        <button class="modal-close" onclick="closeModelModal()">&times;</button>
+      </div>
+      <div id="model-options"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModelModal()">Cancel</button>
+        <button class="btn" onclick="confirmModelSelection()">Add Selected Models</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cron Runs Modal -->
+  <div id="cron-runs-modal" class="modal">
+    <div class="modal-content" style="max-width:700px;">
+      <div class="modal-header">
+        <div class="modal-title">Run History</div>
+        <button class="modal-close" onclick="closeCronRunsModal()">&times;</button>
+      </div>
+      <div id="cron-runs-content"></div>
+    </div>
+  </div>
+
+  <script src="gateway-client.js"></script>
+  <script src="model-config.js"></script>
+  <script src="oauth-handler.js"></script>
+  <script src="providers.js"></script>
+  <script src="dashboard.js"></script>
+  <script src="channels-config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
