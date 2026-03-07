@@ -235,6 +235,11 @@ window.saveAllSettings = async function() {
     if (ep) config.agents.defaults.memorySearch.provider = ep.value;
     const em = document.getElementById('embedding-model');
     if (em) config.agents.defaults.memorySearch.model = em.value;
+    const memApiKey = document.getElementById('embedding-api-key');
+    if (memApiKey && memApiKey.value.trim()) {
+      if (!config.agents.defaults.memorySearch.remote) config.agents.defaults.memorySearch.remote = {};
+      config.agents.defaults.memorySearch.remote.apiKey = memApiKey.value.trim();
+    }
 
     // --- Browser ---
     if (!config.browser) config.browser = {};
@@ -327,6 +332,9 @@ function loadConfig(config) {
     // Set model after provider change updated the options
     const emSel = document.getElementById('embedding-model');
     if (emSel && ms.model) emSel.value = ms.model;
+    // Restore API key
+    const ak = document.getElementById('embedding-api-key');
+    if (ak && ms.remote?.apiKey) ak.value = ms.remote.apiKey;
   }
 
   // Browser
@@ -405,6 +413,12 @@ window.saveMemory = async function() {
 
   const em = document.getElementById('embedding-model');
   if (em) config.agents.defaults.memorySearch.model = em.value;
+
+  const ak = document.getElementById('embedding-api-key');
+  if (ak && ak.value.trim()) {
+    if (!config.agents.defaults.memorySearch.remote) config.agents.defaults.memorySearch.remote = {};
+    config.agents.defaults.memorySearch.remote.apiKey = ak.value.trim();
+  }
 
   await window.verso.saveConfig(config);
   showNotification('Memory settings saved');

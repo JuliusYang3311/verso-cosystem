@@ -225,26 +225,27 @@ function launchGateway(port) {
     ? path.join(__dirname.replace('app.asar', 'app.asar.unpacked'), 'gateway', 'index.js')
     : path.join(__dirname, 'gateway', 'index.js');
 
-  // Resolve the verso source root.
-  // The bundled Resources/gateway/ copy has broken pnpm symlinks,
-  // so prefer the live source tree.
+  // Resolve the verso gateway root.
   const os = require('os');
-  const candidates = [
-    // 1. Dev mode: electron/  →  apps/  →  verso/
-    path.resolve(__dirname, '..', '..', '..'),
-    // 2. Read workspace from config
-    (() => {
-      try {
-        const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.verso', 'verso.json'), 'utf8'));
-        return cfg.agents?.defaults?.workspace;
-      } catch { return null; }
-    })(),
-    // 3. Common install locations
-    path.join(os.homedir(), 'Documents', 'verso'),
-    path.join(os.homedir(), 'verso'),
-    // 4. Bundled fallback
-    app.isPackaged ? path.join(process.resourcesPath, 'gateway') : null,
-  ].filter(Boolean);
+  const candidates = app.isPackaged
+    ? [
+        // Packaged: always prefer bundled resources
+        path.join(process.resourcesPath, 'gateway'),
+      ]
+    : [
+        // Dev mode: electron/  →  apps/  →  verso/
+        path.resolve(__dirname, '..', '..', '..'),
+        // Read workspace from config
+        (() => {
+          try {
+            const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.verso', 'verso.json'), 'utf8'));
+            return cfg.agents?.defaults?.workspace;
+          } catch { return null; }
+        })(),
+        // Common install locations
+        path.join(os.homedir(), 'Documents', 'verso'),
+        path.join(os.homedir(), 'verso'),
+      ].filter(Boolean);
 
   const resolvedGatewayRoot = candidates.find(p => fs.existsSync(path.join(p, 'dist', 'index.js')));
   if (!resolvedGatewayRoot) {

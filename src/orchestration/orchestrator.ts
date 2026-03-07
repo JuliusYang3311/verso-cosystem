@@ -7,7 +7,9 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { VersoConfig } from "../config/types.js";
+import { resolveDefaultAgentWorkspaceDir } from "../agents/workspace.js";
 import { resolveStateDir } from "../config/paths.js";
 import { saveOrchestration } from "./store.js";
 import { createOrchestration } from "./types.js";
@@ -143,7 +145,9 @@ function isPidAlive(pid: number): boolean {
 
 function resolveWorkspace(cfg?: VersoConfig): string {
   const workspace =
-    cfg?.agents?.defaults?.workspace?.trim() || process.env.OPENCLAW_WORKSPACE || process.cwd();
+    cfg?.agents?.defaults?.workspace?.trim() ||
+    process.env.OPENCLAW_WORKSPACE ||
+    resolveDefaultAgentWorkspaceDir();
   // Ensure absolute path to prevent issues when daemon cwd changes
   return path.resolve(workspace);
 }
@@ -243,7 +247,7 @@ export async function startOrchestratorDaemon(
     const maxFixCycles = orchConfig?.maxFixCycles ?? 30;
     const verifyCmd = orchConfig?.verifyCmd ?? "";
 
-    const scriptPath = path.join(workspace, "dist", "orchestration", "daemon-entry.js");
+    const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "daemon-entry.js");
 
     // Open log file for daemon output
     const logFd = fs.openSync(logPath, "a");

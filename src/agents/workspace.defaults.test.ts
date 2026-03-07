@@ -15,7 +15,7 @@ describe("DEFAULT_AGENT_WORKSPACE_DIR", () => {
 
     const mod = await import("./workspace.js");
     expect(mod.DEFAULT_AGENT_WORKSPACE_DIR).toBe(
-      path.join(path.resolve(home), ".openclaw", "workspace"),
+      path.join(path.resolve(home), ".verso", "workspace"),
     );
   });
 });

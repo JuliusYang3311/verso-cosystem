@@ -72,7 +72,7 @@ export function resolveSessionTranscriptCandidates(
     candidates.push(resolveSessionTranscriptPath(sessionId, agentId));
   }
   const home = resolveRequiredHomeDir(process.env, os.homedir);
-  candidates.push(path.join(home, ".openclaw", "sessions", `${sessionId}.jsonl`));
+  candidates.push(path.join(home, ".verso", "sessions", `${sessionId}.jsonl`));
   return candidates;
 }
 

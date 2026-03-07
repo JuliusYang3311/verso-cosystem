@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 export function getEvolverRoot(): string {
@@ -10,7 +11,9 @@ export function getWorkspaceRoot(): string {
   if (fromEnv) {
     return fromEnv;
   }
-  return path.resolve(import.meta.dirname, "..", "..", "..");
+  // Fallback to default workspace dir (~/.verso/workspace) instead of
+  // import.meta.dirname which won't exist for packaged (DMG) installs.
+  return path.join(os.homedir(), ".verso", "workspace");
 }
 
 export function getRepoRoot(): string {

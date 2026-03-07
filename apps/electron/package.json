@@ -66,6 +66,10 @@
       {
         "from": "../../node",
         "to": "gateway/node"
+      },
+      {
+        "from": "../../docs/reference/templates",
+        "to": "gateway/docs/reference/templates"
       }
     ],
     "asarUnpack": [

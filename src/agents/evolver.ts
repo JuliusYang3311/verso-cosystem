@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { VersoConfig } from "../config/types.js";
 import { resolveStateDir } from "../config/paths.js";
 import { resolveOpenClawAgentDir } from "./agent-paths.js";
+import { resolveDefaultAgentWorkspaceDir } from "./workspace.js";
 
 type EvolverStartResult = {
   started: boolean;
@@ -71,7 +73,9 @@ function isPidAlive(pid: number): boolean {
 
 function resolveWorkspace(cfg?: VersoConfig): string {
   return (
-    cfg?.agents?.defaults?.workspace?.trim() || process.env.OPENCLAW_WORKSPACE || process.cwd()
+    cfg?.agents?.defaults?.workspace?.trim() ||
+    process.env.OPENCLAW_WORKSPACE ||
+    resolveDefaultAgentWorkspaceDir()
   );
 }
 
@@ -107,7 +111,12 @@ export async function startEvolverDaemon(opts?: EvolverDaemonOptions): Promise<E
   // Build model slug from main session's provider/model
   const modelSlug = opts?.provider && opts?.model ? `${opts.provider}/${opts.model}` : undefined;
 
-  const scriptPath = path.join(process.cwd(), "dist", "evolver", "daemon-entry.js");
+  const scriptPath = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "evolver",
+    "daemon-entry.js",
+  );
   const child = spawn(process.execPath, [scriptPath], {
     detached: true,
     stdio: "ignore",

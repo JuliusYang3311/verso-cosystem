@@ -213,7 +213,7 @@ async function loadChatSessions() {
 
 async function loadChatHistory() {
   const messagesDiv = document.getElementById('chat-messages');
-  messagesDiv.innerHTML = '<div class="chat-empty">Loading...</div>';
+  const wasNearBottom = isChatNearBottom();
 
   try {
     const result = await window.gatewayClient.chatHistory({ sessionKey: getChatSession(), limit: 100 });
@@ -228,7 +228,8 @@ async function loadChatHistory() {
     for (const msg of messages) {
       appendChatMessage(msg.role || 'system', msg.content || '', false, msg.timestamp || msg.createdAt || null);
     }
-    scrollChatToBottom(true);
+    // Only auto-scroll if user was already near the bottom
+    if (wasNearBottom) scrollChatToBottom(true);
   } catch (err) {
     console.error('Failed to load chat history:', err);
     messagesDiv.innerHTML = '<div class="chat-empty">Could not load history</div>';
@@ -545,7 +546,6 @@ window.addEventListener('gateway-event', (e) => {
       document.getElementById('chat-abort-btn').style.display = 'none';
       document.getElementById('chat-send-btn').disabled = false;
       scrollChatToBottom();
-      setTimeout(() => loadChatHistory(), 500);
     }
   }
 });
@@ -678,10 +678,49 @@ window.deleteSession = async function() {
 
 // ==================== CHANNELS ====================
 
+function formatRelativeTime(ts) {
+  if (!ts) return null;
+  const diff = Date.now() - ts;
+  if (diff < 0) return 'just now';
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function renderAccountStatusBadges(acc) {
+  const badges = [];
+  if (acc.enabled === false) badges.push('<span class="ch-badge ch-badge-off">Disabled</span>');
+  if (acc.configured === false) badges.push('<span class="ch-badge ch-badge-warn">Not configured</span>');
+  if (acc.linked === true) badges.push('<span class="ch-badge ch-badge-ok">Linked</span>');
+  if (acc.running === true) badges.push('<span class="ch-badge ch-badge-ok">Running</span>');
+  else if (acc.running === false && acc.enabled !== false) badges.push('<span class="ch-badge ch-badge-off">Stopped</span>');
+  return badges.join(' ');
+}
+
+function renderAccountDetails(acc) {
+  const rows = [];
+  if (acc.dmPolicy) rows.push(`DM: ${escapeHtml(acc.dmPolicy)}`);
+  if (acc.mode) rows.push(`Mode: ${escapeHtml(acc.mode)}`);
+  if (acc.lastConnectedAt) rows.push(`Connected: ${formatRelativeTime(acc.lastConnectedAt)}`);
+  if (acc.lastInboundAt) rows.push(`Last msg in: ${formatRelativeTime(acc.lastInboundAt)}`);
+  if (acc.lastOutboundAt) rows.push(`Last msg out: ${formatRelativeTime(acc.lastOutboundAt)}`);
+  if (acc.reconnectAttempts > 0) rows.push(`Reconnects: ${acc.reconnectAttempts}`);
+  if (acc.allowFrom && acc.allowFrom.length > 0) rows.push(`Allow: ${escapeHtml(acc.allowFrom.join(', '))}`);
+  return rows.length > 0
+    ? `<div class="ch-details">${rows.map(r => `<span class="ch-detail-item">${r}</span>`).join('')}</div>`
+    : '';
+}
+
 async function loadChannels() {
   try {
     const result = await window.gatewayClient.getChannelsStatus({ probe: false });
     const channels = result?.channels || {};
+    const channelAccountsMap = result?.channelAccounts || {};
     const supportedChannels = new Set(['telegram', 'whatsapp', 'discord', 'slack', 'web']);
     const channelOrder = (result?.channelOrder || Object.keys(channels)).filter(ch => supportedChannels.has(ch));
     const channelLabels = result?.channelLabels || {};
@@ -693,37 +732,53 @@ async function loadChannels() {
     }
 
     listDiv.innerHTML = channelOrder.map(name => {
+      // Prefer channelAccounts (detailed) over channels summary
+      const detailedAccounts = channelAccountsMap[name];
       const channel = channels[name];
-      if (!channel) return '';
+      if (!channel && !detailedAccounts) return '';
       const label = channelLabels[name] || name;
-      const accounts = Array.isArray(channel) ? channel : (channel.accounts || [channel]);
+      const accounts = Array.isArray(detailedAccounts) && detailedAccounts.length > 0
+        ? detailedAccounts
+        : (Array.isArray(channel) ? channel : (channel?.accounts || [channel]));
       const hasConnected = accounts.some(a => a.connected || a.status === 'connected');
+      const allDisabled = accounts.every(a => a.enabled === false);
+
+      // Channel-level summary from channels[name]
+      const summary = channels[name];
+      const configured = summary?.configured !== false;
 
       return `
-        <div class="channel-card">
+        <div class="channel-card ${allDisabled ? 'channel-disabled' : ''}">
           <div class="channel-card-header">
             <div class="channel-card-title">
-              <span class="status-dot ${hasConnected ? 'green' : 'gray'}"></span>
+              <span class="status-dot ${hasConnected ? 'green' : (allDisabled ? 'red' : 'gray')}"></span>
               ${escapeHtml(label)}
+              ${!configured ? '<span class="ch-badge ch-badge-warn" style="margin-left:6px;">Not configured</span>' : ''}
+              ${allDisabled ? '<span class="ch-badge ch-badge-off" style="margin-left:6px;">Plugin disabled</span>' : ''}
             </div>
             <span style="font-size:12px;color:#888;">${accounts.length} account${accounts.length !== 1 ? 's' : ''}</span>
           </div>
           <div class="channel-accounts">
             ${accounts.map((acc, i) => {
               const accId = acc.accountId || acc.id || `#${i}`;
-              const status = acc.connected ? 'Connected' : (acc.status || 'Disconnected');
-              const statusColor = acc.connected ? '#4caf50' : (acc.error ? '#f44336' : '#888');
+              const connected = acc.connected || acc.status === 'connected';
+              const statusText = connected ? 'Connected' : (acc.enabled === false ? 'Disabled' : (acc.lastError || acc.error ? 'Error' : (acc.status || 'Disconnected')));
+              const statusColor = connected ? '#4caf50' : ((acc.lastError || acc.error) ? '#f44336' : (acc.enabled === false ? '#ff9800' : '#888'));
+              const errorMsg = acc.lastError || acc.error || '';
               return `
                 <div class="channel-account">
                   <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div>
-                      <div style="font-weight:500;">${escapeHtml(acc.displayName || accId)}</div>
-                      <div style="color:${statusColor};font-size:12px;margin-top:2px;">${escapeHtml(status)}</div>
-                      ${acc.error ? `<div style="color:#f44336;font-size:11px;margin-top:2px;">${escapeHtml(truncate(acc.error, 100))}</div>` : ''}
-                      ${acc.mode ? `<div style="color:#888;font-size:11px;">Mode: ${escapeHtml(acc.mode)}</div>` : ''}
+                    <div style="flex:1;min-width:0;">
+                      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <span style="font-weight:500;">${escapeHtml(acc.name || acc.displayName || accId)}</span>
+                        ${renderAccountStatusBadges(acc)}
+                      </div>
+                      <div style="color:${statusColor};font-size:12px;margin-top:3px;">${escapeHtml(statusText)}</div>
+                      ${errorMsg ? `<div style="color:#f44336;font-size:11px;margin-top:2px;word-break:break-word;">${escapeHtml(truncate(errorMsg, 150))}</div>` : ''}
+                      ${renderAccountDetails(acc)}
                     </div>
-                    <div style="display:flex;gap:6px;">
-                      ${acc.connected ? `<button class="btn btn-small btn-secondary" onclick="logoutChannel('${escapeHtml(name)}','${escapeHtml(accId)}')">Disconnect</button>` : ''}
+                    <div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">
+                      ${connected ? `<button class="btn btn-small btn-secondary" onclick="logoutChannel('${escapeHtml(name)}','${escapeHtml(accId)}')">Disconnect</button>` : ''}
                     </div>
                   </div>
                 </div>
@@ -1051,23 +1106,27 @@ async function loadInstances() {
     const nodesDiv = document.getElementById('nodes-list');
 
     if (nodes.length === 0) {
-      nodesDiv.innerHTML = '<div style="color:#888;font-size:13px;">No nodes</div>';
+      nodesDiv.innerHTML = '<div class="instance-empty">No nodes connected</div>';
     } else {
       nodesDiv.innerHTML = nodes.map(node => `
-        <div class="list-item">
-          <div class="list-item-content">
-            <div class="list-item-title">${escapeHtml(node.displayName || node.nodeId)}</div>
-            <div class="list-item-meta">
-              ${escapeHtml(node.platform || '')} &middot;
-              ${node.connected ? '<span style="color:#4caf50;">Connected</span>' : '<span style="color:#888;">Offline</span>'}
-              ${node.version ? ` &middot; v${escapeHtml(node.version)}` : ''}
+        <div class="instance-card">
+          <div class="instance-card-header">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="status-dot ${node.connected ? 'green' : 'gray'}"></span>
+              <span class="instance-card-title">${escapeHtml(node.displayName || node.nodeId)}</span>
             </div>
+            <span class="ch-badge ${node.connected ? 'ch-badge-ok' : 'ch-badge-off'}">${node.connected ? 'Online' : 'Offline'}</span>
           </div>
-          <div class="status-dot ${node.connected ? 'green' : 'gray'}"></div>
+          <div class="instance-card-details">
+            ${node.platform ? `<span>Platform: ${escapeHtml(node.platform)}</span>` : ''}
+            ${node.version ? `<span>Version: ${escapeHtml(node.version)}</span>` : ''}
+            ${node.ip ? `<span>IP: ${escapeHtml(node.ip)}</span>` : ''}
+            ${node.roles?.length ? `<span>Roles: ${escapeHtml(node.roles.join(', '))}</span>` : ''}
+          </div>
         </div>
       `).join('');
     }
-  } catch { document.getElementById('nodes-list').innerHTML = '<div style="color:#888;font-size:13px;">Could not load nodes</div>'; }
+  } catch { document.getElementById('nodes-list').innerHTML = '<div class="instance-empty">Could not load nodes</div>'; }
 
   // Device pairings
   try {
@@ -1076,49 +1135,76 @@ async function loadInstances() {
     const devicesDiv = document.getElementById('devices-list');
 
     if (requests.length === 0) {
-      devicesDiv.innerHTML = '<div style="color:#888;font-size:13px;">No pending device pairings</div>';
+      devicesDiv.innerHTML = '<div class="instance-empty">No device pairings</div>';
     } else {
-      devicesDiv.innerHTML = requests.map(req => `
-        <div class="list-item">
-          <div class="list-item-content">
-            <div class="list-item-title">${escapeHtml(req.displayName || req.deviceId || 'Unknown device')}</div>
-            <div class="list-item-meta">${escapeHtml(req.platform || '')} &middot; ${escapeHtml(req.status || 'pending')}</div>
-          </div>
-          <div class="list-item-actions">
-            ${req.status === 'pending' ? `
-              <button class="btn btn-small" onclick="approveDevice('${escapeHtml(req.requestId)}')">Approve</button>
-              <button class="btn btn-small btn-danger" onclick="rejectDevice('${escapeHtml(req.requestId)}')">Reject</button>
+      devicesDiv.innerHTML = requests.map(req => {
+        const isPending = req.status === 'pending';
+        return `
+          <div class="instance-card">
+            <div class="instance-card-header">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="status-dot ${isPending ? 'yellow' : (req.status === 'approved' ? 'green' : 'gray')}"></span>
+                <span class="instance-card-title">${escapeHtml(req.displayName || req.deviceId || 'Unknown device')}</span>
+              </div>
+              <span class="ch-badge ${isPending ? 'ch-badge-warn' : 'ch-badge-ok'}">${escapeHtml(req.status || 'pending')}</span>
+            </div>
+            <div class="instance-card-details">
+              ${req.platform ? `<span>Platform: ${escapeHtml(req.platform)}</span>` : ''}
+              ${req.deviceId ? `<span>Device: ${escapeHtml(req.deviceId)}</span>` : ''}
+            </div>
+            ${isPending ? `
+              <div style="display:flex;gap:8px;margin-top:8px;">
+                <button class="btn btn-small" onclick="approveDevice('${escapeHtml(req.requestId)}')">Approve</button>
+                <button class="btn btn-small btn-secondary" onclick="rejectDevice('${escapeHtml(req.requestId)}')">Reject</button>
+              </div>
             ` : ''}
           </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
-  } catch { document.getElementById('devices-list').innerHTML = '<div style="color:#888;font-size:13px;">Could not load devices</div>'; }
+  } catch { document.getElementById('devices-list').innerHTML = '<div class="instance-empty">Could not load devices</div>'; }
 
   // Presence
   try {
     const result = await window.gatewayClient.getPresence();
-    const presence = result?.entries || result?.presence || [];
+    // system-presence returns an array directly
+    const presence = Array.isArray(result) ? result : (result?.entries || result?.presence || []);
     const presenceDiv = document.getElementById('presence-list');
 
     if (!Array.isArray(presence) || presence.length === 0) {
-      presenceDiv.innerHTML = '<div style="color:#888;font-size:13px;">No connected clients</div>';
+      presenceDiv.innerHTML = '<div class="instance-empty">No connected clients</div>';
     } else {
-      presenceDiv.innerHTML = presence.map(p => `
-        <div class="list-item">
-          <div class="list-item-content">
-            <div class="list-item-title">${escapeHtml(p.displayName || p.host || p.clientId || 'Unknown')}</div>
-            <div class="list-item-meta">
-              ${escapeHtml(p.mode || '')} &middot; ${escapeHtml(p.platform || '')}
-              ${p.version ? ` &middot; v${escapeHtml(p.version)}` : ''}
-              ${p.lastInputSeconds != null ? ` &middot; Last input: ${p.lastInputSeconds}s ago` : ''}
+      presenceDiv.innerHTML = presence.map(p => {
+        const name = p.host || p.deviceId || p.instanceId || 'Unknown';
+        const lastInput = p.lastInputSeconds != null
+          ? (p.lastInputSeconds < 60 ? `${p.lastInputSeconds}s ago` : `${Math.floor(p.lastInputSeconds / 60)}m ago`)
+          : null;
+        const age = p.ts ? formatRelativeTime(p.ts) : null;
+        return `
+          <div class="instance-card">
+            <div class="instance-card-header">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="status-dot green"></span>
+                <span class="instance-card-title">${escapeHtml(name)}</span>
+              </div>
+              ${p.mode ? `<span class="ch-badge ch-badge-ok">${escapeHtml(p.mode)}</span>` : ''}
+            </div>
+            ${p.text ? `<div style="font-size:12px;color:#aaa;margin:4px 0;">${escapeHtml(truncate(p.text, 80))}</div>` : ''}
+            <div class="instance-card-details">
+              ${p.platform ? `<span>${escapeHtml(p.platform)}</span>` : ''}
+              ${p.deviceFamily ? `<span>${escapeHtml(p.deviceFamily)}</span>` : ''}
+              ${p.modelIdentifier ? `<span>${escapeHtml(p.modelIdentifier)}</span>` : ''}
+              ${p.version ? `<span>v${escapeHtml(p.version)}</span>` : ''}
+              ${p.ip ? `<span>${escapeHtml(p.ip)}</span>` : ''}
+              ${p.roles?.length ? `<span>Roles: ${escapeHtml(p.roles.join(', '))}</span>` : ''}
+              ${lastInput ? `<span>Last input: ${lastInput}</span>` : ''}
+              ${age ? `<span>Seen: ${age}</span>` : ''}
             </div>
           </div>
-          <div class="status-dot green"></div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
-  } catch { document.getElementById('presence-list').innerHTML = '<div style="color:#888;font-size:13px;">Could not load presence</div>'; }
+  } catch { document.getElementById('presence-list').innerHTML = '<div class="instance-empty">Could not load presence</div>'; }
 }
 
 window.approveDevice = async function(requestId) {
@@ -1149,52 +1235,96 @@ async function loadUsage() {
 
   try {
     const result = await window.gatewayClient.getSessionsUsage({ limit: 50 });
-    const totals = result?.totals || result?.aggregates || {};
+    const totals = result?.totals || {};
+    const agg = result?.aggregates || {};
     const sessions = result?.sessions || [];
 
+    // Backend fields: input, output, cacheRead, cacheWrite, totalTokens, totalCost
+    const inputTokens = totals.input || 0;
+    const outputTokens = totals.output || 0;
+    const cacheRead = totals.cacheRead || 0;
+    const totalTokens = totals.totalTokens || (inputTokens + outputTokens);
+    const totalCost = totals.totalCost || 0;
+    const msgCounts = agg.messages || {};
+    const toolUsage = agg.tools || {};
+
     totalsDiv.innerHTML = `
-      <div class="stat-card">
-        <div class="stat-label">Total Cost</div>
-        <div class="stat-value">${formatCost(totals.cost || totals.totalCost || 0)}</div>
+      <div class="usage-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Cost</div>
+          <div class="stat-value">${formatCost(totalCost)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Tokens</div>
+          <div class="stat-value">${formatNumber(totalTokens)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Input</div>
+          <div class="stat-value">${formatNumber(inputTokens)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Output</div>
+          <div class="stat-value">${formatNumber(outputTokens)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Cache Read</div>
+          <div class="stat-value">${formatNumber(cacheRead)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sessions</div>
+          <div class="stat-value">${sessions.length}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Messages</div>
+          <div class="stat-value">${formatNumber(msgCounts.total || 0)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Tool Calls</div>
+          <div class="stat-value">${formatNumber(toolUsage.totalCalls || msgCounts.toolCalls || 0)}</div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Input Tokens</div>
-        <div class="stat-value">${formatNumber(totals.inputTokens || 0)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Output Tokens</div>
-        <div class="stat-value">${formatNumber(totals.outputTokens || 0)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Total Tokens</div>
-        <div class="stat-value">${formatNumber((totals.inputTokens || 0) + (totals.outputTokens || 0))}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Requests</div>
-        <div class="stat-value">${formatNumber(totals.requests || totals.turns || 0)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Sessions</div>
-        <div class="stat-value">${sessions.length}</div>
-      </div>
+      ${agg.byModel && agg.byModel.length > 0 ? `
+        <div class="usage-breakdown">
+          <h4 style="margin:16px 0 8px;font-size:13px;color:#aaa;">By Model</h4>
+          ${agg.byModel.map(m => `
+            <div class="usage-breakdown-row">
+              <span class="usage-breakdown-label">${escapeHtml((m.provider || '') + '/' + (m.model || 'unknown'))}</span>
+              <span class="usage-breakdown-value">${formatNumber(m.totals?.totalTokens || 0)} tokens &middot; ${formatCost(m.totals?.totalCost || 0)}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+      ${result?.startDate ? `<div style="margin-top:12px;font-size:11px;color:#666;">Period: ${escapeHtml(result.startDate)} — ${escapeHtml(result.endDate)}</div>` : ''}
     `;
 
     if (sessions.length === 0) {
       sessionsDiv.innerHTML = '<div style="color:#888;font-size:13px;">No usage data</div>';
     } else {
-      sessionsDiv.innerHTML = sessions.slice(0, 30).map(s => `
-        <div class="list-item">
-          <div class="list-item-content">
-            <div class="list-item-title">${escapeHtml(s.key || s.sessionKey || 'Unknown')}</div>
-            <div class="list-item-meta">
-              Cost: ${formatCost(s.cost || s.totalCost || 0)} &middot;
-              Tokens: ${formatNumber((s.inputTokens || 0) + (s.outputTokens || 0))} &middot;
-              Turns: ${s.turns || s.requests || 0}
-              ${s.model ? ` &middot; ${escapeHtml(s.model)}` : ''}
+      sessionsDiv.innerHTML = `<h4 style="margin:0 0 10px;font-size:13px;color:#aaa;">Recent Sessions</h4>` +
+        sessions.slice(0, 30).map(s => {
+          const u = s.usage || {};
+          const sTokens = u.totalTokens || ((u.input || 0) + (u.output || 0));
+          const sCost = u.totalCost || 0;
+          const sMsgs = u.messageCounts?.total || 0;
+          const label = s.label || s.key || s.sessionKey || 'Unknown';
+          const timeStr = s.updatedAt ? formatRelativeTime(s.updatedAt) : '';
+          const channel = s.channel ? `${escapeHtml(s.channel)}` : '';
+          return `
+            <div class="usage-session-item">
+              <div class="usage-session-header">
+                <span class="usage-session-label">${escapeHtml(truncate(label, 60))}</span>
+                ${timeStr ? `<span class="usage-session-time">${timeStr}</span>` : ''}
+              </div>
+              <div class="usage-session-meta">
+                <span>${formatNumber(sTokens)} tokens</span>
+                <span>${formatCost(sCost)}</span>
+                ${sMsgs ? `<span>${sMsgs} msgs</span>` : ''}
+                ${channel ? `<span>${channel}</span>` : ''}
+                ${s.model ? `<span>${escapeHtml(s.model)}</span>` : ''}
+              </div>
             </div>
-          </div>
-        </div>
-      `).join('');
+          `;
+        }).join('');
     }
   } catch (err) {
     console.error('Failed to load usage:', err);
