@@ -6,6 +6,7 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -60,7 +61,7 @@ function getWorkspaceRoot(override?: string): string {
   return (
     process.env.VERSO_WORKSPACE ||
     process.env.OPENCLAW_WORKSPACE ||
-    path.resolve(__dirname, "..", "..")
+    path.join(os.homedir(), ".verso", "workspace")
   );
 }
 

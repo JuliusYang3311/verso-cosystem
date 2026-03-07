@@ -124,15 +124,22 @@ export const DEFAULT_CONTEXT_PARAMS: ContextParams = {
  * Falls back to DEFAULT_CONTEXT_PARAMS if file doesn't exist or fails to load.
  */
 export async function loadContextParams(): Promise<ContextParams> {
-  try {
-    const paramsPath = path.resolve(__dirname, "../evolver/assets/gep/context_params.json");
-    const content = await fs.readFile(paramsPath, "utf-8");
-    const parsed = JSON.parse(content) as Partial<ContextParams>;
-    return { ...DEFAULT_CONTEXT_PARAMS, ...parsed };
-  } catch {
-    // Fall back to defaults if file doesn't exist or parsing fails
-    return DEFAULT_CONTEXT_PARAMS;
+  // Handle both unbundled (dist/agents/) and bundled (dist/) layouts
+  const candidates = [
+    path.resolve(__dirname, "../evolver/assets/gep/context_params.json"),
+    path.resolve(__dirname, "evolver/assets/gep/context_params.json"),
+  ];
+  for (const paramsPath of candidates) {
+    try {
+      const content = await fs.readFile(paramsPath, "utf-8");
+      const parsed = JSON.parse(content) as Partial<ContextParams>;
+      return { ...DEFAULT_CONTEXT_PARAMS, ...parsed };
+    } catch {
+      continue;
+    }
   }
+  // Fall back to defaults if file doesn't exist or parsing fails
+  return DEFAULT_CONTEXT_PARAMS;
 }
 
 // ---------- Dynamic recentRatio calculation ----------

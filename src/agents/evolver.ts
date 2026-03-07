@@ -111,12 +111,13 @@ export async function startEvolverDaemon(opts?: EvolverDaemonOptions): Promise<E
   // Build model slug from main session's provider/model
   const modelSlug = opts?.provider && opts?.model ? `${opts.provider}/${opts.model}` : undefined;
 
-  const scriptPath = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "..",
-    "evolver",
-    "daemon-entry.js",
-  );
+  // import.meta.url may point to dist/ (when bundler inlines into top-level chunk)
+  // or dist/agents/ (when in its own chunk). Handle both cases.
+  const thisDir = path.dirname(fileURLToPath(import.meta.url));
+  let scriptPath = path.join(thisDir, "..", "evolver", "daemon-entry.js");
+  if (!fs.existsSync(scriptPath)) {
+    scriptPath = path.join(thisDir, "evolver", "daemon-entry.js");
+  }
   const child = spawn(process.execPath, [scriptPath], {
     detached: true,
     stdio: "ignore",

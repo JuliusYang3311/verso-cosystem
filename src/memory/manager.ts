@@ -336,12 +336,21 @@ export class MemoryIndexManager implements MemorySearchManager {
 
   private async loadContextParams(): Promise<Partial<ContextParams>> {
     try {
-      const paramsPath = path.resolve(
-        path.dirname(fileURLToPath(import.meta.url)),
-        "../evolver/assets/gep/context_params.json",
-      );
-      const content = await fs.readFile(paramsPath, "utf-8");
-      return JSON.parse(content) as Partial<ContextParams>;
+      const thisDir = path.dirname(fileURLToPath(import.meta.url));
+      // Handle both unbundled (dist/memory/) and bundled (dist/) layouts
+      const candidates = [
+        path.resolve(thisDir, "../evolver/assets/gep/context_params.json"),
+        path.resolve(thisDir, "evolver/assets/gep/context_params.json"),
+      ];
+      for (const paramsPath of candidates) {
+        try {
+          const content = await fs.readFile(paramsPath, "utf-8");
+          return JSON.parse(content) as Partial<ContextParams>;
+        } catch {
+          continue;
+        }
+      }
+      return {};
     } catch {
       return {};
     }

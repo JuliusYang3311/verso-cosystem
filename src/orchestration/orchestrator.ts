@@ -247,7 +247,13 @@ export async function startOrchestratorDaemon(
     const maxFixCycles = orchConfig?.maxFixCycles ?? 30;
     const verifyCmd = orchConfig?.verifyCmd ?? "";
 
-    const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "daemon-entry.js");
+    // import.meta.url may point to dist/ (when bundler inlines into top-level chunk)
+    // or dist/orchestration/ (when in its own chunk). Handle both cases.
+    const thisDir = path.dirname(fileURLToPath(import.meta.url));
+    let scriptPath = path.join(thisDir, "daemon-entry.js");
+    if (!fs.existsSync(scriptPath)) {
+      scriptPath = path.join(thisDir, "orchestration", "daemon-entry.js");
+    }
 
     // Open log file for daemon output
     const logFd = fs.openSync(logPath, "a");
