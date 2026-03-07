@@ -20,7 +20,7 @@ class GatewayClient {
       this.connected = false;
       this.handshakeComplete = false;
       console.log('[Gateway Client] Disconnected');
-      for (const [id, { reject }] of this.pendingRequests) {
+      for (const [, { reject }] of this.pendingRequests) {
         reject(new Error('Gateway disconnected'));
       }
       this.pendingRequests.clear();
@@ -85,7 +85,7 @@ class GatewayClient {
           this.handshakeComplete = true;
           console.log('[Gateway Client] Handshake complete, protocol:', result?.protocol);
           this.emit('handshake', result);
-          this.ensureMainSession();
+          void this.ensureMainSession();
         },
         reject: (err) => {
           console.error('[Gateway Client] Handshake rejected:', err);
@@ -118,7 +118,7 @@ class GatewayClient {
     if (message.type === 'event') {
       if (message.event === 'connect.challenge') {
         console.log('[Gateway Client] Received connect.challenge, sending handshake...');
-        this.performHandshake();
+        void this.performHandshake();
         return;
       }
 
@@ -144,7 +144,7 @@ class GatewayClient {
 
     // Fallback: handle challenge/events without type:"event" wrapper
     if (message.event === 'connect.challenge' && message.type !== 'event') {
-      this.performHandshake();
+      void this.performHandshake();
       return;
     }
     if (message.event && message.type !== 'event') {

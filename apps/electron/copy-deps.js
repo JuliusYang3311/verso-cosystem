@@ -87,7 +87,7 @@ function copyPackageWithDeps(packageName, depth = 0) {
       for (const depName in deps) {
         copyPackageWithDeps(depName, depth + 1);
       }
-    } catch (err) {
+    } catch {
       // Ignore JSON parse errors
     }
   }

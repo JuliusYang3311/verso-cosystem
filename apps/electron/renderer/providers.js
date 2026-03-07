@@ -240,7 +240,7 @@ function confirmProviderName() {
     return;
   }
 
-  const { key, group, authMethod } = pendingProviderType;
+  const { key, authMethod } = pendingProviderType;
 
   // Determine apiType based on provider key
   let apiType = 'openai';
@@ -628,7 +628,7 @@ async function setPrimaryModel(providerName, modelId) {
   // Apply via gateway RPC (non-blocking)
   const latestConfig = await window.verso.getConfig();
   if (typeof window.applyConfigToGateway === 'function') {
-    window.applyConfigToGateway(latestConfig);
+    void window.applyConfigToGateway(latestConfig);
   }
 
   showNotification('Primary model set to ' + modelRef);
@@ -694,7 +694,7 @@ async function saveProviders() {
 
   // Non-blocking gateway update (don't hang UI if gateway is down)
   if (typeof window.applyConfigToGateway === 'function') {
-    window.applyConfigToGateway(config);
+    void window.applyConfigToGateway(config);
   } else {
     // Fallback with inline timeout
     Promise.race([
@@ -703,5 +703,18 @@ async function saveProviders() {
     ]).catch(() => {});
   }
 }
+
+// Expose functions used from HTML onclick attributes
+window.showProviderSelectionModal = showProviderSelectionModal;
+window.selectAuthMethod = selectAuthMethod;
+window.cancelProviderNameInput = cancelProviderNameInput;
+window.showModelSelectionModal = showModelSelectionModal;
+window.confirmModelSelection = confirmModelSelection;
+window.updateProvider = updateProvider;
+window.addCustomModel = addCustomModel;
+window.removeModel = removeModel;
+window.removeProvider = removeProvider;
+window.addNewProvider = addNewProvider;
+window.setPrimaryModel = setPrimaryModel;
 
 // OAuth login placeholder

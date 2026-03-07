@@ -2,16 +2,6 @@
 
 // ==================== HELPERS ====================
 
-function formatUptime(seconds) {
-  if (!seconds || seconds < 0) return '-';
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
 function formatNumber(num) {
   if (num == null) return '0';
   return Number(num).toLocaleString();
@@ -45,18 +35,61 @@ function escapeHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+let chatUnreadCount = 0;
+
 function isChatNearBottom() {
   const el = document.getElementById('chat-messages');
   if (!el) return true;
   return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 }
 
+function updateScrollButton() {
+  const btn = document.getElementById('chat-scroll-btn');
+  if (!btn) return;
+  const nearBottom = isChatNearBottom();
+  btn.classList.toggle('visible', !nearBottom);
+  if (nearBottom) {
+    chatUnreadCount = 0;
+    const badge = btn.querySelector('.unread-badge');
+    if (badge) badge.remove();
+  }
+}
+
 function scrollChatToBottom(force = false) {
-  if (!force && !isChatNearBottom()) return;
+  if (!force && !isChatNearBottom()) {
+    // Not near bottom — increment unread badge
+    chatUnreadCount++;
+    const btn = document.getElementById('chat-scroll-btn');
+    if (btn) {
+      btn.classList.add('visible');
+      let badge = btn.querySelector('.unread-badge');
+      if (!badge) { badge = document.createElement('span'); badge.className = 'unread-badge'; btn.appendChild(badge); }
+      badge.textContent = chatUnreadCount > 99 ? '99+' : chatUnreadCount;
+    }
+    return;
+  }
+  chatUnreadCount = 0;
   const el = document.getElementById('chat-messages');
   if (!el) return;
   const last = el.lastElementChild;
   if (last) last.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  updateScrollButton();
+}
+window.scrollChatToBottom = scrollChatToBottom;
+
+// Listen for scroll to show/hide the scroll-to-bottom button
+requestAnimationFrame(() => {
+  const el = document.getElementById('chat-messages');
+  if (el) el.addEventListener('scroll', () => updateScrollButton(), { passive: true });
+});
+
+function formatMsgTime(ts) {
+  if (!ts) {
+    const now = new Date();
+    return now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+  }
+  const d = typeof ts === 'number' ? new Date(ts) : new Date(ts);
+  return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
 }
 
 function truncate(str, len = 80) {
@@ -193,9 +226,9 @@ async function loadChatHistory() {
 
     messagesDiv.innerHTML = '';
     for (const msg of messages) {
-      appendChatMessage(msg.role || 'system', msg.content || '', false);
+      appendChatMessage(msg.role || 'system', msg.content || '', false, msg.timestamp || msg.createdAt || null);
     }
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    scrollChatToBottom(true);
   } catch (err) {
     console.error('Failed to load chat history:', err);
     messagesDiv.innerHTML = '<div class="chat-empty">Could not load history</div>';
@@ -244,9 +277,8 @@ function extractTextContent(content) {
   return String(content || '');
 }
 
-function appendChatMessage(role, content, scroll = true) {
+function appendChatMessage(role, content, scroll = true, timestamp = null) {
   const messagesDiv = document.getElementById('chat-messages');
-  // Remove empty placeholder
   const empty = messagesDiv.querySelector('.chat-empty');
   if (empty) empty.remove();
 
@@ -254,54 +286,182 @@ function appendChatMessage(role, content, scroll = true) {
   const roleClass = role === 'user' ? 'user' : role === 'assistant' ? 'assistant' : 'system';
   el.className = `chat-msg ${roleClass}`;
 
-  // Extract text from structured content (Anthropic content blocks, etc.)
+  // Message grouping — check if previous message is from same role
+  const prev = messagesDiv.lastElementChild;
+  const prevRole = prev?.classList.contains(roleClass);
+  if (prevRole && prev) {
+    // Previous message is same role — update its grouping class
+    if (prev.classList.contains('group-single')) {
+      prev.classList.remove('group-single');
+      prev.classList.add('group-first');
+    } else if (prev.classList.contains('group-last')) {
+      prev.classList.remove('group-last');
+      prev.classList.add('group-middle');
+    }
+    el.classList.add('group-last');
+    // Hide header on continuation messages
+    el.dataset.continuation = '1';
+  } else {
+    el.classList.add('group-single');
+  }
+
   const textContent = extractTextContent(content);
 
   // Simple markdown-like rendering
   let html = escapeHtml(textContent);
-  // Code blocks
   html = html.replace(/```([\s\S]*?)```/g, '<pre>$1</pre>');
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code style="background:#111;padding:2px 4px;border-radius:3px;">$1</code>');
-  // Bold
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // Line breaks
   html = html.replace(/\n/g, '<br>');
 
-  const avatarHtml = roleClass === 'assistant'
+  const time = formatMsgTime(timestamp);
+  const showHeader = !el.dataset.continuation;
+  const avatarHtml = (roleClass === 'assistant' && showHeader)
     ? '<img src="../assets/icon.png" class="msg-avatar" alt="V">'
     : '';
-  el.innerHTML = `<div class="msg-header">${avatarHtml}<span class="msg-role">${roleClass === 'assistant' ? 'Verso' : roleClass}</span></div>${html}`;
+  const headerHtml = showHeader
+    ? `<div class="msg-header">${avatarHtml}<span class="msg-role">${roleClass === 'assistant' ? 'Verso' : ''}</span><span class="msg-time">${time}</span></div>`
+    : '';
+  el.innerHTML = `${headerHtml}<div class="msg-body">${html}</div>`;
   messagesDiv.appendChild(el);
   if (scroll) scrollChatToBottom(true);
   return el;
 }
 
+// Pending attachments
+let chatPendingAttachments = [];
+
+function renderAttachmentPreviews() {
+  const preview = document.getElementById('chat-attachments-preview');
+  if (!preview) return;
+  preview.innerHTML = '';
+  preview.classList.toggle('has-items', chatPendingAttachments.length > 0);
+  chatPendingAttachments.forEach((att, i) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'chat-attachment-thumb';
+    thumb.innerHTML = `<img src="data:${att.mimeType};base64,${att.content}" alt="${escapeHtml(att.fileName)}"><button class="chat-attachment-remove" onclick="removeChatAttachment(${i})">&times;</button>`;
+    preview.appendChild(thumb);
+  });
+}
+
+window.removeChatAttachment = function(idx) {
+  chatPendingAttachments.splice(idx, 1);
+  renderAttachmentPreviews();
+};
+
+// File input handler
+requestAnimationFrame(() => {
+  const attachBtn = document.getElementById('chat-attach-btn');
+  const fileInput = document.getElementById('chat-file-input');
+  if (attachBtn && fileInput) {
+    attachBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      for (const file of e.target.files) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const b64 = reader.result.split(',')[1];
+          chatPendingAttachments.push({
+            type: 'image',
+            mimeType: file.type || 'image/png',
+            fileName: file.name,
+            content: b64
+          });
+          renderAttachmentPreviews();
+        };
+        reader.readAsDataURL(file);
+      }
+      fileInput.value = '';
+    });
+  }
+
+  // Paste images from clipboard
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) {
+    chatInput.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) continue;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const b64 = reader.result.split(',')[1];
+            chatPendingAttachments.push({ type: 'image', mimeType: file.type, fileName: 'pasted-image.png', content: b64 });
+            renderAttachmentPreviews();
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    });
+  }
+
+  // Drag-and-drop images onto chat area
+  const chatMessages = document.getElementById('chat-messages');
+  if (chatMessages) {
+    chatMessages.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+    chatMessages.addEventListener('drop', (e) => {
+      e.preventDefault();
+      for (const file of e.dataTransfer.files) {
+        if (!file.type.startsWith('image/')) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const b64 = reader.result.split(',')[1];
+          chatPendingAttachments.push({ type: 'image', mimeType: file.type, fileName: file.name, content: b64 });
+          renderAttachmentPreviews();
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+});
+
 async function sendChatMessage() {
   const input = document.getElementById('chat-input');
   const message = input.value.trim();
-  if (!message) return;
+  const attachments = [...chatPendingAttachments];
+  if (!message && attachments.length === 0) return;
 
   input.value = '';
   input.style.height = 'auto';
-  appendChatMessage('user', message);
+
+  // Show user message with attachment thumbnails
+  const userEl = appendChatMessage('user', message || '(image)');
+  if (attachments.length > 0) {
+    const imgContainer = document.createElement('div');
+    imgContainer.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;';
+    for (const att of attachments) {
+      const img = document.createElement('img');
+      img.src = `data:${att.mimeType};base64,${att.content}`;
+      img.className = 'msg-image';
+      img.alt = att.fileName;
+      imgContainer.appendChild(img);
+    }
+    userEl.appendChild(imgContainer);
+  }
+
+  // Clear attachments
+  chatPendingAttachments = [];
+  renderAttachmentPreviews();
 
   const abortBtn = document.getElementById('chat-abort-btn');
   const sendBtn = document.getElementById('chat-send-btn');
   abortBtn.style.display = 'inline-block';
   sendBtn.disabled = true;
 
-  // Create streaming placeholder
   chatStreamingEl = appendChatMessage('assistant', 'Thinking...');
   chatStreamingEl.classList.add('chat-streaming');
   requestAnimationFrame(() => scrollChatToBottom(true));
 
   try {
-    const result = await window.gatewayClient.chatSend({
+    const sendParams = {
       sessionKey: getChatSession(),
-      message,
+      message: message || '',
       idempotencyKey: `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    });
+    };
+    if (attachments.length > 0) sendParams.attachments = attachments;
+    const result = await window.gatewayClient.chatSend(sendParams);
     chatRunId = result?.runId;
     // UI updates are driven by gateway chat events (delta/final).
     // Safety timeout prevents UI from being stuck forever if agent never responds.
@@ -319,7 +479,8 @@ async function sendChatMessage() {
   } catch (err) {
     console.error('Failed to send chat:', err);
     if (chatStreamingEl) {
-      chatStreamingEl.innerHTML = `<div class="msg-role">assistant</div>Error: ${escapeHtml(err.message)}`;
+      const body = chatStreamingEl.querySelector('.msg-body');
+      if (body) body.innerHTML = `<span style="color:#f44336;">Error: ${escapeHtml(err.message)}</span>`;
       chatStreamingEl.classList.remove('chat-streaming');
       chatStreamingEl = null;
     }
@@ -350,19 +511,19 @@ window.addEventListener('gateway-event', (e) => {
   if (event === 'chat' && data) {
     if (data.sessionKey && data.sessionKey !== getChatSession()) return;
     if (data.delta && chatStreamingEl) {
-      const current = chatStreamingEl.querySelector('.msg-role')?.nextSibling?.textContent || '';
-      if (current === 'Thinking...') {
-        chatStreamingEl.innerHTML = `<div class="msg-role">assistant</div>${escapeHtml(data.delta)}`;
-      } else {
-        chatStreamingEl.innerHTML += escapeHtml(data.delta);
+      const body = chatStreamingEl.querySelector('.msg-body');
+      if (body && body.textContent === 'Thinking...') {
+        body.innerHTML = escapeHtml(data.delta).replace(/\n/g, '<br>');
+      } else if (body) {
+        body.innerHTML += escapeHtml(data.delta).replace(/\n/g, '<br>');
       }
       scrollChatToBottom();
     }
-    // Handle delta streaming — update the streaming bubble with partial text
     if (data.state === 'delta' && data.message && chatStreamingEl) {
       const deltaText = extractTextContent(data.message.content || data.message);
       if (deltaText) {
-        chatStreamingEl.innerHTML = `<div class="msg-header"><img src="../assets/icon.png" class="msg-avatar" alt="V"><span class="msg-role">Verso</span></div>${escapeHtml(deltaText).replace(/\n/g, '<br>')}`;
+        const body = chatStreamingEl.querySelector('.msg-body');
+        if (body) body.innerHTML = escapeHtml(deltaText).replace(/\n/g, '<br>');
         scrollChatToBottom();
       }
     }
@@ -375,7 +536,8 @@ window.addEventListener('gateway-event', (e) => {
       if (chatSafetyTimer) { clearTimeout(chatSafetyTimer); chatSafetyTimer = null; }
       if (chatStreamingEl) {
         if (finalText) {
-          chatStreamingEl.innerHTML = `<div class="msg-header"><img src="../assets/icon.png" class="msg-avatar" alt="V"><span class="msg-role">Verso</span></div>${escapeHtml(finalText).replace(/\n/g, '<br>')}`;
+          const body = chatStreamingEl.querySelector('.msg-body');
+          if (body) body.innerHTML = escapeHtml(finalText).replace(/\n/g, '<br>');
         }
         chatStreamingEl.classList.remove('chat-streaming');
         chatStreamingEl = null;
@@ -478,7 +640,7 @@ window.sessionBack = function() {
   document.getElementById('sessions-list-card').style.display = 'block';
   document.getElementById('session-detail-card').style.display = 'none';
   currentSessionKey = null;
-  loadSessions();
+  void loadSessions();
 }
 
 window.resetSession = async function() {
@@ -585,7 +747,7 @@ window.logoutChannel = async function(channel, accountId) {
   try {
     await window.gatewayClient.channelsLogout({ channel, accountId });
     showNotification(`Disconnected ${channel}`);
-    loadChannels();
+    void loadChannels();
   } catch (err) {
     showNotification('Failed to disconnect: ' + err.message, 'error');
   }
@@ -645,7 +807,7 @@ window.toggleCronJob = async function(jobId, currentlyEnabled) {
   try {
     await window.gatewayClient.updateCronJob({ id: jobId, patch: { enabled: !currentlyEnabled } });
     showNotification(currentlyEnabled ? 'Job disabled' : 'Job enabled');
-    loadCronJobs();
+    void loadCronJobs();
   } catch (err) {
     showNotification('Failed: ' + err.message, 'error');
   }
@@ -665,7 +827,7 @@ window.removeCronJob = async function(jobId) {
   try {
     await window.gatewayClient.removeCronJob({ id: jobId });
     showNotification('Job deleted');
-    loadCronJobs();
+    void loadCronJobs();
   } catch (err) {
     showNotification('Failed: ' + err.message, 'error');
   }
@@ -741,7 +903,7 @@ window.saveCronJob = async function() {
     });
     showNotification('Cron job added');
     closeCronModal();
-    loadCronJobs();
+    void loadCronJobs();
   } catch (err) {
     showNotification('Failed: ' + err.message, 'error');
   }
@@ -852,7 +1014,7 @@ window.abortOrchestration = async function(orchId) {
   try {
     await window.gatewayClient.abortOrchestration({ id: orchId });
     showNotification('Orchestration aborted');
-    loadOrchestration();
+    void loadOrchestration();
   } catch (err) {
     showNotification('Failed: ' + err.message, 'error');
   }
@@ -862,7 +1024,7 @@ window.retryOrchestration = async function(orchId) {
   try {
     await window.gatewayClient.retryOrchestration({ id: orchId });
     showNotification('Retry initiated');
-    loadOrchestration();
+    void loadOrchestration();
   } catch (err) {
     showNotification('Failed: ' + err.message, 'error');
   }
@@ -873,7 +1035,7 @@ window.deleteOrchestration = async function(orchId) {
   try {
     await window.gatewayClient.deleteOrchestration({ id: orchId });
     showNotification('Deleted');
-    loadOrchestration();
+    void loadOrchestration();
   } catch (err) {
     showNotification('Failed: ' + err.message, 'error');
   }
@@ -963,7 +1125,7 @@ window.approveDevice = async function(requestId) {
   try {
     await window.gatewayClient.approveDevicePairing({ requestId });
     showNotification('Device approved');
-    loadInstances();
+    void loadInstances();
   } catch (err) {
     showNotification('Failed: ' + err.message, 'error');
   }
@@ -973,7 +1135,7 @@ window.rejectDevice = async function(requestId) {
   try {
     await window.gatewayClient.rejectDevicePairing({ requestId });
     showNotification('Device rejected');
-    loadInstances();
+    void loadInstances();
   } catch (err) {
     showNotification('Failed: ' + err.message, 'error');
   }
@@ -982,7 +1144,6 @@ window.rejectDevice = async function(requestId) {
 // ==================== USAGE ====================
 
 async function loadUsage() {
-  const days = parseInt(document.getElementById('usage-period').value) || 30;
   const totalsDiv = document.getElementById('usage-totals');
   const sessionsDiv = document.getElementById('usage-sessions');
 

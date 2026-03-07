@@ -44,4 +44,4 @@ async function boot() {
     process.exit(1);
   }
 }
-boot();
+boot().catch(err => { console.error('Gateway boot failed:', err); process.exit(1); });

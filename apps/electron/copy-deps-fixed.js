@@ -1,7 +1,7 @@
 // Script to copy necessary node_modules for Gateway
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+// const { execSync } = require('child_process');
 
 const rootDir = path.join(__dirname, '../..');
 const targetDir = path.join(__dirname, 'gateway-deps');

@@ -17,12 +17,12 @@ class ElectronPrompter {
     return Promise.resolve();
   }
 
-  async text({ message, validate, placeholder }) {
+  async text({ message: _message, validate: _validate, placeholder: _placeholder }) {
     // For now, return empty - will be replaced with proper UI prompts
     return '';
   }
 
-  async confirm({ message, initialValue }) {
+  async confirm({ message: _message, initialValue }) {
     return initialValue ?? true;
   }
 
@@ -56,16 +56,13 @@ async function handleOpenAICodexOAuth({ mainWindow, agentDir }) {
     const prompter = new ElectronPrompter(mainWindow);
     const spin = prompter.progress('Starting OAuth flow…');
 
-    let authUrl = null;
-
     const creds = await loginOpenAICodex({
       onAuth: async ({ url }) => {
-        authUrl = url;
         spin.update('Opening browser for authentication...');
         await openUrl(url);
         runtime.log(`Open: ${url}`);
       },
-      onPrompt: async (prompt) => {
+      onPrompt: async (_prompt) => {
         // Return empty for now - the OAuth should complete via callback
         // In a full implementation, we'd show a dialog here
         return '';
@@ -176,7 +173,7 @@ async function handleAnthropicToken({ token, agentDir }) {
   }
 }
 
-async function handleAuth({ authMethod, providerType, mainWindow, config, apiKey, token }) {
+async function handleAuth({ authMethod, providerType, mainWindow, config: _config, apiKey, token }) {
   const agentDir = path.join(os.homedir(), '.verso');
 
   console.log('[Auth Dispatcher] Received:', { authMethod, providerType, apiKey: !!apiKey, token: !!token });

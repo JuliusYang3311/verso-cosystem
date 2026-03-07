@@ -385,7 +385,7 @@ function _enablePluginEntry(cfg: VersoConfig, pluginId: string): VersoConfig {
     ...cfg.plugins?.entries,
     [pluginId]: {
       ...(cfg.plugins?.entries?.[pluginId] as Record<string, unknown> | undefined),
-      enabled: false,
+      enabled: true,
     },
   };
   return {
@@ -403,7 +403,7 @@ function registerPluginEntry(cfg: VersoConfig, pluginId: string): VersoConfig {
   }
   const entries = {
     ...cfg.plugins?.entries,
-    [pluginId]: { enabled: false },
+    [pluginId]: { enabled: true },
   };
   return {
     ...cfg,

@@ -337,7 +337,7 @@ window.saveChannelConfig = async function(channelName) {
 
     // Refresh channels display
     setTimeout(() => {
-      if (window.loadChannels) loadChannels();
+      if (window.loadChannels) void loadChannels();
     }, 3000);
   } catch (err) {
     console.error('Failed to save channel config:', err);
@@ -378,7 +378,7 @@ window.startWhatsAppPairing = async function(accountId) {
       `;
 
       // Now wait for the scan
-      waitForWhatsAppPairing(accountId);
+      void waitForWhatsAppPairing(accountId);
     } else {
       container.innerHTML = `
         <div style="color:#ff9800;padding:12px;">
@@ -414,7 +414,7 @@ async function waitForWhatsAppPairing(accountId) {
       showNotification('WhatsApp paired successfully!');
       setTimeout(() => {
         closeChannelConfigModal();
-        if (window.loadChannels) loadChannels();
+        if (window.loadChannels) void loadChannels();
       }, 2000);
     } else {
       if (statusEl) {
@@ -454,7 +454,7 @@ window.logoutChannelAccount = async function(channelName, accountId) {
       }
     } catch { /* ignore */ }
 
-    if (window.loadChannels) loadChannels();
+    if (window.loadChannels) void loadChannels();
   } catch (err) {
     showNotification('Failed to disconnect: ' + err.message, 'error');
   }

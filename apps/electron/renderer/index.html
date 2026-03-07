@@ -41,12 +41,20 @@
                 <button class="btn btn-small btn-danger" id="chat-abort-btn" style="display:none;">Abort</button>
               </div>
             </div>
-            <div id="chat-messages" class="chat-messages">
-              <div class="chat-empty">Select a session and start chatting</div>
+            <div style="position:relative;flex:1;display:flex;flex-direction:column;min-height:0;">
+              <div id="chat-messages" class="chat-messages">
+                <div class="chat-empty">Select a session and start chatting</div>
+              </div>
+              <button id="chat-scroll-btn" class="chat-scroll-btn" onclick="scrollChatToBottom(true)" title="Scroll to bottom">&#8595;</button>
             </div>
+            <div id="chat-attachments-preview" class="chat-attachments-preview"></div>
             <div class="chat-input-area">
-              <textarea id="chat-input" class="chat-input" placeholder="Type a message..." rows="1"></textarea>
-              <button class="btn" id="chat-send-btn">Send</button>
+              <button class="chat-attach-btn" id="chat-attach-btn" title="Attach image">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+              </button>
+              <input type="file" id="chat-file-input" accept="image/*" multiple style="display:none;">
+              <textarea id="chat-input" class="chat-input" placeholder="Message..." rows="1"></textarea>
+              <button class="btn" id="chat-send-btn" title="Send">&#9654;</button>
             </div>
           </div>
         </div>

@@ -36,7 +36,7 @@ function loadSection(section) {
     case 'instances': guardedLoad('instances', loadInstances); break;
     case 'usage': guardedLoad('usage', loadUsage); break;
     case 'settings':
-      loadGeneralSettings();
+      void loadGeneralSettings();
       break;
   }
 }
@@ -60,12 +60,12 @@ _settingsTabs.forEach(tab => {
     const tabId = tab.dataset.tab;
     if (!_settingsLoaded.has(tabId)) {
       _settingsLoaded.add(tabId);
-      if (tabId === 'general-tab') loadGeneralSettings();
-      else if (tabId === 'providers-tab' && window.loadProviders) { loadProviders().then(() => renderProviders()); }
-      else if (tabId === 'channels-tab') loadChannelsConfig();
-      else if (tabId === 'config-tab') loadRawConfig();
-      else if (tabId === 'evolver-tab') loadEvolverSettings();
-      else if (tabId === 'memory-tab' || tabId === 'browser-tab' || tabId === 'webtools-tab') loadSettingsFromConfig();
+      if (tabId === 'general-tab') void loadGeneralSettings();
+      else if (tabId === 'providers-tab' && window.loadProviders) { void loadProviders().then(() => renderProviders()); }
+      else if (tabId === 'channels-tab') void loadChannelsConfig();
+      else if (tabId === 'config-tab') void loadRawConfig();
+      else if (tabId === 'evolver-tab') void loadEvolverSettings();
+      else if (tabId === 'memory-tab' || tabId === 'browser-tab' || tabId === 'webtools-tab') void loadSettingsFromConfig();
     }
   });
 });
@@ -81,7 +81,7 @@ document.getElementById('chat-refresh-btn').addEventListener('click', () => load
 document.getElementById('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    sendChatMessage();
+    void sendChatMessage();
   }
 });
 
@@ -592,10 +592,10 @@ window.saveModelSelection = async function() {
   config.agents.defaults.model.primary = primary;
 
   await window.verso.saveConfig(config);
-  applyConfigToGateway(config);
+  void applyConfigToGateway(config);
 
   showNotification('Primary model saved: ' + primary);
-  loadModelSection();
+  void loadModelSection();
 }
 
 // ==================== GATEWAY LOG ====================

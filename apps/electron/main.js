@@ -216,20 +216,6 @@ function startGateway() {
   });
 }
 
-function signalGatewayReload() {
-  // Send SIGUSR1 to the running gateway so it reloads config (picks up new token + allowInsecureAuth)
-  try {
-    const { execSync } = require('child_process');
-    const pid = execSync("lsof -ti:18789 2>/dev/null").toString().trim().split('\n')[0];
-    if (pid) {
-      process.kill(parseInt(pid), 'SIGUSR1');
-      console.log('[Main] Sent SIGUSR1 to gateway PID', pid, 'to reload config');
-    }
-  } catch {
-    console.log('[Main] Could not signal gateway reload');
-  }
-}
-
 function launchGateway(port) {
   const fs = require('fs');
 
@@ -492,7 +478,7 @@ app.on('will-quit', () => {
   if (gatewayProcess) {
     try {
       gatewayProcess.kill('SIGKILL');
-    } catch (err) {
+    } catch {
       // Ignore errors on will-quit
     }
   }
@@ -565,9 +551,9 @@ ipcMain.handle('connect-gateway', async (event, url) => {
         resolve(true);
       });
 
-      gatewayWs.on('message', (data) => {
+      gatewayWs.on('message', (/** @type {Buffer|string} */ data) => {
         try {
-          const raw = data.toString();
+          const raw = Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
           const message = JSON.parse(raw);
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('gateway-message', message);
