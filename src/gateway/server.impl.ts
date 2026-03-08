@@ -225,6 +225,13 @@ export async function startGatewayServer(
   setGatewaySigusr1RestartPolicy({ allowExternal: cfgAtStart.commands?.restart === true });
   const defaultAgentId = resolveDefaultAgentId(cfgAtStart);
   const defaultWorkspaceDir = resolveAgentWorkspaceDir(cfgAtStart, defaultAgentId);
+
+  // Propagate workspace to env so latent-factors, dynamic-context, memory-manager
+  // etc. can resolve the workspace without needing a config reference.
+  if (defaultWorkspaceDir && !process.env.VERSO_WORKSPACE) {
+    process.env.VERSO_WORKSPACE = defaultWorkspaceDir;
+  }
+
   const baseMethods = listGatewayMethods();
   const { pluginRegistry, gatewayMethods: baseGatewayMethods } = loadGatewayPlugins({
     cfg: cfgAtStart,
