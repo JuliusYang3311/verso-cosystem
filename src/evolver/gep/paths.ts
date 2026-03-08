@@ -72,6 +72,9 @@ function findBundledAssetsDir(sentinel: string, subdir?: string): string | undef
     path.join(evolverRoot, "..", "assets", suffix),
     path.join(import.meta.dirname, "..", "assets", suffix),
     path.join(import.meta.dirname, "..", "..", "assets", suffix),
+    // Bundler may place chunks in dist/ instead of dist/evolver/gep/ —
+    // cover dist/evolver/assets/ when import.meta.dirname is dist/
+    path.join(import.meta.dirname, "evolver", "assets", suffix),
   ];
   for (const dir of candidates) {
     if (fs.existsSync(path.join(dir, sentinel))) {
