@@ -164,14 +164,14 @@ export function createTmpdirSandbox(workspaceRoot: string): TmpdirSandboxResult 
   let copyResult: ExecResult;
   if (rsyncCheck.ok) {
     copyResult = tryExec(
-      `rsync -a --exclude=node_modules --exclude=.git --exclude=dist --exclude=build "${workspaceRoot}/" "${sandboxDir}/"`,
+      `rsync -a --exclude=node_modules --exclude=.git --exclude=dist --exclude=build --exclude=memory "${workspaceRoot}/" "${sandboxDir}/"`,
       { timeout: 120_000 },
     );
   } else {
     // Fallback to cp
     copyResult = tryExec(
       `cp -R "${workspaceRoot}" "${sandboxDir}/workspace" 2>/dev/null; ` +
-        `rm -rf "${sandboxDir}/workspace/node_modules" "${sandboxDir}/workspace/.git" "${sandboxDir}/workspace/dist"`,
+        `rm -rf "${sandboxDir}/workspace/node_modules" "${sandboxDir}/workspace/.git" "${sandboxDir}/workspace/dist" "${sandboxDir}/workspace/memory"`,
       { timeout: 120_000 },
     );
     if (copyResult.ok) {

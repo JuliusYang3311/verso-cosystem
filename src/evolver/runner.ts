@@ -226,7 +226,10 @@ function deploySandboxToWorkspace(
   workspace: string,
   filesChanged: string[],
 ): void {
+  // Skip memory/ files — managed by runtime, not evolver
+  const DEPLOY_SKIP_PREFIXES = ["memory/", "memory\\"];
   for (const file of filesChanged) {
+    if (DEPLOY_SKIP_PREFIXES.some((p) => file.startsWith(p))) continue;
     const src = path.join(sandboxDir, file);
     const dst = path.join(workspace, file);
     if (fs.existsSync(src) && fs.statSync(src).isFile()) {
@@ -331,7 +334,27 @@ function autoCommitChanges(workspace: string): void {
  */
 export async function runDaemonLoop(options: EvolverRunOptions): Promise<never> {
   const workspace = getWorkspaceRoot(options.workspace);
-  const reviewMode = options.review ?? false;
+
+  // Read review mode dynamically each cycle so config changes take effect
+  // without restarting the daemon.
+  function isReviewMode(): boolean {
+    // 1. Check live config file
+    try {
+      const stateDir =
+        process.env.VERSO_STATE_DIR ||
+        process.env.OPENCLAW_STATE_DIR ||
+        path.join(os.homedir(), ".verso");
+      const cfgPath = path.join(stateDir, "verso.json");
+      if (fs.existsSync(cfgPath)) {
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+        if (cfg?.evolver?.review != null) return !!cfg.evolver.review;
+      }
+    } catch {
+      // fallback
+    }
+    // 2. Fallback to startup option
+    return options.review ?? false;
+  }
 
   const minSleepMs = parseMs(process.env.EVOLVER_MIN_SLEEP_MS, 2000);
   const maxSleepMs = parseMs(process.env.EVOLVER_MAX_SLEEP_MS, 300000);
@@ -391,7 +414,7 @@ export async function runDaemonLoop(options: EvolverRunOptions): Promise<never> 
           : "";
 
       if (acceptance.passed) {
-        if (!reviewMode) {
+        if (!isReviewMode()) {
           // Deploy and commit immediately
           deploySandboxToWorkspace(result.sandboxDir, workspace, result.filesChanged ?? []);
           result.cleanupSandbox?.();

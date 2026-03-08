@@ -407,8 +407,7 @@ function getMutationDirective(logContent: string): string {
 }
 
 const STATE_FILE: string = path.join(getEvolutionDir(), "evolution_state.json");
-// Read MEMORY.md and USER.md from the WORKSPACE root (not the evolver plugin dir).
-// This avoids symlink breakage if the target file is temporarily deleted.
+// Read workspace identity & memory files for evolution context.
 const ROOT_MEMORY: string = path.join(WORKSPACE_ROOT, "MEMORY.md");
 const DIR_MEMORY: string = path.join(MEMORY_DIR, "MEMORY.md");
 const MEMORY_FILE: string = fs.existsSync(ROOT_MEMORY)
@@ -417,30 +416,62 @@ const MEMORY_FILE: string = fs.existsSync(ROOT_MEMORY)
     ? DIR_MEMORY
     : ROOT_MEMORY;
 const USER_FILE: string = path.join(WORKSPACE_ROOT, "USER.md");
+const SOUL_FILE: string = path.join(WORKSPACE_ROOT, "SOUL.md");
+const IDENTITY_FILE: string = path.join(WORKSPACE_ROOT, "IDENTITY.md");
+const AGENTS_FILE: string = path.join(WORKSPACE_ROOT, "AGENTS.md");
+const TOOLS_FILE: string = path.join(WORKSPACE_ROOT, "TOOLS.md");
 
-function readMemorySnippet(): string {
+function readWorkspaceFile(filePath: string, maxChars = 50000): string {
   try {
-    if (!fs.existsSync(MEMORY_FILE)) {
-      return "[MEMORY.md MISSING]";
+    if (!fs.existsSync(filePath)) {
+      return `[${path.basename(filePath)} MISSING]`;
     }
-    const content = fs.readFileSync(MEMORY_FILE, "utf8");
-    // Optimization: Increased limit from 2000 to 50000 for modern context windows
-    return content.length > 50000
-      ? content.slice(0, 50000) + `\n... [TRUNCATED: ${content.length - 50000} chars remaining]`
+    const content = fs.readFileSync(filePath, "utf8");
+    return content.length > maxChars
+      ? content.slice(0, maxChars) +
+          `\n... [TRUNCATED: ${content.length - maxChars} chars remaining]`
       : content;
   } catch {
-    return "[ERROR READING MEMORY.md]";
+    return `[ERROR READING ${path.basename(filePath)}]`;
   }
 }
 
+function readMemorySnippet(): string {
+  return readWorkspaceFile(MEMORY_FILE);
+}
+
 function readUserSnippet(): string {
+  return readWorkspaceFile(USER_FILE, 10000);
+}
+
+function readSoulSnippet(): string {
+  return readWorkspaceFile(SOUL_FILE, 10000);
+}
+
+function readIdentitySnippet(): string {
+  return readWorkspaceFile(IDENTITY_FILE, 5000);
+}
+
+function readAgentsSnippet(): string {
+  return readWorkspaceFile(AGENTS_FILE, 10000);
+}
+
+function readToolsSnippet(): string {
+  return readWorkspaceFile(TOOLS_FILE, 10000);
+}
+
+function listWorkspaceSkills(): string {
   try {
-    if (!fs.existsSync(USER_FILE)) {
-      return "[USER.md MISSING]";
-    }
-    return fs.readFileSync(USER_FILE, "utf8");
+    const skillsDir = path.join(WORKSPACE_ROOT, "skills");
+    if (!fs.existsSync(skillsDir)) return "(no skills/ directory)";
+    const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+    const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    const files = entries.filter((e) => e.isFile()).map((e) => e.name);
+    return (
+      [...dirs.map((d) => `  [dir] ${d}/`), ...files.map((f) => `  ${f}`)].join("\n") || "(empty)"
+    );
   } catch {
-    return "[ERROR READING USER.md]";
+    return "(error listing skills)";
   }
 }
 
@@ -624,6 +655,11 @@ async function run(): Promise<EvolveResult | null> {
   const todayLog = readRecentLog(TODAY_LOG);
   const memorySnippet = readMemorySnippet();
   const userSnippet = readUserSnippet();
+  const soulSnippet = readSoulSnippet();
+  const identitySnippet = readIdentitySnippet();
+  const agentsSnippet = readAgentsSnippet();
+  const toolsSnippet = readToolsSnippet();
+  const workspaceSkillsList = listWorkspaceSkills();
 
   const cycleNum = getNextCycleId();
   const cycleId = `Cycle #${cycleNum}`;
@@ -1225,10 +1261,33 @@ Global memory (MEMORY.md):
 ${memorySnippet}
 \`\`\`
 
-User registry (USER.md):
+User profile (USER.md):
 \`\`\`
 ${userSnippet}
 \`\`\`
+
+Soul / personality (SOUL.md):
+\`\`\`
+${soulSnippet}
+\`\`\`
+
+Identity (IDENTITY.md):
+\`\`\`
+${identitySnippet}
+\`\`\`
+
+Agent config (AGENTS.md):
+\`\`\`
+${agentsSnippet}
+\`\`\`
+
+Tools registry (TOOLS.md):
+\`\`\`
+${toolsSnippet}
+\`\`\`
+
+Workspace skills:
+${workspaceSkillsList}
 
 Recent memory snippet:
 \`\`\`

@@ -325,45 +325,52 @@ A2A payload types: Gene, Capsule, EvolutionEvent.
 External payloads must be staged as candidates first, validated before promotion.
 
 ━━━━━━━━━━━━━━━━━━━━━━
-IX. Protected Files (NEVER delete or overwrite)
+IX. Workspace File Permissions
 ━━━━━━━━━━━━━━━━━━━━━━
 
-The following files are CRITICAL to system identity and operation.
-Deleting, overwriting, or emptying ANY of them is an IMMEDIATE PROTOCOL VIOLATION.
+A. Editable workspace files (you MAY update to personalize for the user):
+- USER.md — append learned user preferences, habits, communication style
+- MEMORY.md — append important observations, patterns, learnings
+- AGENTS.md — update agent configuration based on observed needs
+- TOOLS.md — update tool registry, add/remove entries as tools change
+- TROUBLESHOOTING.md — add solutions for recurring issues
+- HEARTBEAT.md — update as needed
 
-- MEMORY.md
-- SOUL.md
-- IDENTITY.md
-- AGENTS.md
-- USER.md
-- HEARTBEAT.md
-- RECENT_EVENTS.md
-- TOOLS.md
-- TROUBLESHOOTING.md
-- verso.json
-- .env
-- memory/persona_*.md
-- memory/personas/**
+Rules for editing these files:
+- You MAY append new sections or update existing sections
+- You MUST NOT delete them, truncate them to empty, or replace their entire content
+- Edits should reflect observed user behavior and system patterns
+- When updating USER.md, focus on actionable preferences (timezone, language, tools, style)
 
-Evolver core source files (DO NOT modify -- managed by deploy pipeline):
-- src/evolver/evolve.js
-- src/evolver/runner.ts
-- src/evolver/daemon-entry.ts
-- src/evolver/gep/prompt.js
-- src/evolver/gep/signals.js
-- src/evolver/gep/solidify.js
-- src/evolver/gep/selector.js
-- src/evolver/gep/mutation.js
-- src/evolver/gep/personality.js
-- src/evolver/gep/memoryGraph.js
-- src/evolver/gep/paths.js
-- src/evolver/gep/bridge.js
+B. Read-only files (DO NOT modify):
+- SOUL.md — core personality, only the user should change this
+- IDENTITY.md — name, creature type, identity, only the user should change this
+- .env — credentials, managed by user
+- memory/ — entire memory directory is managed by the runtime memory system, DO NOT modify any files under memory/
+
+C. Evolver core source files (DO NOT modify -- deployed from versioned repo):
+- src/evolver/evolve.js, runner.ts, daemon-entry.ts
+- src/evolver/gep/*.js (prompt, signals, solidify, selector, mutation, personality, memoryGraph, paths, bridge)
 - src/agents/evolver.ts
 
-You MAY append to or edit sections within identity/memory files listed above.
-You MUST NOT delete them, truncate them to empty, or replace their entire content.
-You MUST NOT modify evolver core source files -- they are deployed from a versioned repo.
-If you need to reorganize a protected file, create a new version alongside it first.
+━━━━━━━━━━━━━━━━━━━━━━
+IX-B. Workspace Tool & Skill Management
+━━━━━━━━━━━━━━━━━━━━━━
+
+The workspace may contain runtime-generated tools and scripts (e.g. in skills/, scripts/, tools/).
+These are created by Verso during user interactions and may accumulate over time.
+
+Your responsibilities:
+1. AUDIT: Review workspace tools/skills for quality, usefulness, and correctness
+2. DELETE: Remove broken, duplicate, or unused tools — do not hoard dead code
+3. OPTIMIZE: Improve working tools (better error handling, cleaner code, proper docs)
+4. CONSOLIDATE: Move scattered scripts into skills/ directory with proper structure
+5. REGISTER: Update TOOLS.md to reflect current available tools
+
+A well-maintained skills/ directory should have:
+- Each skill in its own subdirectory: skills/<skill-name>/
+- A main entry point (index.js/ts or main.js/ts)
+- Clear naming that reflects the skill's purpose
 
 ━━━━━━━━━━━━━━━━━━━━━━
 X. Forbidden Innovation Zones (DO NOT CREATE)
