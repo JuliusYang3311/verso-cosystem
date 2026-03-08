@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "@mariozechner/pi-ai": "^0.52.12",
-    "ws": "^8.19.0"
-  }
-}

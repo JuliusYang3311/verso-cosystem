@@ -64,42 +64,8 @@ ui/src/ui/__screenshots__/
 ui/playwright-report/
 ui/test-results/
 
-# Android build artifacts
-apps/android/.gradle/
-apps/android/app/build/
-apps/android/.cxx/
-
-# iOS/macOS build artifacts
-apps/macos/.build/
-apps/macos/.build-local/
-apps/macos/.swiftpm/
-apps/shared/VersoKit/.build/
-apps/shared/VersoKit/.swiftpm/
-apps/ios/*.xcodeproj/
-apps/ios/*.xcworkspace/
-apps/ios/.swiftpm/
-apps/ios/Verso.xcodeproj/
-apps/ios/Verso.xcodeproj/**
-apps/macos/.build/**
-apps/ios/*.xcfilelist
-**/ModuleCache/
-
-# Desktop app (Electron) build outputs
-apps/electron/dist/
-apps/electron/out/
-apps/electron/node_modules/
-
-# fastlane (iOS)
-apps/ios/fastlane/README.md
-apps/ios/fastlane/report.xml
-apps/ios/fastlane/Preview.html
-apps/ios/fastlane/screenshots/
-apps/ios/fastlane/test_output/
-apps/ios/fastlane/logs/
-apps/ios/fastlane/.env
-apps/ios/*.ipa
-apps/ios/*.dSYM.zip
-apps/ios/*.mobileprovision
+# Apps (native clients — Android, iOS, macOS, Electron)
+apps/
 
 # Vendor build artifacts
 vendor/
