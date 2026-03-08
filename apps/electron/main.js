@@ -544,6 +544,19 @@ ipcMain.handle('save-config', async (event, updates) => {
   return true;
 });
 
+// Provider UI metadata — persisted separately from verso.json (gateway schema is strict)
+const providerMetaPath = path.join(require('os').homedir(), '.verso', 'provider-meta.json');
+
+ipcMain.handle('load-provider-meta', async () => {
+  try { return JSON.parse(require('fs').readFileSync(providerMetaPath, 'utf8')); } catch { return {}; }
+});
+
+ipcMain.handle('save-provider-meta', async (_event, meta) => {
+  const fs = require('fs');
+  fs.mkdirSync(path.dirname(providerMetaPath), { recursive: true });
+  fs.writeFileSync(providerMetaPath, JSON.stringify(meta, null, 2));
+});
+
 // Gateway auth token handler
 ipcMain.handle('get-gateway-token', async () => {
   return gatewayToken;

@@ -9,12 +9,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderProviders();
 });
 
+async function loadProviderMeta() {
+  try { return await window.verso.loadProviderMeta(); } catch { return {}; }
+}
+
+async function saveProviderMeta(meta) {
+  try { await window.verso.saveProviderMeta(meta); } catch {}
+}
+
 async function loadProviders() {
   const config = await window.verso.getConfig();
   const raw = config.models?.providers || {};
-  const meta = config.models?._providerMeta || {};
+  const meta = await loadProviderMeta();
 
-  // Merge persisted UI metadata back into provider objects
   for (const [name, prov] of Object.entries(raw)) {
     const m = meta[name] || {};
     prov._providerType = m.providerType || inferProviderType(name, prov);
@@ -691,17 +698,15 @@ async function saveProviders() {
   const providerMeta = {};
   for (const [name, provider] of Object.entries(providers)) {
     gatewayProviders[name] = toGatewayProvider(provider);
-    // Persist UI metadata separately so it survives load/save roundtrips
     providerMeta[name] = {
       providerType: provider._providerType || '',
       authMethod: provider._authMethod || '',
     };
   }
   config.models.providers = gatewayProviders;
-  config.models._providerMeta = providerMeta;
-  // Mark these collections for atomic replace (not deep merge) so deletions propagate
-  config._replaceKeys = ['models.providers', 'models._providerMeta'];
+  config._replaceKeys = ['models.providers'];
   await window.verso.saveConfig(config);
+  saveProviderMeta(providerMeta);
 
   // Non-blocking gateway update (don't hang UI if gateway is down)
   if (typeof window.applyConfigToGateway === 'function') {
@@ -727,5 +732,6 @@ window.removeModel = removeModel;
 window.removeProvider = removeProvider;
 window.addNewProvider = addNewProvider;
 window.setPrimaryModel = setPrimaryModel;
+window.saveProviders = saveProviders;
 
 // OAuth login placeholder
