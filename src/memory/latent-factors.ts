@@ -72,10 +72,13 @@ function factorSpacePath(): string {
     return workspacePath;
   }
 
-  // Find bundled default and seed into workspace
+  // Find bundled default and seed into workspace.
+  // Bundler may place this chunk in dist/evolver/ or dist/memory/ — walk up to dist root.
   const candidates = [
     path.resolve(__dirname, "factor-space.json"),
     path.resolve(__dirname, "memory", "factor-space.json"),
+    path.resolve(__dirname, "..", "memory", "factor-space.json"),
+    path.resolve(__dirname, "..", "..", "memory", "factor-space.json"),
   ];
   for (const candidate of candidates) {
     if (fsSync.existsSync(candidate)) {

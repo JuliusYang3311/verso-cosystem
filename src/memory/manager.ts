@@ -340,20 +340,44 @@ export class MemoryIndexManager implements MemorySearchManager {
       const homedir = await import("node:os").then((m) => m.homedir());
       const workspaceRoot =
         process.env.VERSO_WORKSPACE || path.join(homedir, ".verso", "workspace");
-      // Prefer workspace copy (writable, evolver-optimized), then bundled defaults
-      const candidates = [
-        path.join(workspaceRoot, "evolver", "assets", "gep", "context_params.json"),
-        path.resolve(thisDir, "../evolver/assets/gep/context_params.json"),
-        path.resolve(thisDir, "evolver/assets/gep/context_params.json"),
-      ];
-      for (const paramsPath of candidates) {
+      const workspacePath = path.join(
+        workspaceRoot,
+        "evolver",
+        "assets",
+        "gep",
+        "context_params.json",
+      );
+
+      // Prefer workspace copy (writable, evolver-optimized)
+      if (fsSync.existsSync(workspacePath)) {
         try {
-          const content = await fs.readFile(paramsPath, "utf-8");
+          const content = await fs.readFile(workspacePath, "utf-8");
           return JSON.parse(content) as Partial<ContextParams>;
         } catch {
-          continue;
+          // fall through to bundled seed
         }
       }
+
+      // Workspace copy missing — find bundled default, seed to workspace, then read
+      const bundledCandidates = [
+        path.resolve(thisDir, "../evolver/assets/gep/context_params.json"),
+        path.resolve(thisDir, "evolver/assets/gep/context_params.json"),
+        path.resolve(thisDir, "../../evolver/assets/gep/context_params.json"),
+        path.resolve(thisDir, "../assets/gep/context_params.json"),
+      ];
+      for (const candidate of bundledCandidates) {
+        if (fsSync.existsSync(candidate)) {
+          try {
+            fsSync.mkdirSync(path.dirname(workspacePath), { recursive: true });
+            fsSync.copyFileSync(candidate, workspacePath);
+            const content = await fs.readFile(workspacePath, "utf-8");
+            return JSON.parse(content) as Partial<ContextParams>;
+          } catch {
+            continue;
+          }
+        }
+      }
+
       return {};
     } catch {
       return {};

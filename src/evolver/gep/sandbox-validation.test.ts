@@ -142,8 +142,9 @@ function mockExecForSandboxCreation(opts: {
         throw new Error("rsync failed");
       }
       // Simulate copying by creating a package.json in the sandbox dir
-      const cwd = options?.cwd as string | undefined;
-      const targetDir = cwd && cwd.startsWith(os.tmpdir()) ? cwd : undefined;
+      // Parse target dir from rsync command: rsync -a ... "source/" "target/"
+      const rsyncMatch = cmdStr.match(/"([^"]+\/evolver-sandbox-[^"]*)\/"$/);
+      const targetDir = rsyncMatch?.[1] ?? (options?.cwd as string | undefined);
       if (targetDir) {
         fs.mkdirSync(path.join(targetDir, "src"), { recursive: true });
         fs.writeFileSync(

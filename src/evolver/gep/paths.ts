@@ -43,6 +43,8 @@ export function getGepAssetsDir(): string {
     const candidates = [
       path.join(evolverRoot, "assets", "gep"),
       path.join(evolverRoot, "..", "evolver", "assets", "gep"),
+      path.join(evolverRoot, "..", "..", "evolver", "assets", "gep"),
+      path.join(evolverRoot, "..", "assets", "gep"),
     ];
     for (const src of candidates) {
       if (fs.existsSync(path.join(src, "context_params.json"))) {
