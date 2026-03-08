@@ -395,37 +395,49 @@ export function queryToSubqueries(params: {
 // ---------- Factor vector registration ----------
 
 /**
- * Register pre-computed embedding vectors for all factors under a given providerModel.
+ * Merge embedding vectors into the factor space by factor ID.
  *
- * - Vectors must be ordered to match space.factors order.
- * - Automatically initialises weights to 1.0 for the given weightKey for any
- *   factor that does not yet have an entry — this keeps weights and factors in
- *   sync whenever new factors are added to the space.
+ * - `vectorsByFactorId` maps factor ID → embedding vector.
+ * - Reloads the latest space from disk before merging so concurrent writes
+ *   (e.g. evolver adding/removing factors) are not overwritten.
+ * - Automatically initialises weights to 1.0 for any factor that does not
+ *   yet have an entry for the given weightKey.
  * - Persists to disk and invalidates the in-process cache.
- *
- * @param useCase  The application context for which to initialise weights
- *                 (e.g. "memory" or "web"). Vectors are shared across use cases;
- *                 weights are per use case.
  */
 export async function registerFactorVectors(
-  space: LatentFactorSpace,
+  _space: LatentFactorSpace,
   providerModel: string,
   useCase: string,
-  vectors: number[][],
+  vectors: number[][] | Map<string, number[]>,
 ): Promise<LatentFactorSpace> {
-  if (vectors.length !== space.factors.length) {
-    throw new Error(
-      `registerFactorVectors: expected ${space.factors.length} vectors, got ${vectors.length}`,
-    );
+  // Build ID → vector map (supports both legacy array and new Map form)
+  let vecMap: Map<string, number[]>;
+  if (vectors instanceof Map) {
+    vecMap = vectors;
+  } else {
+    if (vectors.length !== _space.factors.length) {
+      throw new Error(
+        `registerFactorVectors: expected ${_space.factors.length} vectors, got ${vectors.length}`,
+      );
+    }
+    vecMap = new Map(_space.factors.map((f, i) => [f.id, vectors[i]]));
   }
+
+  // Reload latest space to avoid overwriting concurrent modifications
+  invalidateFactorSpaceCache();
+  const freshSpace = await loadFactorSpace();
+
   const wKey = weightKey(providerModel, useCase);
   const updated: LatentFactorSpace = {
-    ...space,
-    factors: space.factors.map((f, i) => ({
-      ...f,
-      vectors: { ...f.vectors, [providerModel]: vectors[i] },
-      weights: { ...f.weights, [wKey]: f.weights[wKey] ?? 1.0 },
-    })),
+    ...freshSpace,
+    factors: freshSpace.factors.map((f) => {
+      const vec = vecMap.get(f.id);
+      return {
+        ...f,
+        vectors: vec ? { ...f.vectors, [providerModel]: vec } : f.vectors,
+        weights: { ...f.weights, [wKey]: f.weights[wKey] ?? 1.0 },
+      };
+    }),
   };
   await saveFactorSpace(updated);
   return updated;
@@ -434,13 +446,16 @@ export async function registerFactorVectors(
 /**
  * Update the learnable weight for a single factor.
  *
+ * Reloads the latest space from disk before applying the change so that
+ * concurrent modifications (e.g. new factors, new embeddings) are preserved.
+ *
  * @param factorId      ID of the factor to update.
  * @param providerModel Embedding model key.
  * @param useCase       Application context ("memory" | "web" | …).
  * @param newWeight     New weight value; clamped to [0.1, 10.0].
  */
 export async function updateFactorWeight(
-  space: LatentFactorSpace,
+  _space: LatentFactorSpace,
   factorId: string,
   providerModel: string,
   useCase: string,
@@ -448,9 +463,14 @@ export async function updateFactorWeight(
 ): Promise<LatentFactorSpace> {
   const clamped = Math.max(0.1, Math.min(10.0, newWeight));
   const wKey = weightKey(providerModel, useCase);
+
+  // Reload latest to avoid overwriting concurrent modifications
+  invalidateFactorSpaceCache();
+  const freshSpace = await loadFactorSpace();
+
   const updated: LatentFactorSpace = {
-    ...space,
-    factors: space.factors.map((f) =>
+    ...freshSpace,
+    factors: freshSpace.factors.map((f) =>
       f.id === factorId ? { ...f, weights: { ...f.weights, [wKey]: clamped } } : f,
     ),
   };
@@ -467,7 +487,7 @@ const _embeddingInFlight = new Map<string, Promise<void>>();
  * Ensure all factors have embedding vectors for the given providerModel.
  *
  * If vectors are already present, returns immediately (no I/O).
- * Otherwise, embeds all factor descriptions in a single batch and persists.
+ * Otherwise, embeds only the missing factor descriptions and merges them in.
  * Uses an in-flight lock so concurrent callers share the same promise.
  *
  * Designed to be called fire-and-forget at query time:
@@ -482,10 +502,10 @@ export function ensureFactorVectors(
   useCase: string,
   embedBatch: (texts: string[]) => Promise<number[][]>,
 ): Promise<void> {
-  const allPresent = space.factors.every(
-    (f) => f.vectors[providerModel] && f.vectors[providerModel].length > 0,
+  const missing = space.factors.filter(
+    (f) => !f.vectors[providerModel] || f.vectors[providerModel].length === 0,
   );
-  if (allPresent) {
+  if (missing.length === 0) {
     return Promise.resolve();
   }
 
@@ -495,9 +515,10 @@ export function ensureFactorVectors(
   }
 
   const work = (async () => {
-    const descriptions = space.factors.map((f) => f.description);
+    const descriptions = missing.map((f) => f.description);
     const vectors = await embedBatch(descriptions);
-    await registerFactorVectors(space, providerModel, useCase, vectors);
+    const vecMap = new Map(missing.map((f, i) => [f.id, vectors[i]]));
+    await registerFactorVectors(space, providerModel, useCase, vecMap);
   })().finally(() => {
     _embeddingInFlight.delete(providerModel);
   });
