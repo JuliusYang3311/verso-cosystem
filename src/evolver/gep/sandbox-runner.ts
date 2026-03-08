@@ -253,15 +253,17 @@ export function createTmpdirSandbox(workspaceRoot: string): TmpdirSandboxResult 
     }
   }
 
-  // Install dependencies
-  const installResult = tryExec("pnpm install --frozen-lockfile 2>/dev/null || pnpm install", {
-    cwd: sandboxDir,
-    timeout: 180_000,
-  });
+  // Install dependencies (only if package.json exists)
+  if (fs.existsSync(path.join(sandboxDir, "package.json"))) {
+    const installResult = tryExec("pnpm install --frozen-lockfile 2>/dev/null || pnpm install", {
+      cwd: sandboxDir,
+      timeout: 180_000,
+    });
 
-  if (!installResult.ok) {
-    cleanupTmpdir(sandboxDir);
-    return { ok: false, sandboxDir: null, error: `pnpm install failed: ${installResult.stderr}` };
+    if (!installResult.ok) {
+      cleanupTmpdir(sandboxDir);
+      return { ok: false, sandboxDir: null, error: `pnpm install failed: ${installResult.stderr}` };
+    }
   }
 
   return { ok: true, sandboxDir, error: null };
