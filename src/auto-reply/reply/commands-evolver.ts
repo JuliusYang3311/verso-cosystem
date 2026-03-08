@@ -1,7 +1,7 @@
 import type { CommandHandler } from "./commands-types.js";
 import {
   getEvolverStatus,
-  readEvolverRollbackInfo,
+  readRecentActivity,
   startEvolverDaemon,
   stopEvolverDaemon,
 } from "../../agents/evolver.js";
@@ -89,7 +89,7 @@ export const handleEvolverCommand: CommandHandler = async (params) => {
 
   if (mode === "status") {
     const status = await getEvolverStatus();
-    const rollbackInfo = await readEvolverRollbackInfo();
+    const activity = await readRecentActivity();
     const review = readPendingReview();
     const lines = [
       status.running
@@ -105,7 +105,7 @@ export const handleEvolverCommand: CommandHandler = async (params) => {
         `  Use /evolve approve or /evolve reject to decide.`,
       );
     }
-    lines.push(rollbackInfo ? `Last rollback:\n${rollbackInfo}` : "Last rollback: (none)");
+    lines.push(activity ? `\nRecent activity:\n${activity}` : "\nNo recent activity.");
     return { shouldContinue: false, reply: { text: lines.join("\n") } };
   }
 

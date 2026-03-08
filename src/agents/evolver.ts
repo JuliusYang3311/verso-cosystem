@@ -160,11 +160,32 @@ export async function getEvolverStatus(): Promise<EvolverStatus> {
   return { running, pid: running ? (pid ?? undefined) : undefined, logPath, rollbackPath };
 }
 
-export async function readEvolverRollbackInfo(): Promise<string | null> {
-  const { rollbackPath } = resolveLogPaths();
+/**
+ * Read recent evolver activity from the daemon log (last N meaningful lines).
+ */
+export async function readRecentActivity(): Promise<string | null> {
+  const { logPath } = resolveLogPaths();
   try {
-    const raw = fs.readFileSync(rollbackPath, "utf-8").trim();
-    return raw ? raw : null;
+    const raw = fs.readFileSync(logPath, "utf-8").trim();
+    if (!raw) return null;
+    const lines = raw.split("\n");
+    // Extract human-readable summaries from structured log lines
+    const summaries: string[] = [];
+    for (const line of lines.slice(-20)) {
+      try {
+        const entry = JSON.parse(line);
+        const msg: string = entry["2"] || entry.message || "";
+        if (msg) {
+          const ts = entry.time || entry._meta?.date || "";
+          const timeStr = ts ? ts.slice(0, 19).replace("T", " ") : "";
+          summaries.push(timeStr ? `  [${timeStr}] ${msg}` : `  ${msg}`);
+        }
+      } catch {
+        // Non-JSON line — include as-is
+        if (line.trim()) summaries.push(`  ${line.trim()}`);
+      }
+    }
+    return summaries.length > 0 ? summaries.slice(-8).join("\n") : null;
   } catch {
     return null;
   }

@@ -1,0 +1,89 @@
+{
+  "name": "verso-desktop",
+  "version": "1.0.0",
+  "description": "Verso Desktop App",
+  "author": "Julius Yang <yangzhenyu528@gmail.com>",
+  "main": "main.js",
+  "scripts": {
+    "start": "ELECTRON_RUN_AS_NODE= electron .",
+    "prepare:build": "bash scripts/prepare-build.sh",
+    "build": "npm run prepare:build && electron-builder",
+    "build:mac": "npm run prepare:build && electron-builder --mac --arm64 --x64",
+    "build:mac:arm64": "bash scripts/prepare-build.sh arm64 && electron-builder --mac --arm64",
+    "build:mac:x64": "bash scripts/prepare-build.sh x64 && electron-builder --mac --x64",
+    "build:dir": "npm run prepare:build && electron-builder --mac --dir"
+  },
+  "build": {
+    "appId": "com.verso.desktop",
+    "productName": "Verso",
+    "icon": "assets/icon.icns",
+    "mac": {
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*",
+      "auth/**/*",
+      "gateway/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../../dist",
+        "to": "gateway/dist"
+      },
+      {
+        "from": "../../extensions",
+        "to": "gateway/extensions"
+      },
+      {
+        "from": "../../skills",
+        "to": "gateway/skills"
+      },
+      {
+        "from": "../../assets",
+        "to": "gateway/assets"
+      },
+      {
+        "from": "../../build-node-modules",
+        "to": "gateway/node_modules"
+      },
+      {
+        "from": "../../package.json",
+        "to": "gateway/package.json"
+      },
+      {
+        "from": "../../node",
+        "to": "gateway/node"
+      },
+      {
+        "from": "../../docs/reference/templates",
+        "to": "gateway/docs/reference/templates"
+      }
+    ],
+    "asarUnpack": [
+      "gateway/**/*",
+      "node_modules/@mariozechner/**/*",
+      "node_modules/@sinclair/**/*"
+    ]
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.52.9",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^32.3.3",
+    "electron-builder": "^24.13.3"
+  }
+}
