@@ -64,7 +64,8 @@ function factorSpacePath(): string {
     return process.env.LATENT_FACTOR_SPACE_PATH;
   }
 
-  // Prefer workspace copy (writable, evolver can optimize it)
+  // Always resolve to workspace — this is the single source of truth for
+  // reads AND writes. The bundled dist copy is only used as a seed source.
   const workspaceRoot =
     process.env.VERSO_WORKSPACE || path.join(os.homedir(), ".verso", "workspace");
   const workspacePath = path.join(workspaceRoot, "evolver", "assets", "factor-space.json");
@@ -72,7 +73,7 @@ function factorSpacePath(): string {
     return workspacePath;
   }
 
-  // Find bundled default and seed into workspace.
+  // Seed from bundled dist into workspace.
   // Bundler may place this chunk in dist/evolver/ or dist/memory/ — walk up to dist root.
   const candidates = [
     path.resolve(__dirname, "factor-space.json"),
@@ -82,15 +83,16 @@ function factorSpacePath(): string {
   ];
   for (const candidate of candidates) {
     if (fsSync.existsSync(candidate)) {
-      const dir = path.dirname(workspacePath);
-      fsSync.mkdirSync(dir, { recursive: true });
+      fsSync.mkdirSync(path.dirname(workspacePath), { recursive: true });
       fsSync.copyFileSync(candidate, workspacePath);
       return workspacePath;
     }
   }
 
-  // Last resort: return the bundled path even if missing
-  return candidates[0]!;
+  // Even if bundled seed is missing, always return workspace path.
+  // saveFactorSpace will create the directory and write a fresh file here.
+  fsSync.mkdirSync(path.dirname(workspacePath), { recursive: true });
+  return workspacePath;
 }
 
 // ---------- Types ----------
