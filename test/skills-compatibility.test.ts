@@ -10,22 +10,23 @@ import { describe, it, expect, beforeAll } from "vitest";
 const SKILLS_DIR = path.resolve(__dirname, "../skills");
 
 const CORE_SKILLS = [
-  // Note: evolver is now integrated into src/evolver/, not a skill directory
-  "github",
   "coding-agent",
+  "discord",
+  "github",
+  "gog",
+  "healthcheck",
+  "moltbook",
+  "novel-writer",
+  "openai-image-gen",
+  "openai-whisper-api",
+  "session-logs",
+  "skill-creator",
+  "slack",
+  "summarize",
   "twitter",
-  "videogeneration",
-  "notion",
-  "obsidian",
-  "1password",
-  "crypto-trading",
+  "video-frames",
+  "wacli",
   "weather",
-  "nano-pdf",
-  "world-monitor",
-  "nano-banana-pro", // google
-  "webhook",
-  // Note: cron, gmail, calendar, web-search, brave-search
-  // may be bundled or extension-based, tested separately if present
 ];
 
 // Skills 不应引用这些将被移除的 API

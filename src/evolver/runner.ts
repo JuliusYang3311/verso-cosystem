@@ -202,7 +202,7 @@ export async function runEvolutionCycle(options: EvolverRunOptions): Promise<Run
         for (const file of agentResult.filesChanged) {
           const src = path.join(sandbox.sandboxDir, file);
           const dst = path.join(workspace, file);
-          if (fs.existsSync(src)) {
+          if (fs.existsSync(src) && fs.statSync(src).isFile()) {
             const dir = path.dirname(dst);
             if (!fs.existsSync(dir)) {
               fs.mkdirSync(dir, { recursive: true });

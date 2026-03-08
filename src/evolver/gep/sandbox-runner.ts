@@ -212,19 +212,43 @@ export function createTmpdirSandbox(workspaceRoot: string): TmpdirSandboxResult 
     timeout: 30_000,
   });
   if (untrackedResult.ok) {
-    const files = untrackedResult.stdout
+    const entries = untrackedResult.stdout
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean);
-    for (const file of files) {
+
+    // Collect all files, recursively expanding directories
+    const filesToCopy: string[] = [];
+    const collectFiles = (relPath: string) => {
+      const absPath = path.join(workspaceRoot, relPath);
+      try {
+        const stat = fs.statSync(absPath);
+        if (stat.isFile()) {
+          filesToCopy.push(relPath);
+        } else if (stat.isDirectory()) {
+          for (const child of fs.readdirSync(absPath)) {
+            collectFiles(path.join(relPath, child));
+          }
+        }
+      } catch {
+        // skip entries that can't be stat'd
+      }
+    };
+    for (const entry of entries) {
+      collectFiles(entry.replace(/\/$/, ""));
+    }
+
+    for (const file of filesToCopy) {
       const srcFile = path.join(workspaceRoot, file);
       const dstFile = path.join(sandboxDir, file);
-      if (fs.existsSync(srcFile)) {
-        const dstDir = path.dirname(dstFile);
-        if (!fs.existsSync(dstDir)) {
-          fs.mkdirSync(dstDir, { recursive: true });
-        }
+      const dstDir = path.dirname(dstFile);
+      if (!fs.existsSync(dstDir)) {
+        fs.mkdirSync(dstDir, { recursive: true });
+      }
+      try {
         fs.copyFileSync(srcFile, dstFile);
+      } catch {
+        // skip files that can't be copied
       }
     }
   }

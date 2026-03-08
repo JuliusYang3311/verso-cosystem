@@ -60,6 +60,13 @@ cp "$NODE_BIN" "$GATEWAY_NODE"
 chmod +x "$GATEWAY_NODE"
 echo "Copied Node.js binary to: $GATEWAY_NODE"
 
+# 4. Remove broken symlinks in node_modules (pnpm workspace links that won't resolve in packaged app)
+echo ""
+echo "=== Cleaning broken symlinks in node_modules ==="
+find "$VERSO_ROOT/node_modules/.pnpm/node_modules" -maxdepth 1 -type l ! -exec test -e {} \; -delete 2>/dev/null || true
+find "$VERSO_ROOT/node_modules/.bin" -maxdepth 1 -type l ! -exec test -e {} \; -delete 2>/dev/null || true
+echo "Done"
+
 echo ""
 echo "=== Build preparation complete ==="
 echo "You can now run: cd $ELECTRON_DIR && npm run build:mac"

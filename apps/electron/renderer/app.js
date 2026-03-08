@@ -480,9 +480,10 @@ async function loadEvolverSettings() {
   const toggleEl = document.getElementById('evolver-enabled');
   if (statusEl) statusEl.textContent = 'Checking...';
   try {
-    const result = await window.gatewayClient.chatInject({
+    const result = await window.gatewayClient.chatSend({
       sessionKey: 'agent:main:main',
       message: '/evolve status',
+      idempotencyKey: `evolver-status-${Date.now()}`,
     });
     const text = result?.text || result?.reply?.text || '';
     const running = text.includes('running');
@@ -510,9 +511,10 @@ window.toggleEvolver = async function() {
   }
 
   try {
-    const result = await window.gatewayClient.chatInject({
+    const result = await window.gatewayClient.chatSend({
       sessionKey: 'agent:main:main',
       message: command,
+      idempotencyKey: `evolver-toggle-${Date.now()}`,
     });
     const text = result?.text || result?.reply?.text || '';
     const started = text.includes('started') || text.includes('running');

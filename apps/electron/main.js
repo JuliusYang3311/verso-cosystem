@@ -1,7 +1,7 @@
 // Ensure Electron runs as app, not as Node.js
 delete process.env.ELECTRON_RUN_AS_NODE;
 
-const { app, BrowserWindow, ipcMain, Menu, Tray } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, powerSaveBlocker } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -376,6 +376,10 @@ function showSettings() {
 }
 
 void app.whenReady().then(() => {
+  // Prevent system sleep while Verso is running
+  const sleepBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+  app.on('will-quit', () => powerSaveBlocker.stop(sleepBlockerId));
+
   createWindow();
   createTray();
   startGateway();
