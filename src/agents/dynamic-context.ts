@@ -129,7 +129,7 @@ export async function loadContextParams(): Promise<ContextParams> {
   // Prefer workspace copy (writable, evolver-optimized)
   const workspaceRoot =
     process.env.VERSO_WORKSPACE || path.join(os.homedir(), ".verso", "workspace");
-  const workspacePath = path.join(workspaceRoot, "evolver", "assets", "gep", "context_params.json");
+  const workspacePath = path.join(workspaceRoot, "evolver", "assets", "context_params.json");
 
   // If workspace copy exists, read directly
   if (fsSync.existsSync(workspacePath)) {
@@ -144,10 +144,10 @@ export async function loadContextParams(): Promise<ContextParams> {
 
   // Workspace copy missing — find bundled default, seed to workspace, then read
   const bundledCandidates = [
-    path.resolve(__dirname, "../evolver/assets/gep/context_params.json"),
-    path.resolve(__dirname, "evolver/assets/gep/context_params.json"),
-    path.resolve(__dirname, "../../evolver/assets/gep/context_params.json"),
-    path.resolve(__dirname, "../assets/gep/context_params.json"),
+    path.resolve(__dirname, "../evolver/assets/context_params.json"),
+    path.resolve(__dirname, "evolver/assets/context_params.json"),
+    path.resolve(__dirname, "../../evolver/assets/context_params.json"),
+    path.resolve(__dirname, "../assets/context_params.json"),
   ];
   for (const candidate of bundledCandidates) {
     if (fsSync.existsSync(candidate)) {

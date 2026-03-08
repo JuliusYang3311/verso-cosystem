@@ -396,7 +396,8 @@ Instead, focus innovation on:
 XI. Tunable Parameters
 ━━━━━━━━━━━━━━━━━━━━━━
 
-All parameter files live in the workspace at \`evolver/assets/gep/\`.
+Shared tunable parameters live at \`evolver/assets/\` (context_params.json, factor-space.json).
+GEP-specific assets (capsules, genes, etc.) live at \`evolver/assets/gep/\`.
 The system reads from workspace at runtime — changes take effect immediately.
 
 A. context_params.json — search & retrieval parameters:

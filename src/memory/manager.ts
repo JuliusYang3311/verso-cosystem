@@ -340,13 +340,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       const homedir = await import("node:os").then((m) => m.homedir());
       const workspaceRoot =
         process.env.VERSO_WORKSPACE || path.join(homedir, ".verso", "workspace");
-      const workspacePath = path.join(
-        workspaceRoot,
-        "evolver",
-        "assets",
-        "gep",
-        "context_params.json",
-      );
+      const workspacePath = path.join(workspaceRoot, "evolver", "assets", "context_params.json");
 
       // Prefer workspace copy (writable, evolver-optimized)
       if (fsSync.existsSync(workspacePath)) {
@@ -360,10 +354,10 @@ export class MemoryIndexManager implements MemorySearchManager {
 
       // Workspace copy missing — find bundled default, seed to workspace, then read
       const bundledCandidates = [
-        path.resolve(thisDir, "../evolver/assets/gep/context_params.json"),
-        path.resolve(thisDir, "evolver/assets/gep/context_params.json"),
-        path.resolve(thisDir, "../../evolver/assets/gep/context_params.json"),
-        path.resolve(thisDir, "../assets/gep/context_params.json"),
+        path.resolve(thisDir, "../evolver/assets/context_params.json"),
+        path.resolve(thisDir, "evolver/assets/context_params.json"),
+        path.resolve(thisDir, "../../evolver/assets/context_params.json"),
+        path.resolve(thisDir, "../assets/context_params.json"),
       ];
       for (const candidate of bundledCandidates) {
         if (fsSync.existsSync(candidate)) {

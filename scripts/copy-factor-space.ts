@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 
 const src = path.join(projectRoot, "src", "memory", "factor-space.json");
-const dest = path.join(projectRoot, "dist", "evolver", "assets", "gep", "factor-space.json");
+const dest = path.join(projectRoot, "dist", "evolver", "assets", "factor-space.json");
 
 if (!fs.existsSync(src)) {
   console.warn("[copy-factor-space] factor-space.json not found at", src);

@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { getGepAssetsDir } from "./paths.js";
+import { getEvolverAssetsDir, getGepAssetsDir } from "./paths.js";
 
 // ---------- Types ----------
 
@@ -82,7 +82,7 @@ export const DEFAULT_CONTEXT_PARAMS: ContextParams = {
 // ---------- Parameter I/O ----------
 
 function getContextParamsPath(): string {
-  return path.join(getGepAssetsDir(), CONTEXT_PARAMS_FILE);
+  return path.join(getEvolverAssetsDir(), CONTEXT_PARAMS_FILE);
 }
 
 export function loadContextParams(): ContextParams {

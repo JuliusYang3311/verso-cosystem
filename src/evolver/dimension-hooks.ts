@@ -11,7 +11,7 @@
  *   hit  → w' = w + lr × (score − baseline)   // reward factors that retrieve well
  *   miss → w' = w × (1 − decay)               // slowly shrink unused factors
  *
- * All writes go to workspace/evolver/assets/gep/factor-space.json via
+ * All writes go to workspace/evolver/assets/factor-space.json via
  * updateFactorWeight(), which reloads the latest file before writing.
  */
 
