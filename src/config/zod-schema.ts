@@ -110,7 +110,6 @@ const EvolverSchema = z
     dir: z.string().optional(),
     workspace: z.string().optional(),
     review: z.boolean().optional(),
-    verifyCmd: z.string().optional(),
     rollback: z.boolean().optional(),
     clean: z.boolean().optional(),
     model: z.string().optional(),

@@ -17,16 +17,13 @@ const logger = createSubsystemLogger("evolver-runner");
 
 // ---------- Types ----------
 
-export type EvolverRunMode = "single" | "loop" | "solidify";
+export type EvolverRunMode = "single" | "loop";
 
 export type EvolverRunOptions = {
   mode: EvolverRunMode;
   review?: boolean;
   dryRun?: boolean;
   workspace?: string;
-  verifyCmd?: string;
-  rollbackEnabled?: boolean;
-  cleanEnabled?: boolean;
   /** If true, src/ changes require user approval before deploy. */
   requireReview?: boolean;
   /** Model string from main session (e.g. "anthropic/claude-opus-4-6"). */
@@ -46,6 +43,12 @@ export type RunCycleResult = {
   error?: string;
   elapsed?: number;
   filesChanged?: string[];
+  /** The GEP prompt that was used, for LLM acceptance evaluation. */
+  gepPrompt?: string;
+  /** Sandbox directory containing the changes (caller must clean up). */
+  sandboxDir?: string;
+  /** Cleanup function for the sandbox (call after acceptance/deploy). */
+  cleanupSandbox?: () => void;
 };
 
 // ---------- Helpers ----------
@@ -181,45 +184,33 @@ export async function runEvolutionCycle(options: EvolverRunOptions): Promise<Run
       return { ok: false, error: `Sandbox creation failed: ${sandbox.error}`, elapsed };
     }
 
-    try {
-      const agentResult = await runCodingAgentInSandbox({
-        prompt: evolveResult.prompt,
-        sandboxDir: sandbox.sandboxDir,
-      });
+    const agentResult = await runCodingAgentInSandbox({
+      prompt: evolveResult.prompt,
+      sandboxDir: sandbox.sandboxDir,
+    });
 
-      const elapsed = Date.now() - t0;
+    const elapsed = Date.now() - t0;
 
-      if (!agentResult.ok) {
-        logger.warn("evolver-runner: sandbox agent failed", {
-          error: agentResult.error,
-          elapsed_ms: elapsed,
-        });
-        return { ok: false, error: agentResult.error, elapsed };
-      }
-
-      // 3. Copy changed files from sandbox to real workspace
-      if (agentResult.filesChanged.length > 0) {
-        for (const file of agentResult.filesChanged) {
-          const src = path.join(sandbox.sandboxDir, file);
-          const dst = path.join(workspace, file);
-          if (fs.existsSync(src) && fs.statSync(src).isFile()) {
-            const dir = path.dirname(dst);
-            if (!fs.existsSync(dir)) {
-              fs.mkdirSync(dir, { recursive: true });
-            }
-            fs.copyFileSync(src, dst);
-          }
-        }
-        logger.info("evolver-runner: deployed sandbox changes to workspace", {
-          fileCount: agentResult.filesChanged.length,
-        });
-      }
-
-      logger.info("evolver-runner: cycle completed", { elapsed_ms: elapsed });
-      return { ok: true, elapsed, filesChanged: agentResult.filesChanged };
-    } finally {
+    if (!agentResult.ok) {
       cleanupTmpdir(sandbox.sandboxDir);
+      logger.warn("evolver-runner: sandbox agent failed", {
+        error: agentResult.error,
+        elapsed_ms: elapsed,
+      });
+      return { ok: false, error: agentResult.error, elapsed };
     }
+
+    // Don't copy to workspace yet — return sandbox for acceptance testing.
+    // Caller is responsible for deploying accepted changes and cleaning up.
+    logger.info("evolver-runner: cycle completed, pending acceptance", { elapsed_ms: elapsed });
+    return {
+      ok: true,
+      elapsed,
+      filesChanged: agentResult.filesChanged,
+      gepPrompt: evolveResult.prompt,
+      sandboxDir: sandbox.sandboxDir,
+      cleanupSandbox: () => cleanupTmpdir(sandbox.sandboxDir),
+    };
   } catch (error) {
     const elapsed = Date.now() - t0;
     const msg = error instanceof Error ? error.message : String(error);
@@ -228,67 +219,46 @@ export async function runEvolutionCycle(options: EvolverRunOptions): Promise<Run
   }
 }
 
-/**
- * Run solidify (apply changes after evolution).
- */
-export async function runSolidify(options: {
-  dryRun?: boolean;
-  noRollback?: boolean;
-  intent?: string;
-  summary?: string;
-}): Promise<{ ok: boolean; gene?: unknown; event?: unknown; capsule?: unknown }> {
-  try {
-    const { solidify } = (await import("./gep/solidify.js")) as {
-      solidify: (params: {
-        intent?: string;
-        summary?: string;
-        dryRun?: boolean;
-        rollbackOnFailure?: boolean;
-      }) => { ok: boolean; gene?: unknown; event?: unknown; capsule?: unknown };
-    };
+// ---------- Deploy from Sandbox ----------
 
-    return solidify({
-      intent: options.intent,
-      summary: options.summary,
-      dryRun: options.dryRun,
-      rollbackOnFailure: !options.noRollback,
-    });
-  } catch (error) {
-    logger.warn("evolver-runner: solidify failed", { error: String(error) });
-    return { ok: false };
-  }
-}
-
-// ---------- Verify & Rollback ----------
-
-function runVerify(
+function deploySandboxToWorkspace(
+  sandboxDir: string,
   workspace: string,
-  verifyCmd: string,
-): { ok: boolean; stdout: string; stderr: string } {
-  const result = spawnSync(verifyCmd, {
-    cwd: workspace,
-    shell: true,
-    encoding: "utf-8",
+  filesChanged: string[],
+): void {
+  for (const file of filesChanged) {
+    const src = path.join(sandboxDir, file);
+    const dst = path.join(workspace, file);
+    if (fs.existsSync(src) && fs.statSync(src).isFile()) {
+      const dir = path.dirname(dst);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.copyFileSync(src, dst);
+    }
+  }
+  logger.info("evolver-runner: deployed sandbox changes to workspace", {
+    fileCount: filesChanged.length,
   });
-  return {
-    ok: result.status === 0,
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
-  };
 }
 
-function rollbackChanges(workspace: string, cleanEnabled: boolean): void {
-  spawnSync("git", ["restore", "--staged", "--worktree", "."], {
-    cwd: workspace,
-    encoding: "utf-8",
-  });
-  if (cleanEnabled) {
-    spawnSync("git", ["clean", "-fd"], {
-      cwd: workspace,
-      encoding: "utf-8",
+// ---------- Chat Notification ----------
+
+async function notifyUser(message: string): Promise<void> {
+  try {
+    const { callGateway } = await import("../gateway/call.js");
+    await callGateway({
+      method: "chat.inject",
+      params: {
+        sessionKey: "agent:main:main",
+        message,
+      },
+      timeoutMs: 10_000,
     });
+  } catch {
+    // Best-effort — gateway may not be running
+    logger.warn("evolver-runner: failed to notify user via chat.inject");
   }
-  logger.info("evolver-runner: rollback completed");
 }
 
 function appendErrorRecord(workspace: string, errorType: string, details: unknown): void {
@@ -361,10 +331,6 @@ function autoCommitChanges(workspace: string): void {
  */
 export async function runDaemonLoop(options: EvolverRunOptions): Promise<never> {
   const workspace = getWorkspaceRoot(options.workspace);
-  const verifyCmd =
-    options.verifyCmd ?? "npx tsc --noEmit && pnpm build && pnpm lint && pnpm vitest run";
-  const rollbackEnabled = options.rollbackEnabled ?? true;
-  const cleanEnabled = options.cleanEnabled ?? true;
   const reviewMode = options.review ?? false;
 
   const minSleepMs = parseMs(process.env.EVOLVER_MIN_SLEEP_MS, 2000);
@@ -385,7 +351,6 @@ export async function runDaemonLoop(options: EvolverRunOptions): Promise<never> 
 
   logger.info("evolver-runner: daemon loop started", {
     workspace,
-    verifyCmd,
     model: options.model || "(default)",
     agentDir: options.agentDir || "(none)",
   });
@@ -402,58 +367,108 @@ export async function runDaemonLoop(options: EvolverRunOptions): Promise<never> 
 
     const result = await runEvolutionCycle(options);
 
-    if (result.ok) {
-      // Sandbox agent already validated changes. Run a final verify on the real workspace as safety net.
-      const verify = runVerify(workspace, verifyCmd);
-      if (verify.ok) {
+    if (result.ok && (result.filesChanged ?? []).length > 0 && result.sandboxDir) {
+      // Run acceptance on the SANDBOX (not workspace) — changes haven't been deployed yet
+      const { runEvolverAcceptance } = await import("./acceptance.js");
+      const acceptance = await runEvolverAcceptance({
+        workspaceDir: result.sandboxDir,
+        filesChanged: result.filesChanged ?? [],
+        gepPrompt: result.gepPrompt,
+      });
+
+      logger.info("evolver-runner: acceptance result", {
+        passed: acceptance.passed,
+        confidence: acceptance.confidence,
+        verifyCmd: acceptance.verifyCmd,
+        verifyPassed: acceptance.verifyPassed,
+        reasoning: acceptance.reasoning?.slice(0, 200),
+      });
+
+      const filesList = (result.filesChanged ?? []).slice(0, 5).join(", ");
+      const filesNote =
+        (result.filesChanged ?? []).length > 5
+          ? ` (and ${(result.filesChanged ?? []).length - 5} more)`
+          : "";
+
+      if (acceptance.passed) {
         if (!reviewMode) {
+          // Deploy and commit immediately
+          deploySandboxToWorkspace(result.sandboxDir, workspace, result.filesChanged ?? []);
+          result.cleanupSandbox?.();
           autoCommitChanges(workspace);
+          await notifyUser(
+            `🧬 **Evolver cycle ${cycleCount} deployed** — ${(result.filesChanged ?? []).length} file(s) changed: ${filesList}${filesNote}\n` +
+              `Confidence: ${acceptance.confidence}% | ${acceptance.reasoning?.slice(0, 150) ?? ""}`,
+          );
         } else {
-          // Write pending review and wait for user decision
+          // Write pending review — keep sandbox alive until user decides
           const { writePendingReview, readPendingReview, clearPendingReview } =
             await import("./evolver-review.js");
           writePendingReview({
             createdAt: new Date().toISOString(),
             cycleId: `cycle_${cycleCount}`,
             filesChanged: result.filesChanged ?? [],
-            summary: `Evolution cycle ${cycleCount} completed. ${(result.filesChanged ?? []).length} file(s) changed.`,
+            summary: `Evolution cycle ${cycleCount} completed. ${(result.filesChanged ?? []).length} file(s) changed. Acceptance: ${acceptance.reasoning?.slice(0, 200) ?? "passed"}`,
           });
-          logger.info("evolver-runner: pending review written, waiting for user decision");
+
+          // Notify user and prompt for decision
+          await notifyUser(
+            `🧬 **Evolver cycle ${cycleCount} ready for review** — ${(result.filesChanged ?? []).length} file(s) changed: ${filesList}${filesNote}\n` +
+              `Confidence: ${acceptance.confidence}% | ${acceptance.reasoning?.slice(0, 150) ?? ""}\n\n` +
+              `To accept: \`/evolve approve\`\n` +
+              `To reject: \`/evolve reject\``,
+          );
 
           // Poll until user decides
+          let deployed = false;
           while (true) {
             await sleepMs(5000);
             const review = readPendingReview();
             if (!review || review.decision) {
               if (review?.decision === "approve") {
+                deploySandboxToWorkspace(result.sandboxDir, workspace, result.filesChanged ?? []);
                 autoCommitChanges(workspace);
-                logger.info("evolver-runner: review approved, changes committed");
+                deployed = true;
+                logger.info("evolver-runner: review approved, changes deployed");
               } else {
-                rollbackChanges(workspace, cleanEnabled);
-                logger.info("evolver-runner: review rejected, changes rolled back");
+                logger.info("evolver-runner: review rejected, sandbox discarded");
               }
               clearPendingReview();
               break;
             }
           }
+          result.cleanupSandbox?.();
+          if (!deployed) {
+            // Nothing was deployed — no action needed
+          }
         }
-      } else if (rollbackEnabled) {
-        // Sandbox passed but real workspace verify failed — rollback
-        rollbackChanges(workspace, cleanEnabled);
+      } else {
+        // Acceptance failed — discard sandbox, log error. Workspace is untouched.
+        result.cleanupSandbox?.();
         clearPendingSolidify(solidifyStatePath);
-        appendErrorRecord(workspace, "post_deploy_verify_failed", {
-          stdout: verify.stdout.slice(0, 2000),
-          stderr: verify.stderr.slice(0, 2000),
+        appendErrorRecord(workspace, "acceptance_failed", {
+          confidence: acceptance.confidence,
+          reasoning: acceptance.reasoning?.slice(0, 2000),
+          verifyCmd: acceptance.verifyCmd,
+          verifyPassed: acceptance.verifyPassed,
+          issues: acceptance.issues?.slice(0, 10),
         });
+        await notifyUser(
+          `🧬 **Evolver cycle ${cycleCount} rejected** — acceptance failed (confidence: ${acceptance.confidence}%)\n` +
+            `${acceptance.reasoning?.slice(0, 300) ?? "No details"}` +
+            (acceptance.issues?.length
+              ? `\nIssues: ${acceptance.issues.map((i) => `[${i.severity}] ${i.description}`).join("; ")}`
+              : ""),
+        );
       }
     } else {
-      // Cycle failed — clear pending solidify so daemon doesn't get stuck
-      if (rollbackEnabled) {
-        rollbackChanges(workspace, cleanEnabled);
-      }
-      clearPendingSolidify(solidifyStatePath);
-      if (result.error) {
-        appendErrorRecord(workspace, "run_failed", { error: result.error });
+      // Cycle failed or no changes — clean up sandbox if present
+      result.cleanupSandbox?.();
+      if (!result.ok) {
+        clearPendingSolidify(solidifyStatePath);
+        if (result.error) {
+          appendErrorRecord(workspace, "run_failed", { error: result.error });
+        }
       }
     }
 

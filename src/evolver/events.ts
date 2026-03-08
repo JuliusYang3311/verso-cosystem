@@ -21,7 +21,7 @@ export type EvolverEvent =
 
 export type EvolverStatus = {
   running: boolean;
-  mode?: "single" | "loop" | "solidify";
+  mode?: "single" | "loop";
   currentCycle?: number;
   totalCycles?: number;
   lastRunTime?: number;

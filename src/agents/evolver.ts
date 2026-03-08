@@ -30,9 +30,6 @@ const LOG_FILENAME = "evolver-daemon.log";
 const PID_FILENAME = "evolver-daemon.pid";
 const ROLLBACK_FILENAME = "evolver-daemon.rollback.json";
 
-/** Full verification command: typecheck + lint + build + test. */
-const VERIFY_CMD = "npx tsc --noEmit && pnpm lint && pnpm build && pnpm vitest run";
-
 function ensureLogsDir(): string {
   const stateDir = resolveStateDir();
   const logsDir = path.join(stateDir, "logs");
@@ -127,7 +124,6 @@ export async function startEvolverDaemon(opts?: EvolverDaemonOptions): Promise<E
       OPENCLAW_WORKSPACE: workspace,
       MEMORY_DIR: memoryDir,
       EVOLVER_REVIEW: review ? "true" : "false",
-      EVOLVER_VERIFY_CMD: VERIFY_CMD,
       EVOLVER_LOG_PATH: logPath,
       ...(modelSlug ? { EVOLVER_MODEL: modelSlug } : {}),
       EVOLVER_AGENT_DIR: agentDir,
