@@ -1,0 +1,131 @@
+{
+  "version": "1.0.0",
+  "factors": [
+    {
+      "id": "internal",
+      "description": "内部结构 机制 自身因素 原因 结构性问题 internal mechanism root cause",
+      "subqueryTemplate": "{entity} internal mechanism structure root cause",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "external",
+      "description": "宏观环境 外部经济 政策 市场环境 external environment macro economy",
+      "subqueryTemplate": "{entity} external environment macro market",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "trend",
+      "description": "长期趋势 发展方向 未来变化 历史演变 trend trajectory evolution forecast",
+      "subqueryTemplate": "{entity} trend trajectory future evolution",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "cost",
+      "description": "成本 价格 规模效应 效率 资源消耗 cost price efficiency scale",
+      "subqueryTemplate": "{entity} cost price efficiency scale economics",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "policy",
+      "description": "政策 法规 合规 监管 制度约束 policy regulation compliance governance",
+      "subqueryTemplate": "{entity} policy regulation compliance governance",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "technology",
+      "description": "技术 能力 创新 研发 工程实现 technology capability innovation engineering",
+      "subqueryTemplate": "{entity} technology capability innovation engineering",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "risk",
+      "description": "风险 不确定性 威胁 脆弱性 暴露 risk uncertainty threat vulnerability",
+      "subqueryTemplate": "{entity} risk uncertainty threat vulnerability",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "user_behavior",
+      "description": "用户 行为 需求 偏好 使用模式 user behavior demand preference adoption",
+      "subqueryTemplate": "{entity} user behavior demand preference adoption",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "time",
+      "description": "时间 节奏 周期 时序 紧迫性 timing cycle urgency cadence schedule",
+      "subqueryTemplate": "{entity} timing cycle urgency schedule",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "market_momentum",
+      "description": "市场情绪 动量 预期 信心 舆论 market sentiment momentum expectation confidence",
+      "subqueryTemplate": "{entity} market sentiment momentum expectation",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "regulatory",
+      "description": "合规 标准 认证 审计 治理 regulatory standard certification audit governance",
+      "subqueryTemplate": "{entity} regulatory standard certification audit",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "competition",
+      "description": "竞争者 竞争格局 市场份额 对手行为 competition competitor market share rivalry",
+      "subqueryTemplate": "{entity} competition competitor market share rivalry",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "causality",
+      "description": "因果关系 根因 连锁反应 影响路径 为什么 causality root cause chain effect why reason",
+      "subqueryTemplate": "{entity} causality root cause chain effect reason why",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "comparison",
+      "description": "对比 权衡 替代方案 差异 优劣 comparison tradeoff alternative difference versus",
+      "subqueryTemplate": "{entity} comparison tradeoff alternative difference versus",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "process",
+      "description": "流程 步骤 方法论 操作 实施 如何做 process steps methodology how-to implementation",
+      "subqueryTemplate": "{entity} process steps methodology how-to implementation",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "social",
+      "description": "社会影响 文化 舆论 群体行为 公众认知 social impact culture public opinion community",
+      "subqueryTemplate": "{entity} social impact culture public opinion community behavior",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "geography",
+      "description": "地域 区域差异 本地化 国家 城市 地缘 geography region local country city geopolitics",
+      "subqueryTemplate": "{entity} geography region local country geopolitics",
+      "vectors": {},
+      "weights": {}
+    },
+    {
+      "id": "data_evidence",
+      "description": "数据 证据 统计 研究结论 实证 指标 data evidence statistics research empirical metrics",
+      "subqueryTemplate": "{entity} data evidence statistics research empirical metrics",
+      "vectors": {},
+      "weights": {}
+    }
+  ]
+}

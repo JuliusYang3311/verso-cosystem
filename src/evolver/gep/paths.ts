@@ -6,13 +6,37 @@ export function getEvolverRoot(): string {
   return path.resolve(import.meta.dirname, "..");
 }
 
+/**
+ * Resolve the workspace root directory.
+ *
+ * Priority:
+ * 1. VERSO_WORKSPACE / OPENCLAW_WORKSPACE env var
+ * 2. agents.defaults.workspace from ~/.verso/verso.json (Settings UI)
+ * 3. Default ~/.verso/workspace
+ */
 export function getWorkspaceRoot(): string {
   const fromEnv = process.env.VERSO_WORKSPACE || process.env.OPENCLAW_WORKSPACE;
   if (fromEnv) {
     return fromEnv;
   }
-  // Fallback to default workspace dir (~/.verso/workspace) instead of
-  // import.meta.dirname which won't exist for packaged (DMG) installs.
+
+  // Read workspace from config — avoids import of config/io.js (no circular deps).
+  try {
+    const configPath = path.join(os.homedir(), ".verso", "verso.json");
+    if (fs.existsSync(configPath)) {
+      const raw = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, any>;
+      const configured: string | undefined = raw?.agents?.defaults?.workspace?.trim();
+      if (configured) {
+        const resolved = configured.startsWith("~")
+          ? path.join(os.homedir(), configured.slice(1))
+          : configured;
+        return path.resolve(resolved);
+      }
+    }
+  } catch {
+    // Config not available (e.g. during build) — fall through to default.
+  }
+
   return path.join(os.homedir(), ".verso", "workspace");
 }
 
