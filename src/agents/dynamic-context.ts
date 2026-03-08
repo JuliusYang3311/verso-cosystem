@@ -12,17 +12,12 @@ import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { estimateTokens } from "@mariozechner/pi-coding-agent";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   applyDiversityPipeline,
   deduplicateChunks,
   mmrSelectChunks,
   type DiverseChunk,
 } from "../memory/chunk-diversity.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------- Type definitions ----------
 
@@ -126,44 +121,16 @@ export const DEFAULT_CONTEXT_PARAMS: ContextParams = {
  * Falls back to DEFAULT_CONTEXT_PARAMS if file doesn't exist or fails to load.
  */
 export async function loadContextParams(): Promise<ContextParams> {
-  // Prefer workspace copy (writable, evolver-optimized)
-  const workspaceRoot =
-    process.env.VERSO_WORKSPACE || path.join(os.homedir(), ".verso", "workspace");
-  const workspacePath = path.join(workspaceRoot, "evolver", "assets", "context_params.json");
-
-  // If workspace copy exists, read directly
-  if (fsSync.existsSync(workspacePath)) {
-    try {
-      const content = await fs.readFile(workspacePath, "utf-8");
-      const parsed = JSON.parse(content) as Partial<ContextParams>;
-      return { ...DEFAULT_CONTEXT_PARAMS, ...parsed };
-    } catch {
-      // fall through to bundled seed
+  try {
+    const { getContextParamsPath } = await import("../evolver/gep/paths.js");
+    const filePath = getContextParamsPath();
+    if (fsSync.existsSync(filePath)) {
+      const content = await fs.readFile(filePath, "utf-8");
+      return { ...DEFAULT_CONTEXT_PARAMS, ...(JSON.parse(content) as Partial<ContextParams>) };
     }
+  } catch {
+    // fall through to defaults
   }
-
-  // Workspace copy missing — find bundled default, seed to workspace, then read
-  const bundledCandidates = [
-    path.resolve(__dirname, "../evolver/assets/context_params.json"),
-    path.resolve(__dirname, "evolver/assets/context_params.json"),
-    path.resolve(__dirname, "../../evolver/assets/context_params.json"),
-    path.resolve(__dirname, "../assets/context_params.json"),
-  ];
-  for (const candidate of bundledCandidates) {
-    if (fsSync.existsSync(candidate)) {
-      try {
-        fsSync.mkdirSync(path.dirname(workspacePath), { recursive: true });
-        fsSync.copyFileSync(candidate, workspacePath);
-        const content = await fs.readFile(workspacePath, "utf-8");
-        const parsed = JSON.parse(content) as Partial<ContextParams>;
-        return { ...DEFAULT_CONTEXT_PARAMS, ...parsed };
-      } catch {
-        continue;
-      }
-    }
-  }
-
-  // Fall back to defaults if file doesn't exist or parsing fails
   return DEFAULT_CONTEXT_PARAMS;
 }
 

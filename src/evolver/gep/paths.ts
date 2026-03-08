@@ -29,84 +29,119 @@ export function getEvolutionDir(): string {
   return process.env.EVOLUTION_DIR || path.join(getMemoryDir(), "evolution");
 }
 
+// ---------------------------------------------------------------------------
+// Bundled-to-workspace seed helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the bundled evolver assets directory containing `sentinel` file.
+ * Returns the path or undefined if not found.
+ */
+function findBundledAssetsDir(sentinel: string, subdir?: string): string | undefined {
+  const evolverRoot = getEvolverRoot();
+  const suffix = subdir ? path.join(subdir) : "";
+  const candidates = [
+    path.join(evolverRoot, "assets", suffix),
+    path.join(evolverRoot, "evolver", "assets", suffix),
+    path.join(evolverRoot, "..", "evolver", "assets", suffix),
+    path.join(evolverRoot, "..", "..", "evolver", "assets", suffix),
+    path.join(evolverRoot, "..", "assets", suffix),
+    path.join(import.meta.dirname, "..", "assets", suffix),
+    path.join(import.meta.dirname, "..", "..", "assets", suffix),
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, sentinel))) {
+      return dir;
+    }
+  }
+  return undefined;
+}
+
+/** Copy missing files from `srcDir` into `destDir`. Existing files are not overwritten. */
+function seedMissing(srcDir: string, destDir: string): void {
+  fs.mkdirSync(destDir, { recursive: true });
+  for (const file of fs.readdirSync(srcDir)) {
+    const srcFile = path.join(srcDir, file);
+    const dstFile = path.join(destDir, file);
+    if (fs.statSync(srcFile).isFile() && !fs.existsSync(dstFile)) {
+      fs.copyFileSync(srcFile, dstFile);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Evolver shared assets — context_params.json, factor-space.json
+// ---------------------------------------------------------------------------
+
+let _evolverAssetsDirCache: string | undefined;
+
 /**
  * Evolver assets dir: workspace/evolver/assets/
  * Contains context_params.json and factor-space.json (shared tunable params).
- * Separate from GEP-specific assets (capsules, genes, etc.).
+ * Seeds missing files from bundled dist on first access.
  */
 export function getEvolverAssetsDir(): string {
   if (process.env.EVOLVER_ASSETS_DIR) {
     return process.env.EVOLVER_ASSETS_DIR;
   }
+  if (_evolverAssetsDirCache) return _evolverAssetsDirCache;
 
   const workspaceDir = path.join(getWorkspaceRoot(), "evolver", "assets");
+  const bundled = findBundledAssetsDir("context_params.json");
+  if (bundled) seedMissing(bundled, workspaceDir);
 
-  // Sync bundled assets to workspace — seed missing files on every startup
-  const evolverRoot = getEvolverRoot();
-  const candidates = [
-    path.join(evolverRoot, "assets"),
-    path.join(evolverRoot, "evolver", "assets"),
-    path.join(evolverRoot, "..", "evolver", "assets"),
-    path.join(evolverRoot, "..", "..", "evolver", "assets"),
-    path.join(evolverRoot, "..", "assets"),
-    path.join(import.meta.dirname, "..", "assets"),
-    path.join(import.meta.dirname, "..", "..", "assets"),
-  ];
-  for (const src of candidates) {
-    if (fs.existsSync(path.join(src, "context_params.json"))) {
-      fs.mkdirSync(workspaceDir, { recursive: true });
-      for (const file of fs.readdirSync(src)) {
-        const srcFile = path.join(src, file);
-        const dstFile = path.join(workspaceDir, file);
-        if (fs.statSync(srcFile).isFile() && !fs.existsSync(dstFile)) {
-          fs.copyFileSync(srcFile, dstFile);
-        }
-      }
-      break;
-    }
-  }
-
+  _evolverAssetsDirCache = workspaceDir;
   return workspaceDir;
 }
+
+// ---------------------------------------------------------------------------
+// GEP-specific assets — capsules.json, genes.json, etc.
+// ---------------------------------------------------------------------------
+
+let _gepAssetsDirCache: string | undefined;
 
 /**
  * GEP-specific assets dir: workspace/evolver/assets/gep/
  * Contains capsules.json, genes.json, candidates.jsonl, events.jsonl, feedback.jsonl.
+ * Seeds missing files from bundled dist on first access.
  */
 export function getGepAssetsDir(): string {
   if (process.env.GEP_ASSETS_DIR) {
     return process.env.GEP_ASSETS_DIR;
   }
+  if (_gepAssetsDirCache) return _gepAssetsDirCache;
 
   const workspaceDir = path.join(getWorkspaceRoot(), "evolver", "assets", "gep");
+  const bundled = findBundledAssetsDir("capsules.json", "gep");
+  if (bundled) seedMissing(bundled, workspaceDir);
 
-  // Sync bundled GEP assets to workspace
-  const evolverRoot = getEvolverRoot();
-  const candidates = [
-    path.join(evolverRoot, "assets", "gep"),
-    path.join(evolverRoot, "evolver", "assets", "gep"),
-    path.join(evolverRoot, "..", "evolver", "assets", "gep"),
-    path.join(evolverRoot, "..", "..", "evolver", "assets", "gep"),
-    path.join(evolverRoot, "..", "assets", "gep"),
-    path.join(import.meta.dirname, "assets", "gep"),
-    path.join(import.meta.dirname, "..", "assets", "gep"),
-  ];
-  for (const src of candidates) {
-    if (fs.existsSync(path.join(src, "capsules.json"))) {
-      fs.mkdirSync(workspaceDir, { recursive: true });
-      for (const file of fs.readdirSync(src)) {
-        const srcFile = path.join(src, file);
-        const dstFile = path.join(workspaceDir, file);
-        if (fs.statSync(srcFile).isFile() && !fs.existsSync(dstFile)) {
-          fs.copyFileSync(srcFile, dstFile);
-        }
-      }
-      break;
-    }
-  }
-
+  _gepAssetsDirCache = workspaceDir;
   return workspaceDir;
 }
+
+// ---------------------------------------------------------------------------
+// Convenience accessors — single-file paths with lazy seed
+// ---------------------------------------------------------------------------
+
+/**
+ * Path to context_params.json in workspace.
+ * Triggers seed from bundled assets on first call if missing.
+ */
+export function getContextParamsPath(): string {
+  return path.join(getEvolverAssetsDir(), "context_params.json");
+}
+
+/**
+ * Path to factor-space.json in workspace.
+ * Triggers seed from bundled assets on first call if missing.
+ */
+export function getFactorSpacePath(): string {
+  return path.join(getEvolverAssetsDir(), "factor-space.json");
+}
+
+// ---------------------------------------------------------------------------
+// Other workspace dirs
+// ---------------------------------------------------------------------------
 
 export function getSkillsDir(): string {
   return path.join(getWorkspaceRoot(), "skills");

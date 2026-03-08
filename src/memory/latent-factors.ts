@@ -52,11 +52,8 @@
 
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { getFactorSpacePath as _getFactorSpacePath } from "../evolver/gep/paths.js";
 
 /** Override in tests via LATENT_FACTOR_SPACE_PATH to avoid polluting production data. */
 function factorSpacePath(): string {
@@ -64,44 +61,17 @@ function factorSpacePath(): string {
     return process.env.LATENT_FACTOR_SPACE_PATH;
   }
 
-  // Shared evolver assets live under workspace/evolver/assets/
-  const workspaceRoot =
-    process.env.VERSO_WORKSPACE || path.join(os.homedir(), ".verso", "workspace");
-  const assetsDir = path.join(workspaceRoot, "evolver", "assets");
-  const workspacePath = path.join(assetsDir, "factor-space.json");
-  if (fsSync.existsSync(workspacePath)) {
-    return workspacePath;
-  }
+  const workspacePath = _getFactorSpacePath();
 
   // Migrate from old location (evolver/assets/gep/factor-space.json → evolver/assets/)
-  const oldPath = path.join(assetsDir, "gep", "factor-space.json");
-  if (fsSync.existsSync(oldPath)) {
-    fsSync.mkdirSync(assetsDir, { recursive: true });
-    fsSync.renameSync(oldPath, workspacePath);
-    return workspacePath;
-  }
-
-  // Seed from bundled dist into workspace.
-  // Bundled copy lives at dist/evolver/assets/factor-space.json.
-  // __dirname varies depending on which chunk inlines this module.
-  const candidates = [
-    path.resolve(__dirname, "factor-space.json"),
-    path.resolve(__dirname, "evolver", "assets", "factor-space.json"),
-    path.resolve(__dirname, "..", "evolver", "assets", "factor-space.json"),
-    path.resolve(__dirname, "..", "..", "evolver", "assets", "factor-space.json"),
-    path.resolve(__dirname, "assets", "factor-space.json"),
-    path.resolve(__dirname, "..", "assets", "factor-space.json"),
-  ];
-  for (const candidate of candidates) {
-    if (fsSync.existsSync(candidate)) {
-      fsSync.mkdirSync(assetsDir, { recursive: true });
-      fsSync.copyFileSync(candidate, workspacePath);
-      return workspacePath;
+  if (!fsSync.existsSync(workspacePath)) {
+    const oldPath = path.join(path.dirname(workspacePath), "gep", "factor-space.json");
+    if (fsSync.existsSync(oldPath)) {
+      fsSync.mkdirSync(path.dirname(workspacePath), { recursive: true });
+      fsSync.renameSync(oldPath, workspacePath);
     }
   }
 
-  // Even if bundled seed is missing, always return workspace path.
-  fsSync.mkdirSync(assetsDir, { recursive: true });
   return workspacePath;
 }
 

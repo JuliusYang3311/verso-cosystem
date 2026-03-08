@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ContextParams } from "../agents/dynamic-context.js";
 import type { ResolvedMemorySearchConfig } from "../agents/memory-search.js";
 import type { VersoConfig } from "../config/config.js";
@@ -336,42 +335,12 @@ export class MemoryIndexManager implements MemorySearchManager {
 
   private async loadContextParams(): Promise<Partial<ContextParams>> {
     try {
-      const thisDir = path.dirname(fileURLToPath(import.meta.url));
-      const homedir = await import("node:os").then((m) => m.homedir());
-      const workspaceRoot =
-        process.env.VERSO_WORKSPACE || path.join(homedir, ".verso", "workspace");
-      const workspacePath = path.join(workspaceRoot, "evolver", "assets", "context_params.json");
-
-      // Prefer workspace copy (writable, evolver-optimized)
-      if (fsSync.existsSync(workspacePath)) {
-        try {
-          const content = await fs.readFile(workspacePath, "utf-8");
-          return JSON.parse(content) as Partial<ContextParams>;
-        } catch {
-          // fall through to bundled seed
-        }
+      const { getContextParamsPath } = await import("../evolver/gep/paths.js");
+      const filePath = getContextParamsPath();
+      if (fsSync.existsSync(filePath)) {
+        const content = await fs.readFile(filePath, "utf-8");
+        return JSON.parse(content) as Partial<ContextParams>;
       }
-
-      // Workspace copy missing — find bundled default, seed to workspace, then read
-      const bundledCandidates = [
-        path.resolve(thisDir, "../evolver/assets/context_params.json"),
-        path.resolve(thisDir, "evolver/assets/context_params.json"),
-        path.resolve(thisDir, "../../evolver/assets/context_params.json"),
-        path.resolve(thisDir, "../assets/context_params.json"),
-      ];
-      for (const candidate of bundledCandidates) {
-        if (fsSync.existsSync(candidate)) {
-          try {
-            fsSync.mkdirSync(path.dirname(workspacePath), { recursive: true });
-            fsSync.copyFileSync(candidate, workspacePath);
-            const content = await fs.readFile(workspacePath, "utf-8");
-            return JSON.parse(content) as Partial<ContextParams>;
-          } catch {
-            continue;
-          }
-        }
-      }
-
       return {};
     } catch {
       return {};
