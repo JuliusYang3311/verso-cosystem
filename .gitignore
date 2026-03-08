@@ -64,8 +64,10 @@ ui/src/ui/__screenshots__/
 ui/playwright-report/
 ui/test-results/
 
-# Apps (native clients — Android, iOS, macOS, Electron)
-apps/
+# Electron build artifacts
+apps/electron/dist/
+apps/electron/build-resources/
+apps/electron/node_modules/
 
 # Vendor build artifacts
 vendor/
