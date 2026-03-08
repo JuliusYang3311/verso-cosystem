@@ -318,7 +318,7 @@ function credentialMode(credential: AuthProfileCredential): "api_key" | "oauth" 
 }
 
 export async function modelsAuthLoginCommand(opts: LoginOptions, runtime: RuntimeEnv) {
-  if (!process.stdin.isTTY && process.env.VERSO_EMBEDDED !== "true") {
+  if (!process.stdin.isTTY) {
     throw new Error("models auth login requires an interactive TTY.");
   }
 
