@@ -30,8 +30,36 @@ export function getEvolutionDir(): string {
 }
 
 export function getGepAssetsDir(): string {
-  const evolverRoot = getEvolverRoot();
-  return process.env.GEP_ASSETS_DIR || path.join(evolverRoot, "assets", "gep");
+  if (process.env.GEP_ASSETS_DIR) {
+    return process.env.GEP_ASSETS_DIR;
+  }
+
+  // Prefer workspace copy (writable, persists across updates)
+  const workspaceDir = path.join(getWorkspaceRoot(), "evolver", "assets", "gep");
+
+  // If workspace copy doesn't exist, seed it from bundled dist
+  if (!fs.existsSync(path.join(workspaceDir, "context_params.json"))) {
+    const evolverRoot = getEvolverRoot();
+    const candidates = [
+      path.join(evolverRoot, "assets", "gep"),
+      path.join(evolverRoot, "..", "evolver", "assets", "gep"),
+    ];
+    for (const src of candidates) {
+      if (fs.existsSync(path.join(src, "context_params.json"))) {
+        fs.mkdirSync(workspaceDir, { recursive: true });
+        for (const file of fs.readdirSync(src)) {
+          const srcFile = path.join(src, file);
+          const dstFile = path.join(workspaceDir, file);
+          if (fs.statSync(srcFile).isFile() && !fs.existsSync(dstFile)) {
+            fs.copyFileSync(srcFile, dstFile);
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  return workspaceDir;
 }
 
 export function getSkillsDir(): string {

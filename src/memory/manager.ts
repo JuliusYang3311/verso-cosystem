@@ -337,8 +337,12 @@ export class MemoryIndexManager implements MemorySearchManager {
   private async loadContextParams(): Promise<Partial<ContextParams>> {
     try {
       const thisDir = path.dirname(fileURLToPath(import.meta.url));
-      // Handle both unbundled (dist/memory/) and bundled (dist/) layouts
+      const homedir = await import("node:os").then((m) => m.homedir());
+      const workspaceRoot =
+        process.env.VERSO_WORKSPACE || path.join(homedir, ".verso", "workspace");
+      // Prefer workspace copy (writable, evolver-optimized), then bundled defaults
       const candidates = [
+        path.join(workspaceRoot, "evolver", "assets", "gep", "context_params.json"),
         path.resolve(thisDir, "../evolver/assets/gep/context_params.json"),
         path.resolve(thisDir, "evolver/assets/gep/context_params.json"),
       ];

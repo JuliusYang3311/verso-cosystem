@@ -11,6 +11,7 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { estimateTokens } from "@mariozechner/pi-coding-agent";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -124,8 +125,11 @@ export const DEFAULT_CONTEXT_PARAMS: ContextParams = {
  * Falls back to DEFAULT_CONTEXT_PARAMS if file doesn't exist or fails to load.
  */
 export async function loadContextParams(): Promise<ContextParams> {
-  // Handle both unbundled (dist/agents/) and bundled (dist/) layouts
+  // Prefer workspace copy (writable, evolver-optimized), then bundled defaults
+  const workspaceRoot =
+    process.env.VERSO_WORKSPACE || path.join(os.homedir(), ".verso", "workspace");
   const candidates = [
+    path.join(workspaceRoot, "evolver", "assets", "gep", "context_params.json"),
     path.resolve(__dirname, "../evolver/assets/gep/context_params.json"),
     path.resolve(__dirname, "evolver/assets/gep/context_params.json"),
   ];

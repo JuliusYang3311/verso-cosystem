@@ -52,6 +52,7 @@
 
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -62,11 +63,31 @@ function factorSpacePath(): string {
   if (process.env.LATENT_FACTOR_SPACE_PATH) {
     return process.env.LATENT_FACTOR_SPACE_PATH;
   }
-  // Unbundled: __dirname = dist/memory/; bundled: __dirname = dist/
-  // Try sibling first, then memory/ subdirectory as fallback for bundled builds.
-  const sibling = path.resolve(__dirname, "factor-space.json");
-  const subdir = path.resolve(__dirname, "memory", "factor-space.json");
-  return fsSync.existsSync(sibling) ? sibling : subdir;
+
+  // Prefer workspace copy (writable, evolver can optimize it)
+  const workspaceRoot =
+    process.env.VERSO_WORKSPACE || path.join(os.homedir(), ".verso", "workspace");
+  const workspacePath = path.join(workspaceRoot, "evolver", "assets", "factor-space.json");
+  if (fsSync.existsSync(workspacePath)) {
+    return workspacePath;
+  }
+
+  // Find bundled default and seed into workspace
+  const candidates = [
+    path.resolve(__dirname, "factor-space.json"),
+    path.resolve(__dirname, "memory", "factor-space.json"),
+  ];
+  for (const candidate of candidates) {
+    if (fsSync.existsSync(candidate)) {
+      const dir = path.dirname(workspacePath);
+      fsSync.mkdirSync(dir, { recursive: true });
+      fsSync.copyFileSync(candidate, workspacePath);
+      return workspacePath;
+    }
+  }
+
+  // Last resort: return the bundled path even if missing
+  return candidates[0]!;
 }
 
 // ---------- Types ----------
