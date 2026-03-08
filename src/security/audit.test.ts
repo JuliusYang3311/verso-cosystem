@@ -233,7 +233,7 @@ describe("security audit", () => {
     const finding = res.findings.find((f) => f.checkId === "models.small_params");
     expect(finding?.severity).toBe("critical");
     expect(finding?.detail).toContain("mistral-8b");
-    expect(finding?.detail).toContain("web_search");
+    expect(finding?.detail).toContain("brave_search");
     expect(finding?.detail).toContain("web_fetch");
     expect(finding?.detail).toContain("browser");
   });
