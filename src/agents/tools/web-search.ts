@@ -264,8 +264,8 @@ async function runBraveSubquery(params: {
     }
     return {
       url: entryUrl,
-      title: entry.title ? wrapWebContent(entry.title, "brave_search") : "",
-      description: entry.description ? wrapWebContent(entry.description, "brave_search") : "",
+      title: entry.title ? wrapWebContent(entry.title, "web_search") : "",
+      description: entry.description ? wrapWebContent(entry.description, "web_search") : "",
       published: entry.age || undefined,
       siteName,
       factorId: params.factorId,
@@ -613,7 +613,7 @@ export function createWebSearchTool(options?: {
 
   return {
     label: "Web Search",
-    name: "brave_search",
+    name: "web_search",
     description:
       "Search the web using Brave Search. Decomposes the query into semantically diverse sub-queries via the latent factor space, runs them in parallel, deduplicates by URL, and applies MMR diversity selection. Returns a compact, diverse result set covering multiple information dimensions.",
     parameters: WebSearchSchema,
@@ -621,7 +621,7 @@ export function createWebSearchTool(options?: {
       if (!apiKey) {
         return jsonResult({
           error: "missing_brave_api_key",
-          message: `brave_search needs a Brave Search API key. Run \`${formatCliCommand("verso configure --section web")}\` to store it, or set BRAVE_API_KEY in the Gateway environment.`,
+          message: `web_search needs a Brave Search API key. Run \`${formatCliCommand("verso configure --section web")}\` to store it, or set BRAVE_API_KEY in the Gateway environment.`,
           docs: "https://docs.verso.ai/tools/web",
         });
       }

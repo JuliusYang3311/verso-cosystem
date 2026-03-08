@@ -286,7 +286,7 @@
       "title": "Memory Get",
       "detailKeys": ["path", "from", "lines"]
     },
-    "brave_search": {
+    "web_search": {
       "emoji": "🔎",
       "title": "Web Search",
       "detailKeys": ["query", "count"]

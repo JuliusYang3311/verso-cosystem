@@ -15,9 +15,9 @@ describe("web tools defaults", () => {
     expect(tool).toBeNull();
   });
 
-  it("enables brave_search by default", () => {
+  it("enables web_search by default", () => {
     const tool = createWebSearchTool({ config: {}, sandboxed: false });
-    expect(tool?.name).toBe("brave_search");
+    expect(tool?.name).toBe("web_search");
   });
 });
 

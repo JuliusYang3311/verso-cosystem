@@ -216,7 +216,7 @@ export function buildAgentSystemPrompt(params: {
     ls: "List directory contents",
     exec: "Run shell commands (pty available for TTY-required CLIs)",
     process: "Manage background exec sessions",
-    brave_search:
+    web_search:
       "Search the web via Brave Search — use for current events, news, stock prices, or any query needing fresh/live data; prefer over web_fetch for discovery tasks",
     web_fetch: "Fetch and extract readable content from a URL",
     // Channel docking: add login tools here when a channel needs interactive linking.
@@ -248,7 +248,7 @@ export function buildAgentSystemPrompt(params: {
     "ls",
     "exec",
     "process",
-    "brave_search",
+    "web_search",
     "web_fetch",
     "browser",
     "canvas",
@@ -435,8 +435,8 @@ export function buildAgentSystemPrompt(params: {
     "Use plain human language for narration unless in a technical context.",
     "",
     "CRITICAL: ALWAYS use the function calling API to invoke tools. NEVER describe tool calls as text.",
-    "Bad: 'I'm using brave_search to find...' or '[tool: brave_search, args: {...}]'",
-    "Good: Actually call the brave_search tool via the function calling interface.",
+    "Bad: 'I'm using web_search to find...' or '[tool: web_search, args: {...}]'",
+    "Good: Actually call the web_search tool via the function calling interface.",
     "If you want to use a tool, CALL IT — do not write about calling it.",
     "",
     "## Verso CLI Quick Reference",

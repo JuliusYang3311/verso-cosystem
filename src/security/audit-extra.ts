@@ -536,8 +536,8 @@ export function collectSmallModelRiskFindings(params: {
     });
     const exposed: string[] = [];
     if (isWebSearchEnabled(params.cfg, params.env)) {
-      if (isToolAllowedByPolicies("brave_search", policies)) {
-        exposed.push("brave_search");
+      if (isToolAllowedByPolicies("web_search", policies)) {
+        exposed.push("web_search");
       }
     }
     if (isWebFetchEnabled(params.cfg)) {
