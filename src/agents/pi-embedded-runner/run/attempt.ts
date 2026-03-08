@@ -606,11 +606,16 @@ export async function runEmbeddedAttempt(
             let retrievedChunks: Parameters<typeof buildDynamicContext>[0]["retrievedChunks"] = [];
             if (searchQuery) {
               try {
-                const { manager } = await getMemorySearchManager({
+                const { manager, error: managerError } = await getMemorySearchManager({
                   cfg: params.config ?? {},
                   agentId: sessionAgentId,
                 });
-                if (manager) {
+                if (!manager) {
+                  log.warn(
+                    `memory manager unavailable: runId=${params.runId} agentId=${sessionAgentId} ` +
+                      `error=${managerError ?? "resolved config returned null (disabled or no provider)"}`,
+                  );
+                } else {
                   const searchResults = await manager.search(searchQuery, {
                     maxResults: 20,
                     sessionKey: params.sessionKey,
@@ -628,7 +633,7 @@ export async function runEmbeddedAttempt(
                   }));
                 }
               } catch (retrievalErr) {
-                log.debug(`memory retrieval failed (non-fatal): ${String(retrievalErr)}`);
+                log.warn(`memory retrieval failed (non-fatal): ${String(retrievalErr)}`);
               }
             }
 
