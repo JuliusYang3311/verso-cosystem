@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { VersoConfig } from "../../config/config.js";
 import type { AnyAgentTool } from "./common.js";
 import { formatCliCommand } from "../../cli/command-format.js";
+import { emitFactorHit, emitFactorMiss } from "../../evolver/dimension-hooks.js";
 import {
   loadFactorSpace,
   queryToSubqueries,
@@ -492,8 +493,28 @@ async function runWebSearch(params: {
     const r = subResults[i];
     if (r.status === "fulfilled") {
       allRaw.push(...r.value);
+      // Emit hit signal: factor produced results
+      if (r.value.length > 0 && subqueries[i].factorId !== "direct") {
+        const avgScore = r.value.reduce((s, v) => s + v.score, 0) / r.value.length;
+        emitFactorHit(
+          subqueries[i].factorId,
+          params.query.slice(0, 80),
+          avgScore,
+          WEB_PROVIDER_MODEL,
+          "web",
+        );
+      }
     } else {
       factorErrors.push(`${subqueries[i].factorId}: ${String(r.reason)}`);
+    }
+  }
+  // Emit miss signals for factors that returned zero results
+  for (let i = 0; i < subResults.length; i++) {
+    const r = subResults[i];
+    const fid = subqueries[i].factorId;
+    if (fid === "direct") continue;
+    if (r.status === "fulfilled" && r.value.length === 0) {
+      emitFactorMiss(fid, params.query.slice(0, 80), WEB_PROVIDER_MODEL, "web");
     }
   }
 

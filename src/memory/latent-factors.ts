@@ -64,34 +64,44 @@ function factorSpacePath(): string {
     return process.env.LATENT_FACTOR_SPACE_PATH;
   }
 
-  // Always resolve to workspace — this is the single source of truth for
-  // reads AND writes. The bundled dist copy is only used as a seed source.
+  // All GEP assets live under workspace/evolver/assets/gep/
   const workspaceRoot =
     process.env.VERSO_WORKSPACE || path.join(os.homedir(), ".verso", "workspace");
-  const workspacePath = path.join(workspaceRoot, "evolver", "assets", "factor-space.json");
+  const gepDir = path.join(workspaceRoot, "evolver", "assets", "gep");
+  const workspacePath = path.join(gepDir, "factor-space.json");
   if (fsSync.existsSync(workspacePath)) {
     return workspacePath;
   }
 
+  // Migrate from old location (evolver/assets/factor-space.json → gep/)
+  const oldPath = path.join(workspaceRoot, "evolver", "assets", "factor-space.json");
+  if (fsSync.existsSync(oldPath)) {
+    fsSync.mkdirSync(gepDir, { recursive: true });
+    fsSync.renameSync(oldPath, workspacePath);
+    return workspacePath;
+  }
+
   // Seed from bundled dist into workspace.
-  // Bundler may place this chunk in dist/evolver/ or dist/memory/ — walk up to dist root.
+  // Bundled copy lives at dist/evolver/assets/gep/factor-space.json.
+  // __dirname varies depending on which chunk inlines this module.
   const candidates = [
     path.resolve(__dirname, "factor-space.json"),
-    path.resolve(__dirname, "memory", "factor-space.json"),
-    path.resolve(__dirname, "..", "memory", "factor-space.json"),
-    path.resolve(__dirname, "..", "..", "memory", "factor-space.json"),
+    path.resolve(__dirname, "evolver", "assets", "gep", "factor-space.json"),
+    path.resolve(__dirname, "..", "evolver", "assets", "gep", "factor-space.json"),
+    path.resolve(__dirname, "..", "..", "evolver", "assets", "gep", "factor-space.json"),
+    path.resolve(__dirname, "assets", "gep", "factor-space.json"),
+    path.resolve(__dirname, "..", "assets", "gep", "factor-space.json"),
   ];
   for (const candidate of candidates) {
     if (fsSync.existsSync(candidate)) {
-      fsSync.mkdirSync(path.dirname(workspacePath), { recursive: true });
+      fsSync.mkdirSync(gepDir, { recursive: true });
       fsSync.copyFileSync(candidate, workspacePath);
       return workspacePath;
     }
   }
 
   // Even if bundled seed is missing, always return workspace path.
-  // saveFactorSpace will create the directory and write a fresh file here.
-  fsSync.mkdirSync(path.dirname(workspacePath), { recursive: true });
+  fsSync.mkdirSync(gepDir, { recursive: true });
   return workspacePath;
 }
 

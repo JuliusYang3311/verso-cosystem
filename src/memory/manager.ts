@@ -516,10 +516,12 @@ export class MemoryIndexManager implements MemorySearchManager {
 
         // Merge: deduplicate by (path, startLine), keep highest score per chunk
         const chunkMap = new Map<string, SearchRowResult>();
-        for (const result of allResults) {
-          if (result.status !== "fulfilled") {
-            continue;
-          }
+        const factorResultCounts = new Map<string, number>();
+        for (let ri = 0; ri < allResults.length; ri++) {
+          const result = allResults[ri];
+          if (result.status !== "fulfilled") continue;
+          const fid = searchInputs[ri].factorId;
+          factorResultCounts.set(fid, (factorResultCounts.get(fid) ?? 0) + result.value.length);
           for (const row of result.value) {
             const key = `${row.path}:${row.startLine}`;
             const existing = chunkMap.get(key);
@@ -529,6 +531,30 @@ export class MemoryIndexManager implements MemorySearchManager {
           }
         }
         const results = [...chunkMap.values()].toSorted((a, b) => b.score - a.score);
+
+        // Emit factor hit/miss signals for online weight learning
+        try {
+          const { emitFactorHit, emitFactorMiss } = await import("../evolver/dimension-hooks.js");
+          for (const input of searchInputs) {
+            if (input.factorId === "_primary") continue;
+            const count = factorResultCounts.get(input.factorId) ?? 0;
+            if (count > 0) {
+              const avgScore =
+                results.length > 0 ? results.reduce((s, r) => s + r.score, 0) / results.length : 0;
+              emitFactorHit(
+                input.factorId,
+                cleaned.slice(0, 80),
+                avgScore,
+                this.provider.model,
+                "memory",
+              );
+            } else {
+              emitFactorMiss(input.factorId, cleaned.slice(0, 80), this.provider.model, "memory");
+            }
+          }
+        } catch {
+          // dimension-hooks not available — skip signal emission
+        }
 
         // Apply keyword boost if hybrid enabled
         if (hybrid.enabled) {

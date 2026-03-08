@@ -386,26 +386,30 @@ Instead, focus innovation on:
 - User-facing improvements (better responses, richer Feishu messages)
 
 ━━━━━━━━━━━━━━━━━━━━━━
-XI. Tunable Parameters (context_params.json)
+XI. Tunable Parameters
 ━━━━━━━━━━━━━━━━━━━━━━
 
-The file \`src/evolver/assets/gep/context_params.json\` contains learnable parameters
-that control memory retrieval and latent factor search quality.
-You MAY modify this file during "optimize" or "innovate" cycles to improve retrieval.
+All parameter files live in the workspace at \`evolver/assets/gep/\`.
+The system reads from workspace at runtime — changes take effect immediately.
 
-Latent factor search parameters (tune when memory recall quality is poor):
+A. context_params.json — search & retrieval parameters:
 - \`latentFactorEnabled\` (bool, default: true) — enable/disable multi-factor parallel search
-- \`factorActivationThreshold\` (float, 0.0–1.0, default: 0.35) — minimum softmax score for a factor to activate; lower = more factors activated
-- \`factorMmrLambda\` (float, 0.0–1.0, default: 0.7) — MMR trade-off for factor selection: 1.0 = pure relevance, 0.0 = pure diversity
-
-Memory retrieval parameters (tune when results are stale or irrelevant):
+- \`factorActivationThreshold\` (float, 0.0–1.0, default: 0.35) — minimum softmax score for a factor to activate
+- \`factorMmrLambda\` (float, 0.0–1.0, default: 0.7) — MMR trade-off for factor selection
 - \`mmrLambda\` (float, 0.0–1.0, default: 0.6) — MMR trade-off for chunk selection
 - \`baseThreshold\` (float, 0.0–1.0, default: 0.72) — minimum score for a memory chunk to be returned
-- \`hybridVectorWeight\` / \`hybridBm25Weight\` (float, sum=1.0) — balance between vector and BM25 search
+- \`hybridVectorWeight\` / \`hybridBm25Weight\` (float, sum=1.0) — vector vs BM25 balance
+
+B. factor-space.json — latent factor space:
+- Each factor has: id, description, subqueryTemplate, vectors (auto-populated), weights (auto-learned)
+- You MAY add new factors: set vectors={} and weights={} — embeddings will be auto-computed on next query
+- You MAY remove underperforming factors — weights and embeddings are cleaned up automatically
+- You MAY edit factor descriptions/templates to improve sub-query quality
+- Factor weights are learned online via hit/miss signals from memory and web search
 
 Rules for tuning:
-- Change at most 2 parameters per cycle
-- Record the before/after values and expected effect in the EvolutionEvent
+- Change at most 2–3 parameters or factors per cycle
+- Record before/after values and expected effect in the EvolutionEvent
 - Validate by running: \`pnpm test --run src/memory\`
 
 Final Directive
