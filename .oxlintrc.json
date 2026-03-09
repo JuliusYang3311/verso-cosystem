@@ -1,4 +1,9 @@
 {
   "rules": {},
-  "ignorePatterns": ["apps/desktop/**", "apps/macos/**", "src/app/**"]
+  "ignorePatterns": [
+    "apps/desktop/**",
+    "apps/macos/**",
+    "src/app/**",
+    "src/canvas-host/a2ui/*.bundle.js"
+  ]
 }
