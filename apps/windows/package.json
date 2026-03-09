@@ -1,0 +1,86 @@
+{
+  "name": "verso-desktop-windows",
+  "version": "1.0.0",
+  "description": "Verso Desktop App (Windows)",
+  "author": "Julius Yang <yangzhenyu528@gmail.com>",
+  "main": "main.js",
+  "scripts": {
+    "prepare:build": "powershell -ExecutionPolicy Bypass -File scripts/prepare-build.ps1",
+    "build:win": "node scripts/prepare-build.js && npx electron-builder --win --x64",
+    "build:win:dir": "node scripts/prepare-build.js && npx electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.verso.desktop",
+    "productName": "Verso",
+    "icon": "assets/icon.ico",
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*",
+      "auth/**/*",
+      "gateway/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../../dist",
+        "to": "gateway/dist"
+      },
+      {
+        "from": "../../extensions",
+        "to": "gateway/extensions"
+      },
+      {
+        "from": "../../skills",
+        "to": "gateway/skills"
+      },
+      {
+        "from": "../../assets",
+        "to": "gateway/assets"
+      },
+      {
+        "from": "../../build-node-modules",
+        "to": "gateway/node_modules"
+      },
+      {
+        "from": "../../package.json",
+        "to": "gateway/package.json"
+      },
+      {
+        "from": "../../node.exe",
+        "to": "gateway/node.exe"
+      },
+      {
+        "from": "../../docs/reference/templates",
+        "to": "gateway/docs/reference/templates"
+      }
+    ],
+    "asarUnpack": [
+      "gateway/**/*",
+      "node_modules/**/*"
+    ]
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.52.9",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^32.3.3",
+    "electron-builder": "^24.13.3"
+  }
+}

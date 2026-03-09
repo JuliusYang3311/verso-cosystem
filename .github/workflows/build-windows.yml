@@ -1,0 +1,51 @@
+name: Build Windows
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build verso
+        run: pnpm run build
+
+      - name: Install Windows native modules
+        run: |
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $sqliteVer = if ($pkg.dependencies.'sqlite-vec') { $pkg.dependencies.'sqlite-vec' } else { "0.1.7-alpha.2" }
+          $sharpVer = if ($pkg.dependencies.sharp) { $pkg.dependencies.sharp -replace '\^','' } else { "0.34.5" }
+          pnpm add -w "sqlite-vec-win32-x64@$sqliteVer" 2>$null
+          pnpm add -w "@img/sharp-win32-x64@$sharpVer" 2>$null
+
+      - name: Prepare Windows build
+        working-directory: apps/windows
+        run: |
+          npm install
+          node scripts/prepare-build.js x64
+
+      - name: Build Electron (Windows x64)
+        working-directory: apps/windows
+        run: npx electron-builder --win --x64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: verso-windows-x64
+          path: |
+            apps/windows/dist/*.exe
+            apps/windows/dist/*.exe.blockmap
