@@ -573,7 +573,7 @@ describe("runCronIsolatedAgentTurn", () => {
     });
   });
 
-  it("starts a fresh session id for each cron run", async () => {
+  it("does not persist cron session to the session store", async () => {
     await withTempHome(async (home) => {
       const storePath = await writeSessionStore(home);
       const deps: CliDeps = {
@@ -602,27 +602,14 @@ describe("runCronIsolatedAgentTurn", () => {
         sessionKey: "cron:job-1",
         lane: "cron",
       });
-      const first = await readSessionEntry(storePath, "agent:main:cron:job-1");
+      const entry = await readSessionEntry(storePath, "agent:main:cron:job-1");
 
-      await runCronIsolatedAgentTurn({
-        cfg,
-        deps,
-        job,
-        message: "ping",
-        sessionKey: "cron:job-1",
-        lane: "cron",
-      });
-      const second = await readSessionEntry(storePath, "agent:main:cron:job-1");
-
-      expect(first?.sessionId).toBeDefined();
-      expect(second?.sessionId).toBeDefined();
-      expect(second?.sessionId).not.toBe(first?.sessionId);
-      expect(first?.label).toBe("Cron: job-1");
-      expect(second?.label).toBe("Cron: job-1");
+      // Cron runs are ephemeral — nothing should be written to the session store.
+      expect(entry).toBeUndefined();
     });
   });
 
-  it("preserves an existing cron session label", async () => {
+  it("does not overwrite existing session store entries", async () => {
     await withTempHome(async (home) => {
       const storePath = await writeSessionStore(home);
       const raw = await fs.readFile(storePath, "utf-8");
@@ -659,6 +646,8 @@ describe("runCronIsolatedAgentTurn", () => {
       });
       const entry = await readSessionEntry(storePath, "agent:main:cron:job-1");
 
+      // Pre-existing entry should remain untouched.
+      expect(entry?.sessionId).toBe("old");
       expect(entry?.label).toBe("Nightly digest");
     });
   });

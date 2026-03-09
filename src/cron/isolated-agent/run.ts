@@ -40,7 +40,12 @@ import {
   supportsXHighThinking,
 } from "../../auto-reply/thinking.js";
 import { createOutboundSendDeps, type CliDeps } from "../../cli/outbound-send-deps.js";
-import { resolveSessionTranscriptPath, updateSessionStore } from "../../config/sessions.js";
+import {
+  resolveSessionTranscriptPath,
+  resolveStorePath,
+  loadSessionStore,
+} from "../../config/sessions.js";
+import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { deliverOutboundPayloads } from "../../infra/outbound/deliver.js";
 import { getRemoteSkillEligibility } from "../../infra/skills-remote.js";
@@ -52,7 +57,6 @@ import {
   getHookType,
   isExternalHookSession,
 } from "../../security/external-content.js";
-import { resolvePersistenceMode, handleTransientCleanup } from "../../sessions/persistence.js";
 import { resolveCronDeliveryPlan } from "../delivery.js";
 import { resolveDeliveryTarget } from "./delivery-target.js";
 import {
@@ -217,17 +221,10 @@ export async function runCronIsolatedAgentTurn(params: {
   const runSessionKey = baseSessionKey.startsWith("cron:")
     ? `${agentSessionKey}:run:${runSessionId}`
     : agentSessionKey;
+  // Cron runs are in-memory only — no session store persistence.
+  // Results are injected into the main session transcript after completion.
   const persistSessionEntry = async () => {
-    cronSession.store[agentSessionKey] = cronSession.sessionEntry;
-    if (runSessionKey !== agentSessionKey) {
-      cronSession.store[runSessionKey] = cronSession.sessionEntry;
-    }
-    await updateSessionStore(cronSession.storePath, (store) => {
-      store[agentSessionKey] = cronSession.sessionEntry;
-      if (runSessionKey !== agentSessionKey) {
-        store[runSessionKey] = cronSession.sessionEntry;
-      }
-    });
+    // Keep in-memory entry up-to-date (used by agent run config) but never write to disk.
   };
   const withRunSession = (
     result: Omit<RunCronAgentTurnResult, "sessionId" | "sessionKey">,
@@ -535,22 +532,59 @@ export async function runCronIsolatedAgentTurn(params: {
     }
   }
 
-  // Transient cleanup:
-  const persistence = resolvePersistenceMode({
-    cfg: cfgWithAgentDefaults,
-    agentId,
-    sessionKey: agentSessionKey,
-    sessionEntry: cronSession.sessionEntry,
-  });
+  // Inject cron result summary into the main session transcript.
+  if (synthesizedText) {
+    try {
+      const mainSessionKey = resolveAgentMainSessionKey({ cfg: params.cfg, agentId });
+      const mainStorePath = resolveStorePath(params.cfg.session?.store, { agentId });
+      const mainStore = loadSessionStore(mainStorePath);
+      const mainEntry = mainStore[mainSessionKey];
+      if (mainEntry?.sessionId) {
+        const mainTranscriptPath = resolveSessionTranscriptPath(mainEntry.sessionId, agentId);
+        const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+        const cronLabel = params.job.name?.trim()
+          ? `Cron: ${params.job.name}`
+          : `Cron: ${params.job.id}`;
+        const sessionManager = SessionManager.open(mainTranscriptPath);
+        sessionManager.appendMessage({
+          role: "assistant",
+          content: [{ type: "text", text: `[${cronLabel}]\n\n${synthesizedText}` }],
+          timestamp: Date.now(),
+          stopReason: "stop",
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          api: "openai-responses",
+          provider: "verso",
+          model: "cron-injected",
+        } as Parameters<typeof sessionManager.appendMessage>[0]);
+      }
+    } catch (err) {
+      logWarn(
+        `[cron:${params.job.id}] Failed to inject into main session: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
-  if (persistence === "transient" && agentSessionKey) {
+  // Clean up the temporary cron transcript file — cron runs are ephemeral.
+  // Only remove the file; do NOT touch the session store (we never wrote to it).
+  {
     const sessionFile = resolveSessionTranscriptPath(cronSession.sessionEntry.sessionId, agentId);
-    await handleTransientCleanup({
-      cfg: cfgWithAgentDefaults,
-      agentId,
-      sessionKey: agentSessionKey,
-      sessionFile,
-    });
+    if (sessionFile) {
+      try {
+        const fs = await import("node:fs");
+        if (fs.existsSync(sessionFile)) {
+          fs.unlinkSync(sessionFile);
+        }
+      } catch {
+        // Best-effort cleanup
+      }
+    }
   }
 
   return { status: "ok", summary, outputText };
