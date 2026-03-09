@@ -50,7 +50,7 @@ describe("memory search config", () => {
               },
             },
             chunking: { tokens: 500, overlap: 100 },
-            query: { maxResults: 4, minScore: 0.2 },
+            query: { minScore: 0.2 },
           },
         },
         list: [
@@ -59,7 +59,7 @@ describe("memory search config", () => {
             default: true,
             memorySearch: {
               chunking: { tokens: 320 },
-              query: { maxResults: 8 },
+              query: {},
               store: {
                 vector: {
                   enabled: true,
@@ -75,7 +75,7 @@ describe("memory search config", () => {
     expect(resolved?.model).toBe("text-embedding-3-small");
     expect(resolved?.chunking.tokens).toBe(320);
     expect(resolved?.chunking.overlap).toBe(100);
-    expect(resolved?.query.maxResults).toBe(8);
+
     expect(resolved?.query.minScore).toBe(0.2);
     expect(resolved?.store.vector.enabled).toBe(true);
     expect(resolved?.store.vector.extensionPath).toBe("/opt/sqlite-vec.dylib");

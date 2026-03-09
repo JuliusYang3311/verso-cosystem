@@ -655,7 +655,6 @@ export function registerMemoryCli(program: Command) {
       async (
         query: string,
         opts: MemoryCommandOptions & {
-          maxResults?: number;
           minScore?: number;
         },
       ) => {
@@ -673,7 +672,6 @@ export function registerMemoryCli(program: Command) {
             let results: Awaited<ReturnType<typeof manager.search>>;
             try {
               results = await manager.search(query, {
-                maxResults: opts.maxResults,
                 minScore: opts.minScore,
               });
             } catch (err) {

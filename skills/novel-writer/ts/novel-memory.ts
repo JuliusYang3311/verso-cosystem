@@ -21,7 +21,7 @@ import {
 import { loadConfig } from "../../../src/config/io.js";
 import { applyDiversityPipeline, type DiverseChunk } from "../../../src/memory/chunk-diversity.js";
 import { createEmbeddingProvider } from "../../../src/memory/embeddings.js";
-import { bm25RankToScore, buildFtsQuery, mergeHybridResults } from "../../../src/memory/hybrid.js";
+import { buildFtsQuery, mergeHybridResults } from "../../../src/memory/hybrid.js";
 import {
   chunkMarkdown,
   generateL0Abstract,
@@ -40,7 +40,6 @@ import {
   computeProviderKey,
   withTimeout,
 } from "../../../src/memory/manager-embeddings.js";
-import { searchHierarchical } from "../../../src/memory/manager-hierarchical-search.js";
 import { searchVector, searchKeyword } from "../../../src/memory/manager-search.js";
 import {
   VECTOR_TABLE,
@@ -493,7 +492,7 @@ export class NovelMemoryStore {
 
     // Convert back to SearchRowResult
     return diverseResults.slice(0, qs.maxResults).map((c) => ({
-      id: `${c.path}:${c.startLine}`,
+      id: c.id ?? `${c.path}:${c.startLine}`,
       path: c.path,
       startLine: c.startLine,
       endLine: c.endLine,
@@ -501,6 +500,8 @@ export class NovelMemoryStore {
       snippet: c.snippet,
       score: c.score,
       timestamp: c.timestamp,
+      l0Tags: c.l0Tags,
+      l1Sentences: c.l1Sentences ? JSON.stringify(c.l1Sentences) : undefined,
     })) as SearchRowResult[];
   }
 
@@ -512,45 +513,13 @@ export class NovelMemoryStore {
     query: string,
     queryVec: number[],
     limit: number,
-    ctxParams: ContextParams = DEFAULT_CONTEXT_PARAMS,
+    _ctxParams: ContextParams = DEFAULT_CONTEXT_PARAMS,
   ): Promise<SearchRowResult[]> {
     const hasVector = queryVec.some((v) => v !== 0);
     const sourceFilter = this.buildSourceFilter();
     const sourceFilterAliased = this.buildSourceFilter("c");
 
-    // Try hierarchical search first
-    if (hasVector) {
-      try {
-        return await searchHierarchical({
-          db: this.db,
-          queryVec,
-          query,
-          limit: Math.min(200, limit),
-          snippetMaxChars: SNIPPET_MAX_CHARS,
-          providerModel: this.provider.model,
-          vectorTable: VECTOR_TABLE,
-          filesVectorTable: FILES_VECTOR_TABLE,
-          filesFtsTable: "files_fts",
-          ftsAvailable: this.fts.available,
-          filesFtsAvailable: this.filesFts.available,
-          contextParams: ctxParams,
-          ensureVectorReady: async (dims) => this.ensureVectorReady(dims),
-          ensureFileVectorReady: async (dims) => {
-            const ready = await this.ensureVectorReady(dims);
-            if (ready && !this.fileVectorTableReady) {
-              this.fileVectorTableReady = ensureFileVectorTable(this.db, dims);
-            }
-            return ready && this.fileVectorTableReady;
-          },
-          sourceFilterVec: sourceFilterAliased,
-          sourceFilterChunks: sourceFilter,
-        });
-      } catch {
-        // Fall through to flat search
-      }
-    }
-
-    // Flat fallback
+    // Vector search
     const vectorResults = hasVector
       ? await searchVector({
           db: this.db,
@@ -578,7 +547,7 @@ export class NovelMemoryStore {
       snippetMaxChars: SNIPPET_MAX_CHARS,
       sourceFilter,
       buildFtsQuery: (raw) => buildFtsQuery(raw),
-      bm25RankToScore,
+      bm25RankToScore: (rank) => -rank, // negate so softmax ranks correctly
     }).catch(() => []);
 
     if (keywordResults.length === 0) {

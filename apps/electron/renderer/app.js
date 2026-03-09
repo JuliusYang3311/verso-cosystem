@@ -189,6 +189,28 @@ window.saveAllSettings = async function() {
       if (config.models) delete config.models.providers;
     }
 
+    // --- Sync primary/fallbacks from provider state ---
+    if (window.providers) {
+      let primary = null;
+      const fallbacks = [];
+      for (const [pName, prov] of Object.entries(window.providers)) {
+        for (const m of (prov.models || [])) {
+          const mid = typeof m === 'string' ? m : m.id;
+          const ref = `${pName}/${mid}`;
+          if (typeof m === 'object' && m._primary) {
+            primary = ref;
+          } else {
+            fallbacks.push(ref);
+          }
+        }
+      }
+      if (primary) {
+        if (!config.agents.defaults.model) config.agents.defaults.model = {};
+        config.agents.defaults.model.primary = primary;
+        config.agents.defaults.model.fallbacks = fallbacks;
+      }
+    }
+
     // --- Channels (delegate to channels-config if available) ---
     if (typeof window.collectChannelConfig === 'function') {
       window.collectChannelConfig(config);

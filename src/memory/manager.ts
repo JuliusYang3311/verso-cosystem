@@ -32,13 +32,11 @@ import {
   type OpenAiEmbeddingClient,
   type VoyageEmbeddingClient,
 } from "./embeddings.js";
-import { bm25RankToScore, buildFtsQuery, mergeHybridResults } from "./hybrid.js";
+import { buildFtsQuery, mergeHybridResults } from "./hybrid.js";
 import {
   buildFileEntry,
   chunkMarkdown,
   ensureDir,
-  generateFileL0,
-  generateL0Abstract,
   hashText,
   isMemoryPath,
   listMemoryFiles,
@@ -46,7 +44,13 @@ import {
   type MemoryFileEntry,
   runWithConcurrency,
 } from "./internal.js";
-import { loadFactorSpace, ensureFactorVectors, queryToSubqueries } from "./latent-factors.js";
+import {
+  loadFactorSpace,
+  ensureFactorVectors,
+  queryToSubqueries,
+  projectChunkToFactors,
+  findGapCutoff,
+} from "./latent-factors.js";
 import {
   BATCH_FAILURE_LIMIT,
   type BatchFailureTracker,
@@ -63,8 +67,18 @@ import {
   embedQueryWithTimeout,
   withTimeout,
 } from "./manager-embeddings.js";
-import { searchHierarchical } from "./manager-hierarchical-search.js";
-import { searchKeyword, searchVector, type SearchRowResult } from "./manager-search.js";
+import {
+  splitSentences,
+  extractL1Sentences,
+  type ExtractedSentence,
+} from "./manager-l1-extractive.js";
+import {
+  searchKeyword,
+  searchVector,
+  searchVectorFiltered,
+  getChunkIdsForFactor,
+  type SearchRowResult,
+} from "./manager-search.js";
 import {
   type SessionDeltaState,
   resetSessionDelta,
@@ -148,6 +162,8 @@ export class MemoryIndexManager implements MemorySearchManager {
   };
   private batchFailureTracker: BatchFailureTracker;
   private db: DatabaseSync;
+  /** Reference to the original DB during atomic reindex, for L1 cache lookups. */
+  private l1CacheDb: DatabaseSync | null = null;
   private readonly sources: Set<MemorySource>;
   private providerKey: string;
   private readonly cache: { enabled: boolean; maxEntries?: number };
@@ -366,7 +382,6 @@ export class MemoryIndexManager implements MemorySearchManager {
   async search(
     query: string,
     opts?: {
-      maxResults?: number;
       minScore?: number;
       sessionKey?: string;
     },
@@ -381,51 +396,30 @@ export class MemoryIndexManager implements MemorySearchManager {
     if (!cleaned) {
       return [];
     }
-    const minScore = opts?.minScore ?? this.settings.query.minScore;
-    const maxResults = opts?.maxResults ?? this.settings.query.maxResults;
     const hybrid = this.settings.query.hybrid;
-    const candidates = Math.min(
-      200,
-      Math.max(1, Math.floor(maxResults * hybrid.candidateMultiplier)),
-    );
+    const candidates = 50;
 
     const ctx = this.buildEmbeddingContext();
     const queryVec = await embedQueryWithTimeout(ctx, cleaned);
     const hasVector = queryVec.some((v) => v !== 0);
 
-    // Load context params for hierarchical search settings
+    // Load context params (evolver-tunable via context_params.json)
+    // Priority: user config > evolver context_params > hardcoded defaults
     const contextParams = await this.loadContextParams();
+    const hybridVectorWeight = hybrid.vectorWeight ?? contextParams.hybridVectorWeight ?? 0.7;
+    const hybridTextWeight = hybrid.textWeight ?? 1 - hybridVectorWeight;
+    const minScore =
+      opts?.minScore ?? this.settings.query.minScore ?? contextParams.hybridMinScore ?? 0;
 
-    // Build shared hierarchical search params (reused across factor sub-queries)
-    const baseHierarchicalParams = {
-      db: this.db,
-      snippetMaxChars: SNIPPET_MAX_CHARS,
-      providerModel: this.provider.model,
-      vectorTable: VECTOR_TABLE,
-      filesVectorTable: FILES_VECTOR_TABLE,
-      filesFtsTable: "files_fts",
-      ftsAvailable: this.fts.available,
-      filesFtsAvailable: this.filesFts.available,
-      contextParams: contextParams as ContextParams,
-      ensureVectorReady: async (dims: number) => await this.ensureVectorReady(dims),
-      ensureFileVectorReady: async (dims: number) => {
-        const ready = await this.ensureVectorReady(dims);
-        if (ready && !this.fileVectorTableReady) {
-          this.fileVectorTableReady = ensureFileVectorTable(this.db, dims);
-        }
-        return ready && this.fileVectorTableReady;
-      },
-      sourceFilterVec: this.buildSourceFilter("c"),
-      sourceFilterChunks: this.buildSourceFilter(),
-    };
+    const sourceFilterVec = this.buildSourceFilter("c");
+    const sourceFilterChunks = this.buildSourceFilter();
 
-    // Use hierarchical search (file-level pre-filter → chunk-level search)
+    // L0 tag-based multi-factor search
     if (hasVector) {
       try {
         // Project query onto factor space and build sub-queries
         let space = await loadFactorSpace();
-        // Ensure factor vectors are computed before projection; reload to get fresh vectors.
-        if (hasVector && space.factors.length > 0) {
+        if (space.factors.length > 0) {
           await ensureFactorVectors(space, this.provider.model, "memory", (texts) =>
             ctx.provider.embedBatch(texts),
           ).catch(() => {});
@@ -444,15 +438,13 @@ export class MemoryIndexManager implements MemorySearchManager {
             })
           : { subqueries: [] };
 
-        // Embed all sub-query texts in a single batch, in parallel with the
-        // original query vector (which is already computed above).
+        // Embed all sub-query texts in a single batch
         const subQueryTexts = subqueries.map((s) => s.subquery);
         const subQueryVecs = await ctx.provider
           .embedBatch(subQueryTexts)
           .catch(() => [] as number[][]);
 
-        // Build per-factor search inputs: original query + factor sub-queries
-        // Each entry is { queryVec, queryText } for one hierarchical search pass.
+        // Build per-factor search inputs
         const searchInputs: Array<{ queryVec: number[]; queryText: string; factorId: string }> = [
           { queryVec, queryText: cleaned, factorId: "_primary" },
           ...subqueries
@@ -464,20 +456,58 @@ export class MemoryIndexManager implements MemorySearchManager {
             .filter((s) => s.queryVec.length > 0),
         ];
 
+        const perFactorLimit = candidates;
+        const baseSearchParams = {
+          db: this.db,
+          vectorTable: VECTOR_TABLE,
+          providerModel: this.provider.model,
+          snippetMaxChars: SNIPPET_MAX_CHARS,
+          ensureVectorReady: async (dims: number) => await this.ensureVectorReady(dims),
+          sourceFilterVec,
+          sourceFilterChunks,
+        };
+
         // Run all factor searches in parallel
-        const perFactorLimit = Math.ceil(candidates / searchInputs.length);
+        // Primary query: unfiltered vector search
+        // Factor sub-queries: L0 tag filtered via gap detection
         const allResults = await Promise.allSettled(
-          searchInputs.map((input) =>
-            searchHierarchical({
-              ...baseHierarchicalParams,
+          searchInputs.map((input) => {
+            if (input.factorId === "_primary") {
+              // Primary query — search all chunks, no L0 filter
+              return searchVector({
+                ...baseSearchParams,
+                queryVec: input.queryVec,
+                limit: perFactorLimit,
+              });
+            }
+            // Factor sub-query — L0 tag filtering
+            const l0Candidates = getChunkIdsForFactor({
+              db: this.db,
+              providerModel: this.provider.model,
+              factorId: input.factorId,
+              sourceFilter: sourceFilterChunks,
+            });
+            if (l0Candidates.length === 0) {
+              // No chunks match this factor — skip entirely
+              return Promise.resolve([] as SearchRowResult[]);
+            }
+            // Gap detection on L0 scores to select matching chunks
+            const l0Scores = l0Candidates.map((c) => c.l0Score);
+            const cutoff = findGapCutoff(l0Scores);
+            const filteredIds = l0Candidates.slice(0, cutoff).map((c) => c.id);
+            if (filteredIds.length === 0) {
+              return Promise.resolve([] as SearchRowResult[]);
+            }
+            return searchVectorFiltered({
+              ...baseSearchParams,
               queryVec: input.queryVec,
-              query: input.queryText,
+              chunkIds: filteredIds,
               limit: perFactorLimit,
-            }),
-          ),
+            });
+          }),
         );
 
-        // Merge: deduplicate by (path, startLine), keep highest score per chunk
+        // Merge: deduplicate by chunk ID, keep highest score
         const chunkMap = new Map<string, SearchRowResult>();
         const factorResultCounts = new Map<string, number>();
         for (let ri = 0; ri < allResults.length; ri++) {
@@ -486,10 +516,9 @@ export class MemoryIndexManager implements MemorySearchManager {
           const fid = searchInputs[ri].factorId;
           factorResultCounts.set(fid, (factorResultCounts.get(fid) ?? 0) + result.value.length);
           for (const row of result.value) {
-            const key = `${row.path}:${row.startLine}`;
-            const existing = chunkMap.get(key);
+            const existing = chunkMap.get(row.id);
             if (!existing || row.score > existing.score) {
-              chunkMap.set(key, row);
+              chunkMap.set(row.id, row);
             }
           }
         }
@@ -525,35 +554,21 @@ export class MemoryIndexManager implements MemorySearchManager {
           if (keywordResults.length > 0) {
             const merged = this.mergeHybridResults({
               vector: results.map(
-                (r) => ({ ...r, id: r.id }) as MemorySearchResult & { id: string },
+                (r) => this.toMemorySearchResult(r) as MemorySearchResult & { id: string },
               ),
               keyword: keywordResults,
-              vectorWeight: hybrid.vectorWeight,
-              textWeight: hybrid.textWeight,
+              vectorWeight: hybridVectorWeight,
+              textWeight: hybridTextWeight,
             });
-            return merged.filter((entry) => entry.score >= minScore).slice(0, maxResults);
+            return merged.filter((entry) => entry.score >= minScore);
           }
         }
 
         return results
-          .map(
-            (r) =>
-              ({
-                path: r.path,
-                startLine: r.startLine,
-                endLine: r.endLine,
-                score: r.score,
-                snippet: r.snippet,
-                source: r.source,
-                timestamp: r.timestamp,
-                l0Abstract: r.l0Abstract,
-                l1Overview: r.l1Overview,
-              }) as MemorySearchResult,
-          )
-          .filter((entry) => entry.score >= minScore)
-          .slice(0, maxResults);
+          .map((r) => this.toMemorySearchResult(r))
+          .filter((entry) => entry.score >= minScore);
       } catch (err) {
-        log.debug(`hierarchical search failed, falling back: ${String(err)}`);
+        log.debug(`L0 tag search failed, falling back: ${String(err)}`);
         // Fall through to flat search on error
       }
     }
@@ -564,7 +579,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       : [];
 
     if (!hybrid.enabled) {
-      return vectorResults.filter((entry) => entry.score >= minScore).slice(0, maxResults);
+      return vectorResults.filter((entry: MemorySearchResult) => entry.score >= minScore);
     }
 
     const keywordResults = hybrid.enabled
@@ -574,11 +589,11 @@ export class MemoryIndexManager implements MemorySearchManager {
     const merged = this.mergeHybridResults({
       vector: vectorResults,
       keyword: keywordResults,
-      vectorWeight: hybrid.vectorWeight,
-      textWeight: hybrid.textWeight,
+      vectorWeight: hybridVectorWeight,
+      textWeight: hybridTextWeight,
     });
 
-    return merged.filter((entry) => entry.score >= minScore).slice(0, maxResults);
+    return merged.filter((entry) => entry.score >= minScore);
   }
 
   private async searchVector(
@@ -596,7 +611,9 @@ export class MemoryIndexManager implements MemorySearchManager {
       sourceFilterVec: this.buildSourceFilter("c"),
       sourceFilterChunks: this.buildSourceFilter(),
     });
-    return results.map((entry) => entry as MemorySearchResult & { id: string });
+    return results.map(
+      (entry) => this.toMemorySearchResult(entry) as MemorySearchResult & { id: string },
+    );
   }
 
   private buildFtsQuery(raw: string): string | null {
@@ -620,9 +637,15 @@ export class MemoryIndexManager implements MemorySearchManager {
       snippetMaxChars: SNIPPET_MAX_CHARS,
       sourceFilter,
       buildFtsQuery: (raw) => this.buildFtsQuery(raw),
-      bm25RankToScore,
+      bm25RankToScore: (rank) => -rank, // negate so softmax ranks correctly (more negative BM25 = larger value)
     });
-    return results.map((entry) => entry as MemorySearchResult & { id: string; textScore: number });
+    return results.map(
+      (entry) =>
+        ({
+          ...this.toMemorySearchResult(entry),
+          textScore: entry.textScore,
+        }) as MemorySearchResult & { id: string; textScore: number },
+    );
   }
 
   private mergeHybridResults(params: {
@@ -631,14 +654,14 @@ export class MemoryIndexManager implements MemorySearchManager {
     vectorWeight: number;
     textWeight: number;
   }): MemorySearchResult[] {
-    // Build L0/L1 lookup from vector results (keyword search doesn't provide them)
-    const l0l1Map = new Map<string, { l0Abstract?: string; l1Overview?: string }>();
+    // Build metadata lookup from vector results (keyword search doesn't provide l0Tags/l1Sentences)
+    const metaMap = new Map<
+      string,
+      { l0Tags?: Record<string, number>; l1Sentences?: import("./types.js").L1Sentence[] }
+    >();
     for (const r of params.vector) {
-      if (r.l0Abstract || r.l1Overview) {
-        l0l1Map.set(`${r.path}:${r.startLine}:${r.endLine}`, {
-          l0Abstract: r.l0Abstract,
-          l1Overview: r.l1Overview,
-        });
+      if (r.l0Tags || r.l1Sentences) {
+        metaMap.set(r.id, { l0Tags: r.l0Tags, l1Sentences: r.l1Sentences });
       }
     }
 
@@ -666,14 +689,40 @@ export class MemoryIndexManager implements MemorySearchManager {
       textWeight: params.textWeight,
     });
     return merged.map((entry) => {
-      const key = `${entry.path}:${entry.startLine}:${entry.endLine}`;
-      const l0l1 = l0l1Map.get(key);
+      const meta = metaMap.get(entry.id);
       return {
         ...entry,
-        l0Abstract: l0l1?.l0Abstract,
-        l1Overview: l0l1?.l1Overview,
+        l0Tags: meta?.l0Tags,
+        l1Sentences: meta?.l1Sentences,
       } as MemorySearchResult;
     });
+  }
+
+  /** Convert SearchRowResult to MemorySearchResult, building L1 snippet from sentences. */
+  private toMemorySearchResult(r: SearchRowResult): MemorySearchResult {
+    let l1Sentences: import("./types.js").L1Sentence[] | undefined;
+    if (r.l1Sentences) {
+      try {
+        l1Sentences = JSON.parse(r.l1Sentences);
+      } catch {
+        /* ignore */
+      }
+    }
+    // Build snippet from L1 sentences if available, otherwise use L2 text
+    const snippet =
+      l1Sentences && l1Sentences.length > 0 ? l1Sentences.map((s) => s.text).join(" ") : r.snippet;
+    return {
+      id: r.id,
+      path: r.path,
+      startLine: r.startLine,
+      endLine: r.endLine,
+      score: r.score,
+      snippet,
+      source: r.source as import("./types.js").MemorySource,
+      timestamp: r.timestamp,
+      l0Tags: r.l0Tags,
+      l1Sentences,
+    };
   }
 
   async sync(params?: {
@@ -688,6 +737,33 @@ export class MemoryIndexManager implements MemorySearchManager {
       this.syncing = null;
     });
     return this.syncing;
+  }
+
+  async readChunk(
+    chunkId: string,
+  ): Promise<{
+    id: string;
+    text: string;
+    path: string;
+    startLine: number;
+    endLine: number;
+  } | null> {
+    const id = chunkId.startsWith("chunk:") ? chunkId.slice(6) : chunkId;
+    const row = this.db
+      .prepare(`SELECT id, text, path, start_line, end_line FROM chunks WHERE id = ?`)
+      .get(id) as
+      | { id: string; text: string; path: string; start_line: number; end_line: number }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      id: row.id,
+      text: row.text,
+      path: row.path,
+      startLine: row.start_line,
+      endLine: row.end_line,
+    };
   }
 
   async readFile(params: {
@@ -1534,6 +1610,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     };
 
     this.db = tempDb;
+    this.l1CacheDb = originalDb;
     this.vectorReady = null;
     this.vector.available = null;
     this.vector.loadError = undefined;
@@ -1590,6 +1667,7 @@ export class MemoryIndexManager implements MemorySearchManager {
         cacheTable: EMBEDDING_CACHE_TABLE,
       });
 
+      this.l1CacheDb = null;
       this.db.close();
       originalDb.close();
       originalDbClosed = true;
@@ -1603,6 +1681,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       this.ensureSchema();
       this.vector.dims = nextMeta.vectorDims;
     } catch (err) {
+      this.l1CacheDb = null;
       try {
         this.db.close();
       } catch {}
@@ -1692,10 +1771,67 @@ export class MemoryIndexManager implements MemorySearchManager {
     const vectorReady = sample ? await this.ensureVectorReady(sample.length) : false;
     const now = Date.now();
 
-    // Generate L0 abstracts for each chunk
-    const chunkL0s: string[] = [];
-    for (const chunk of chunks) {
-      chunkL0s.push(generateL0Abstract(chunk));
+    // Generate L0 tags (factor projection) for each chunk
+    let factorSpace: Awaited<ReturnType<typeof loadFactorSpace>> | null = null;
+    try {
+      factorSpace = await loadFactorSpace();
+      if (factorSpace.factors.length === 0) {
+        factorSpace = null;
+      }
+    } catch {
+      factorSpace = null;
+    }
+    const chunkL0Tags: Record<string, number>[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const embedding = embeddings[i];
+      if (factorSpace && embedding && embedding.length > 0) {
+        chunkL0Tags.push(projectChunkToFactors(embedding, factorSpace, this.provider.model));
+      } else {
+        chunkL0Tags.push({});
+      }
+    }
+
+    // Generate L1 extractive summaries for each chunk
+    // L1 ref points to chunk ID in SQL (L2 is chunks.text), resolved after ID generation
+    // Reuse existing L1 data when the chunk hash hasn't changed (avoids redundant sentence embeddings)
+    const chunkL1Sentences: ExtractedSentence[][] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const embedding = embeddings[i] ?? [];
+      // Check if this chunk already has L1 data in the DB (same content hash → same L1 result)
+      // During atomic reindex, l1CacheDb points to the original DB with existing data
+      const chunkId = hashText(
+        `${options.source}:${entry.path}:${chunk.startLine}:${chunk.endLine}:${chunk.hash}:${this.provider.model}`,
+      );
+      const lookupDb = this.l1CacheDb ?? this.db;
+      try {
+        const existing = lookupDb
+          .prepare(`SELECT l1_sentences FROM chunks WHERE id = ? AND hash = ?`)
+          .get(chunkId, chunk.hash) as { l1_sentences: string } | undefined;
+        if (existing?.l1_sentences) {
+          const parsed = JSON.parse(existing.l1_sentences) as ExtractedSentence[];
+          if (parsed.length > 0) {
+            chunkL1Sentences.push(parsed);
+            continue;
+          }
+        }
+      } catch {
+        /* fall through to regeneration */
+      }
+      const sentences = splitSentences(chunk.text);
+      if (sentences.length <= 1 || embedding.length === 0) {
+        chunkL1Sentences.push(sentences);
+        continue;
+      }
+      let sentenceEmbeddings: number[][];
+      try {
+        sentenceEmbeddings = await ctx.provider.embedBatch(sentences.map((s) => s.text));
+      } catch {
+        chunkL1Sentences.push(sentences);
+        continue;
+      }
+      const selected = extractL1Sentences(sentences, sentenceEmbeddings, embedding);
+      chunkL1Sentences.push(selected);
     }
 
     // Information gain filter: skip chunks that are near-duplicates of existing chunks
@@ -1739,7 +1875,8 @@ export class MemoryIndexManager implements MemorySearchManager {
 
     const igChunks = nonRedundantIndices.map((i) => chunks[i]);
     const igEmbeddings = nonRedundantIndices.map((i) => embeddings[i]);
-    const igL0s = nonRedundantIndices.map((i) => chunkL0s[i]);
+    const igL0Tags = nonRedundantIndices.map((i) => chunkL0Tags[i]);
+    const igL1Sentences = nonRedundantIndices.map((i) => chunkL1Sentences[i]);
 
     if (vectorReady) {
       try {
@@ -1763,21 +1900,23 @@ export class MemoryIndexManager implements MemorySearchManager {
     for (let i = 0; i < igChunks.length; i++) {
       const chunk = igChunks[i];
       const embedding = igEmbeddings[i] ?? [];
-      const l0 = igL0s[i] ?? "";
+      const l0Tags = igL0Tags[i] ?? {};
+      const l1Sents = igL1Sentences[i] ?? [];
       const id = hashText(
         `${options.source}:${entry.path}:${chunk.startLine}:${chunk.endLine}:${chunk.hash}:${this.provider.model}`,
       );
       this.db
         .prepare(
-          `INSERT INTO chunks (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at, l0_abstract)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO chunks (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at, l0_tags, l1_sentences)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              hash=excluded.hash,
              model=excluded.model,
              text=excluded.text,
              embedding=excluded.embedding,
              updated_at=excluded.updated_at,
-             l0_abstract=excluded.l0_abstract`,
+             l0_tags=excluded.l0_tags,
+             l1_sentences=excluded.l1_sentences`,
         )
         .run(
           id,
@@ -1790,7 +1929,8 @@ export class MemoryIndexManager implements MemorySearchManager {
           chunk.text,
           JSON.stringify(embedding),
           now,
-          l0,
+          JSON.stringify(l0Tags),
+          JSON.stringify(l1Sents),
         );
       if (vectorReady && embedding.length > 0) {
         try {
@@ -1818,8 +1958,11 @@ export class MemoryIndexManager implements MemorySearchManager {
       }
     }
 
-    // Generate file-level L0 abstract (from non-redundant chunks only)
-    const fileL0 = generateFileL0(igL0s);
+    // Generate file-level L0 abstract from L1 sentences (for hierarchical search compatibility)
+    const fileL0 = igL1Sentences
+      .flatMap((sents) => sents.map((s) => s.text))
+      .join("; ")
+      .slice(0, 600);
 
     // Embed file-level L0 and write to files_vec
     let fileL0Embedding: number[] = [];

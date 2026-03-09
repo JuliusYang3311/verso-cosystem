@@ -29,9 +29,11 @@ export type DiverseChunk = {
   score: number;
   readonly source: string;
   readonly timestamp?: number;
-  readonly l0Abstract?: string;
-  readonly l1Overview?: string;
-  readonly level?: "l0" | "l1" | "l2";
+  readonly id?: string;
+  /** L0 factor tags { factorId: score }. */
+  readonly l0Tags?: Record<string, number>;
+  /** L1 extracted key sentences. */
+  readonly l1Sentences?: Array<{ text: string; startChar: number; endChar: number }>;
   /** Embedding vector — present when the retrieval layer provides it. */
   readonly embedding?: number[];
   /** Factor attribution — populated by multi-factor retrieval. */

@@ -11,12 +11,13 @@ import { jsonResult, readNumberParam, readStringParam } from "./common.js";
 
 const MemorySearchSchema = Type.Object({
   query: Type.String(),
-  maxResults: Type.Optional(Type.Number()),
+
   minScore: Type.Optional(Type.Number()),
 });
 
 const MemoryGetSchema = Type.Object({
-  path: Type.String(),
+  chunkId: Type.Optional(Type.String()),
+  path: Type.Optional(Type.String()),
   from: Type.Optional(Type.Number()),
   lines: Type.Optional(Type.Number()),
 });
@@ -40,11 +41,10 @@ export function createMemorySearchTool(options: {
     label: "Memory Search",
     name: "memory_search",
     description:
-      "Mandatory recall step: semantically search MEMORY.md + memory/*.md (and optional session transcripts) before answering questions about prior work, decisions, dates, people, preferences, or todos; returns top snippets with path + lines.",
+      "Mandatory recall step: semantically search memory (MEMORY.md, memory/*.md, session transcripts). Returns L1 summaries (key sentences) with chunk IDs. Use memory_get with the chunk ID to read the full L2 text when you need details.",
     parameters: MemorySearchSchema,
     execute: async (_toolCallId, params) => {
       const query = readStringParam(params, "query", { required: true });
-      const maxResults = readNumberParam(params, "maxResults");
       const minScore = readNumberParam(params, "minScore");
       const { manager, error } = await getMemorySearchManager({
         cfg,
@@ -60,7 +60,6 @@ export function createMemorySearchTool(options: {
           sessionKey: options.agentSessionKey,
         });
         const rawResults = await manager.search(query, {
-          maxResults,
           minScore,
           sessionKey: options.agentSessionKey,
         });
@@ -99,10 +98,11 @@ export function createMemoryGetTool(options: {
     label: "Memory Get",
     name: "memory_get",
     description:
-      "Safe snippet read from MEMORY.md or memory/*.md with optional from/lines; use after memory_search to pull only the needed lines and keep context small.",
+      "Read L2 full chunk text by chunk ID (from memory_search results), or read a memory file by path. Use after memory_search to get full details.",
     parameters: MemoryGetSchema,
     execute: async (_toolCallId, params) => {
-      const relPath = readStringParam(params, "path", { required: true });
+      const chunkId = readStringParam(params, "chunkId");
+      const relPath = readStringParam(params, "path");
       const from = readNumberParam(params, "from", { integer: true });
       const lines = readNumberParam(params, "lines", { integer: true });
       const { manager, error } = await getMemorySearchManager({
@@ -110,9 +110,21 @@ export function createMemoryGetTool(options: {
         agentId,
       });
       if (!manager) {
-        return jsonResult({ path: relPath, text: "", disabled: true, error });
+        return jsonResult({ text: "", disabled: true, error });
       }
       try {
+        // Prefer chunk ID lookup (L2 from SQL)
+        if (chunkId) {
+          const chunk = await manager.readChunk(chunkId);
+          if (!chunk) {
+            return jsonResult({ text: "", error: `chunk not found: ${chunkId}` });
+          }
+          return jsonResult(chunk);
+        }
+        // Fallback to file path read
+        if (!relPath) {
+          return jsonResult({ text: "", error: "chunkId or path required" });
+        }
         const result = await manager.readFile({
           relPath,
           from: from ?? undefined,

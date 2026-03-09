@@ -617,10 +617,10 @@ export async function runEmbeddedAttempt(
                   );
                 } else {
                   const searchResults = await manager.search(searchQuery, {
-                    maxResults: 20,
                     sessionKey: params.sessionKey,
                   });
                   retrievedChunks = searchResults.map((r) => ({
+                    id: r.id,
                     snippet: r.snippet,
                     score: r.score,
                     path: r.path,
@@ -628,8 +628,8 @@ export async function runEmbeddedAttempt(
                     startLine: r.startLine,
                     endLine: r.endLine,
                     timestamp: r.timestamp,
-                    l0Abstract: r.l0Abstract,
-                    l1Overview: r.l1Overview,
+                    l0Tags: r.l0Tags,
+                    l1Sentences: r.l1Sentences,
                   }));
                 }
               } catch (retrievalErr) {

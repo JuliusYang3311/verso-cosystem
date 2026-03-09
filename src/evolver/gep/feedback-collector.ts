@@ -39,9 +39,7 @@ interface ContextParams {
   recentRatioMin: number;
   recentRatioMax: number;
   hybridVectorWeight: number;
-  hybridBm25Weight: number;
-  compactSafetyMargin: number;
-  flushSoftThreshold: number;
+  hybridMinScore: number;
   [key: string]: unknown;
 }
 
@@ -74,9 +72,7 @@ export const DEFAULT_CONTEXT_PARAMS: ContextParams = {
   recentRatioMin: 0.2,
   recentRatioMax: 0.7,
   hybridVectorWeight: 0.7,
-  hybridBm25Weight: 0.3,
-  compactSafetyMargin: 1.2,
-  flushSoftThreshold: 4000,
+  hybridMinScore: 0.01,
 };
 
 // ---------- Parameter I/O ----------

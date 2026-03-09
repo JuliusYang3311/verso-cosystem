@@ -405,7 +405,6 @@ export const MemorySearchSchema = z
       .optional(),
     query: z
       .object({
-        maxResults: z.number().int().positive().optional(),
         minScore: z.number().min(0).max(1).optional(),
         hybrid: z
           .object({

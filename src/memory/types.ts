@@ -1,21 +1,28 @@
 export type MemorySource = "memory" | "sessions";
 
+export type L1Sentence = {
+  text: string;
+  startChar: number;
+  endChar: number;
+};
+
 export type MemorySearchResult = {
+  /** Chunk ID in SQL (use with readChunk to get L2 full text). */
+  id: string;
   path: string;
   startLine: number;
   endLine: number;
   score: number;
+  /** L1 extractive summary (key sentences joined). Injected into context. */
   snippet: string;
   source: MemorySource;
   citation?: string;
   /** Epoch ms when this chunk was last indexed. Used for time decay in dynamic context. */
   timestamp?: number;
-  /** L0 abstract (~100 tokens) generated at index time. */
-  l0Abstract?: string;
-  /** L1 overview (~500 tokens) generated asynchronously. */
-  l1Overview?: string;
-  /** Which level was loaded for this result. */
-  level?: "l0" | "l1" | "l2";
+  /** L0 factor tags { factorId: score }. */
+  l0Tags?: Record<string, number>;
+  /** L1 extracted key sentences. */
+  l1Sentences?: L1Sentence[];
 };
 
 export type MemoryEmbeddingProbeResult = {
@@ -69,8 +76,13 @@ export type MemoryProviderStatus = {
 export interface MemorySearchManager {
   search(
     query: string,
-    opts?: { maxResults?: number; minScore?: number; sessionKey?: string },
+    opts?: { minScore?: number; sessionKey?: string },
   ): Promise<MemorySearchResult[]>;
+  /** Read L2 full text by chunk ID from SQL. */
+  readChunk(
+    chunkId: string,
+  ): Promise<{ id: string; text: string; path: string; startLine: number; endLine: number } | null>;
+  /** Read file content (legacy, kept for backward compatibility). */
   readFile(params: {
     relPath: string;
     from?: number;

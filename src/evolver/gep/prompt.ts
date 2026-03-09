@@ -406,7 +406,8 @@ A. context_params.json — search & retrieval parameters:
 - \`factorMmrLambda\` (float, 0.0–1.0, default: 0.7) — MMR trade-off for factor selection
 - \`mmrLambda\` (float, 0.0–1.0, default: 0.6) — MMR trade-off for chunk selection
 - \`baseThreshold\` (float, 0.0–1.0, default: 0.72) — minimum score for a memory chunk to be returned
-- \`hybridVectorWeight\` / \`hybridBm25Weight\` (float, sum=1.0) — vector vs BM25 balance
+- \`hybridVectorWeight\` (float, 0.0–1.0, default: 0.7) — vector weight; textWeight = 1 - vectorWeight
+- \`hybridMinScore\` (float, ≥0, default: 0.01) — minimum hybrid score threshold for filtering
 
 B. factor-space.json — latent factor space:
 - Each factor has: id, description, subqueryTemplate, vectors (auto-populated), weights (auto-learned)

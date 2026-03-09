@@ -291,7 +291,7 @@ describe("memory index", () => {
             sync: { watch: false, onSessionStart: false, onSearch: true },
             query: {
               minScore: 0,
-              maxResults: 200,
+
               hybrid: {
                 enabled: true,
                 vectorWeight: 0.99,
@@ -349,7 +349,7 @@ describe("memory index", () => {
             sync: { watch: false, onSessionStart: false, onSearch: true },
             query: {
               minScore: 0,
-              maxResults: 200,
+
               hybrid: {
                 enabled: true,
                 vectorWeight: 0.01,

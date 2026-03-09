@@ -6,23 +6,8 @@
   "recentRatioMin": 0.2,
   "recentRatioMax": 0.7,
   "hybridVectorWeight": 0.7,
-  "hybridBm25Weight": 0.3,
-  "compactSafetyMargin": 1.2,
-  "flushSoftThreshold": 4000,
-  "hierarchicalSearch": true,
-  "hierarchicalFileLimit": 10,
-  "hierarchicalFileThreshold": 0.5,
-  "hierarchicalFileThresholdFloor": 0.3,
-  "hierarchicalAlpha": 0.7,
-  "hierarchicalConvergenceRounds": 3,
-  "fileVectorWeight": 0.7,
-  "fileBm25Weight": 0.3,
-  "l0EmbeddingEnabled": true,
-  "l1GenerationEnabled": true,
-  "l1UseLlm": false,
-  "l1LlmRateLimitMs": 10000,
+  "hybridMinScore": 0.01,
   "progressiveLoadingEnabled": true,
-  "progressiveL2MaxChunks": 5,
   "mmrLambda": 0.6,
   "redundancyThreshold": 0.95,
   "latentFactorEnabled": true,
@@ -30,12 +15,5 @@
   "factorMmrLambda": 0.7,
   "webSearchMmrLambda": 0.7,
   "webSearchMmrMinGain": 0.05,
-  "webSearchBudgetTokens": 8000,
-  "dimensionWeights": {
-    "rel": 0.5,
-    "div": 0.25,
-    "time": 0.15,
-    "source": 0.05,
-    "level": 0.05
-  }
+  "webSearchBudgetTokens": 8000
 }

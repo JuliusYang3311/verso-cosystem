@@ -296,20 +296,33 @@ export function deduplicateWebResults(results: RawWebResult[]): MergedWebResult[
       continue;
     }
 
-    const mergedScore = Math.max(existing.score, r.score);
+    // Accumulate scores across factors — URLs appearing in multiple factors get boosted
     const factorMap = new Map(existing.factorsUsed.map((f) => [f.id, f]));
     const prev = factorMap.get(r.factorId);
     if (!prev || r.score > prev.score) {
       factorMap.set(r.factorId, { id: r.factorId, score: r.score });
     }
+    const factors = [...factorMap.values()].toSorted((a, b) => b.score - a.score);
+    const accumulatedScore = factors.reduce((sum, f) => sum + f.score, 0);
     map.set(key, {
       ...existing,
-      score: mergedScore,
-      factorsUsed: [...factorMap.values()].toSorted((a, b) => b.score - a.score),
+      score: accumulatedScore,
+      factorsUsed: factors,
     });
   }
 
-  return [...map.values()];
+  // Softmax normalize final scores
+  const entries = [...map.values()];
+  if (entries.length > 0) {
+    const max = Math.max(...entries.map((e) => e.score));
+    const exps = entries.map((e) => Math.exp(e.score - max));
+    const sum = exps.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < entries.length; i++) {
+      entries[i].score = exps[i] / sum;
+    }
+  }
+
+  return entries;
 }
 
 // ---------- MMR result selection ----------

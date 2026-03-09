@@ -205,14 +205,28 @@ describe("deduplicateWebResults", () => {
     expect(deduplicateWebResults(results)).toHaveLength(2);
   });
 
-  it("merges duplicate URLs keeping max score", () => {
+  it("merges duplicate URLs accumulating scores across factors", () => {
     const results = [
       makeRaw("https://a.com", "factual", 0.6),
       makeRaw("https://a.com", "recent", 0.9),
     ];
     const merged = deduplicateWebResults(results);
     expect(merged).toHaveLength(1);
-    expect(merged[0].score).toBe(0.9);
+    // Single item after softmax normalizes to 1.0
+    expect(merged[0].score).toBe(1);
+  });
+
+  it("boosts URLs appearing in multiple factors", () => {
+    const results = [
+      makeRaw("https://a.com", "factual", 0.5),
+      makeRaw("https://a.com", "recent", 0.5),
+      makeRaw("https://b.com", "factual", 0.8),
+    ];
+    const merged = deduplicateWebResults(results);
+    // "a" appears in 2 factors (accumulated 1.0) vs "b" in 1 factor (0.8)
+    const a = merged.find((r) => r.url === "https://a.com")!;
+    const b = merged.find((r) => r.url === "https://b.com")!;
+    expect(a.score).toBeGreaterThan(b.score);
   });
 
   it("merges factor attributions on duplicate URL", () => {

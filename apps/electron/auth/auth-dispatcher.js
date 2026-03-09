@@ -1,79 +1,127 @@
-// Auth dispatcher — routes auth to CLI subprocess (outside asar, no ESM issues)
-const { app, shell } = require('electron');
-const { spawn } = require('child_process');
+// Auth dispatcher — handles OAuth, API key, and token auth for Electron
+const { shell } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 
-const AGENT_DIR = path.join(os.homedir(), '.verso');
+const STATE_DIR = path.join(os.homedir(), '.verso');
+const AUTH_AGENT_DIR = path.join(STATE_DIR, 'agents', 'main', 'agent');
+const AUTH_PROFILE_PATH = path.join(AUTH_AGENT_DIR, 'auth-profiles.json');
 
-// OAuth methods handled via CLI subprocess
+// OAuth methods handled via pi-ai
 const OAUTH_METHODS = new Set([
   'openai-codex', 'minimax-portal', 'google-antigravity',
-  'google-gemini-cli', 'qwen-portal', 'github-copilot', 'chutes',
+  'google-gemini-cli', 'qwen-portal', 'github-copilot',
 ]);
 
 // ---------------------------------------------------------------------------
-// Gateway node binary + CLI entry (runs outside asar)
+// Write OAuth credentials to auth-profiles.json (same format as gateway CLI)
 // ---------------------------------------------------------------------------
-function resolveCliPaths() {
-  const res = process.resourcesPath || path.join(__dirname, '..', '..', '..');
-  const bundled = path.join(res, 'gateway', 'node');
-  const nodeBin = (app.isPackaged && fs.existsSync(bundled)) ? bundled : process.execPath;
-  const roots = [path.join(res, 'gateway'), path.join(__dirname, '..', '..')];
-  const gatewayRoot = roots.find(p => fs.existsSync(path.join(p, 'dist', 'index.js')));
-  return { nodeBin, cliEntry: gatewayRoot ? path.join(gatewayRoot, 'dist', 'index.js') : null };
-}
+function writeOAuthToAuthProfiles(provider, creds) {
+  fs.mkdirSync(AUTH_AGENT_DIR, { recursive: true });
+  let store = { version: 1, profiles: {} };
+  try { store = JSON.parse(fs.readFileSync(AUTH_PROFILE_PATH, 'utf8')); } catch {}
+  if (!store.profiles) store.profiles = {};
 
-function runCli(args) {
-  return new Promise((resolve, reject) => {
-    const { nodeBin, cliEntry } = resolveCliPaths();
-    if (!cliEntry) return reject(new Error('Gateway dist not found'));
-
-    const child = spawn(nodeBin, [cliEntry, ...args], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', VERSO_EMBEDDED: 'true' },
-    });
-
-    let out = '', err = '';
-    child.stdout.on('data', d => { out += d; });
-    child.stderr.on('data', d => { err += d; });
-    child.on('close', code => resolve({
-      success: code === 0,
-      output: out.trim(),
-      error: code !== 0 ? (err.trim() || out.trim() || `Exit ${code}`) : undefined,
-    }));
-    child.on('error', reject);
-  });
+  const email = typeof creds.email === 'string' && creds.email.trim() ? creds.email.trim() : 'default';
+  const profileId = `${provider}:${email}`;
+  store.profiles[profileId] = {
+    type: 'oauth',
+    provider,
+    ...creds,
+  };
+  store.version = store.version || 1;
+  fs.writeFileSync(AUTH_PROFILE_PATH, JSON.stringify(store, null, 2));
+  console.log('[Auth] Wrote auth profile:', profileId, 'to', AUTH_PROFILE_PATH);
 }
 
 // ---------------------------------------------------------------------------
-// OAuth — delegate to CLI (runs outside asar, all ESM deps available)
+// ESM import helper — resolve from asar.unpacked when packaged
 // ---------------------------------------------------------------------------
-async function handleOAuth(authMethod) {
+function resolveUnpackedModule(packageName) {
+  // In dev mode, normal resolution works fine
+  const resolved = require.resolve(`${packageName}/package.json`);
+  // In packaged app, redirect from app.asar → app.asar.unpacked
+  return pathToFileURL(
+    path.join(
+      path.dirname(resolved.replace('app.asar', 'app.asar.unpacked')),
+      'dist', 'index.js'
+    )
+  ).href;
+}
+
+// ---------------------------------------------------------------------------
+// OAuth — import pi-ai from unpacked path to avoid ESM-in-asar issues
+// ---------------------------------------------------------------------------
+async function handleOAuth({ authMethod, mainWindow: _mainWindow }) {
   try {
-    return await runCli(['models', 'auth', 'login', '--provider', authMethod, '--method', authMethod]);
+    console.log('[Auth] Starting OAuth:', authMethod);
+    const piAiUrl = resolveUnpackedModule('@mariozechner/pi-ai');
+    console.log('[Auth] Importing pi-ai from:', piAiUrl);
+    const piAi = await import(piAiUrl);
+
+    if (authMethod === 'openai-codex') {
+      const { loginOpenAICodex } = piAi;
+      const creds = await loginOpenAICodex({
+        onAuth: async ({ url }) => {
+          console.log('[Auth] Opening browser:', url);
+          await shell.openExternal(url);
+        },
+        onPrompt: async () => '',
+        onProgress: (msg) => console.log('[Auth Progress]', msg),
+      });
+
+      if (creds) {
+        writeOAuthToAuthProfiles('openai-codex', creds);
+        return { success: true, credentials: creds };
+      }
+      return { success: false, error: 'No credentials returned' };
+    }
+
+    // For other OAuth methods, try the generic loginXxx pattern
+    const methodMap = {
+      'minimax-portal': 'loginMiniMaxPortal',
+      'google-antigravity': 'loginGoogleAntigravity',
+      'google-gemini-cli': 'loginGoogleGeminiCli',
+      'qwen-portal': 'loginQwenPortal',
+      'github-copilot': 'loginGithubCopilot',
+    };
+
+    const fnName = methodMap[authMethod];
+    if (fnName && typeof piAi[fnName] === 'function') {
+      const creds = await piAi[fnName]({
+        onAuth: async ({ url }) => { await shell.openExternal(url); },
+        onPrompt: async () => '',
+        onProgress: (msg) => console.log('[Auth Progress]', msg),
+      });
+      if (creds) {
+        writeOAuthToAuthProfiles(authMethod, creds);
+        return { success: true, credentials: creds };
+      }
+      return { success: false, error: 'No credentials returned' };
+    }
+
+    return { success: false, error: `OAuth method "${authMethod}" not found in pi-ai` };
   } catch (err) {
-    return { success: false, error: err.message };
+    console.error('[Auth] OAuth error:', err);
+    return { success: false, error: err.message || 'OAuth failed' };
   }
 }
 
 // ---------------------------------------------------------------------------
-// API Key — write to config directly (no ESM needed)
+// API Key — write directly (no ESM needed)
 // ---------------------------------------------------------------------------
 async function handleApiKeyAuth({ provider, apiKey }) {
   try {
-    const envPath = path.join(AGENT_DIR, '.env');
-    let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+    fs.mkdirSync(AUTH_AGENT_DIR, { recursive: true });
+    let store = { version: 1, profiles: {} };
+    try { store = JSON.parse(fs.readFileSync(AUTH_PROFILE_PATH, 'utf8')); } catch {}
+    if (!store.profiles) store.profiles = {};
 
-    const key = `${provider.toUpperCase()}_API_KEY`;
-    const line = `${key}=${apiKey}`;
-    content = content.includes(key)
-      ? content.replace(new RegExp(`${key}=.*`), line)
-      : content + `\n${line}\n`;
-
-    fs.mkdirSync(AGENT_DIR, { recursive: true });
-    fs.writeFileSync(envPath, content);
+    store.profiles[`${provider}:default`] = { type: 'api_key', provider, key: apiKey };
+    store.version = store.version || 1;
+    fs.writeFileSync(AUTH_PROFILE_PATH, JSON.stringify(store, null, 2));
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -81,17 +129,18 @@ async function handleApiKeyAuth({ provider, apiKey }) {
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic token — write to auth-profiles.json directly
+// Anthropic token — write to auth-profiles.json
 // ---------------------------------------------------------------------------
 async function handleAnthropicToken(token) {
   try {
-    const profilePath = path.join(AGENT_DIR, 'auth-profiles.json');
-    let profiles = {};
-    try { profiles = JSON.parse(fs.readFileSync(profilePath, 'utf8')); } catch {}
+    fs.mkdirSync(AUTH_AGENT_DIR, { recursive: true });
+    let store = { version: 1, profiles: {} };
+    try { store = JSON.parse(fs.readFileSync(AUTH_PROFILE_PATH, 'utf8')); } catch {}
+    if (!store.profiles) store.profiles = {};
 
-    profiles['anthropic:default'] = { type: 'token', provider: 'anthropic', token };
-    fs.mkdirSync(AGENT_DIR, { recursive: true });
-    fs.writeFileSync(profilePath, JSON.stringify(profiles, null, 2));
+    store.profiles['anthropic:default'] = { type: 'token', provider: 'anthropic', token };
+    store.version = store.version || 1;
+    fs.writeFileSync(AUTH_PROFILE_PATH, JSON.stringify(store, null, 2));
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -105,7 +154,7 @@ async function handleAuth({ authMethod, providerType, mainWindow, apiKey, token 
   console.log('[Auth]', { authMethod, providerType, apiKey: !!apiKey, token: !!token });
 
   if (OAUTH_METHODS.has(authMethod)) {
-    return handleOAuth(authMethod);
+    return handleOAuth({ authMethod, mainWindow });
   }
   if (authMethod === 'token' && providerType === 'anthropic') {
     return token ? handleAnthropicToken(token) : { success: false, error: 'Token is required' };

@@ -17,10 +17,10 @@ export type SearchRowResult = {
   source: SearchSource;
   /** Epoch ms when this chunk was last indexed. */
   timestamp?: number;
-  /** L0 abstract for progressive loading. */
-  l0Abstract?: string;
-  /** L1 overview for progressive loading. */
-  l1Overview?: string;
+  /** L0 factor tags { factorId: score }. */
+  l0Tags?: Record<string, number>;
+  /** L1 extracted key sentences as JSON string. */
+  l1Sentences?: string;
   /** Embedding vector — present when retrieved via the in-process fallback path. */
   embedding?: number[];
 };
@@ -43,7 +43,7 @@ export async function searchVector(params: {
     const rows = params.db
       .prepare(
         `SELECT c.id, c.path, c.start_line, c.end_line, c.text,\n` +
-          `       c.source, c.updated_at, c.l0_abstract, c.l1_overview,\n` +
+          `       c.source, c.updated_at, c.l0_tags, c.l1_sentences,\n` +
           `       vec_distance_cosine(v.embedding, ?) AS dist\n` +
           `  FROM ${params.vectorTable} v\n` +
           `  JOIN chunks c ON c.id = v.id\n` +
@@ -64,22 +64,30 @@ export async function searchVector(params: {
       text: string;
       source: SearchSource;
       updated_at: number;
-      l0_abstract: string;
-      l1_overview: string;
+      l0_tags: string;
+      l1_sentences: string;
       dist: number;
     }>;
-    return rows.map((row) => ({
-      id: row.id,
-      path: row.path,
-      startLine: row.start_line,
-      endLine: row.end_line,
-      score: 1 - row.dist,
-      snippet: truncateUtf16Safe(row.text, params.snippetMaxChars),
-      source: row.source,
-      timestamp: row.updated_at,
-      l0Abstract: row.l0_abstract || undefined,
-      l1Overview: row.l1_overview || undefined,
-    }));
+    return rows.map((row) => {
+      let l0Tags: Record<string, number> | undefined;
+      try {
+        l0Tags = JSON.parse(row.l0_tags || "{}");
+      } catch {
+        l0Tags = undefined;
+      }
+      return {
+        id: row.id,
+        path: row.path,
+        startLine: row.start_line,
+        endLine: row.end_line,
+        score: 1 - row.dist,
+        snippet: truncateUtf16Safe(row.text, params.snippetMaxChars),
+        source: row.source,
+        timestamp: row.updated_at,
+        l0Tags,
+        l1Sentences: row.l1_sentences || undefined,
+      };
+    });
   }
 
   const candidates = listChunks({
@@ -199,6 +207,148 @@ export async function searchKeyword(params: {
       source: row.source,
     };
   });
+}
+
+// ---------- L0 tag-based chunk filtering ----------
+
+/**
+ * Load all chunk IDs that have a non-zero score for a given factor in their L0 tags.
+ * Returns them sorted descending by L0 score for that factor.
+ */
+export function getChunkIdsForFactor(params: {
+  db: DatabaseSync;
+  providerModel: string;
+  factorId: string;
+  sourceFilter: { sql: string; params: SearchSource[] };
+}): Array<{ id: string; l0Score: number }> {
+  const rows = params.db
+    .prepare(
+      `SELECT id, l0_tags FROM chunks` +
+        ` WHERE model = ?${params.sourceFilter.sql}` +
+        ` AND l0_tags != '{}'`,
+    )
+    .all(params.providerModel, ...params.sourceFilter.params) as Array<{
+    id: string;
+    l0_tags: string;
+  }>;
+
+  const results: Array<{ id: string; l0Score: number }> = [];
+  for (const row of rows) {
+    try {
+      const tags = JSON.parse(row.l0_tags) as Record<string, number>;
+      const score = tags[params.factorId];
+      if (score !== undefined && score > 0) {
+        results.push({ id: row.id, l0Score: score });
+      }
+    } catch {
+      // skip malformed l0_tags
+    }
+  }
+  results.sort((a, b) => b.l0Score - a.l0Score);
+  return results;
+}
+
+/**
+ * Vector search restricted to a specific set of chunk IDs (L0-filtered).
+ * Uses an IN clause to limit search to matching chunks.
+ */
+export async function searchVectorFiltered(params: {
+  db: DatabaseSync;
+  vectorTable: string;
+  providerModel: string;
+  queryVec: number[];
+  chunkIds: string[];
+  limit: number;
+  snippetMaxChars: number;
+  ensureVectorReady: (dimensions: number) => Promise<boolean>;
+  sourceFilterVec: { sql: string; params: SearchSource[] };
+  sourceFilterChunks: { sql: string; params: SearchSource[] };
+}): Promise<SearchRowResult[]> {
+  if (params.queryVec.length === 0 || params.limit <= 0 || params.chunkIds.length === 0) {
+    return [];
+  }
+  if (await params.ensureVectorReady(params.queryVec.length)) {
+    // Use IN clause to filter to L0-matching chunks
+    const placeholders = params.chunkIds.map(() => "?").join(",");
+    const rows = params.db
+      .prepare(
+        `SELECT c.id, c.path, c.start_line, c.end_line, c.text,\n` +
+          `       c.source, c.updated_at, c.l0_tags, c.l1_sentences,\n` +
+          `       vec_distance_cosine(v.embedding, ?) AS dist\n` +
+          `  FROM ${params.vectorTable} v\n` +
+          `  JOIN chunks c ON c.id = v.id\n` +
+          ` WHERE c.model = ?${params.sourceFilterVec.sql}\n` +
+          `   AND c.id IN (${placeholders})\n` +
+          ` ORDER BY dist ASC\n` +
+          ` LIMIT ?`,
+      )
+      .all(
+        vectorToBlob(params.queryVec),
+        params.providerModel,
+        ...params.sourceFilterVec.params,
+        ...params.chunkIds,
+        params.limit,
+      ) as Array<{
+      id: string;
+      path: string;
+      start_line: number;
+      end_line: number;
+      text: string;
+      source: SearchSource;
+      updated_at: number;
+      l0_tags: string;
+      l1_sentences: string;
+      dist: number;
+    }>;
+    return rows.map((row) => {
+      let l0Tags: Record<string, number> | undefined;
+      try {
+        l0Tags = JSON.parse(row.l0_tags || "{}");
+      } catch {
+        l0Tags = undefined;
+      }
+      return {
+        id: row.id,
+        path: row.path,
+        startLine: row.start_line,
+        endLine: row.end_line,
+        score: 1 - row.dist,
+        snippet: truncateUtf16Safe(row.text, params.snippetMaxChars),
+        source: row.source,
+        timestamp: row.updated_at,
+        l0Tags,
+        l1Sentences: row.l1_sentences || undefined,
+      };
+    });
+  }
+
+  // Fallback: in-process cosine over filtered chunks
+  const allChunks = listChunks({
+    db: params.db,
+    providerModel: params.providerModel,
+    sourceFilter: params.sourceFilterChunks,
+  });
+  const idSet = new Set(params.chunkIds);
+  const filtered = allChunks.filter((c) => idSet.has(c.id));
+  const scored = filtered
+    .map((chunk) => ({
+      chunk,
+      score: cosineSimilarity(params.queryVec, chunk.embedding),
+    }))
+    .filter((entry) => Number.isFinite(entry.score));
+  return scored
+    .toSorted((a, b) => b.score - a.score)
+    .slice(0, params.limit)
+    .map((entry) => ({
+      id: entry.chunk.id,
+      path: entry.chunk.path,
+      startLine: entry.chunk.startLine,
+      endLine: entry.chunk.endLine,
+      score: entry.score,
+      snippet: truncateUtf16Safe(entry.chunk.text, params.snippetMaxChars),
+      source: entry.chunk.source,
+      embedding: entry.chunk.embedding,
+    }));
 }
 
 // ---------- File-level search functions (for hierarchical search) ----------

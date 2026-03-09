@@ -55,6 +55,27 @@ export function ensureMemoryIndexSchema(params: {
   let ftsError: string | undefined;
   if (params.ftsEnabled) {
     try {
+      // Migrate from unicode61 (default) to trigram tokenizer for CJK support.
+      // Check if existing table uses trigram; if not, drop and recreate.
+      let needsRecreate = false;
+      try {
+        const tableExists = params.db
+          .prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`)
+          .get(params.ftsTable);
+        if (tableExists) {
+          const createSql = params.db
+            .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`)
+            .get(params.ftsTable) as { sql: string } | undefined;
+          if (createSql && !createSql.sql.includes("trigram")) {
+            needsRecreate = true;
+          }
+        }
+      } catch {
+        /* fall through */
+      }
+      if (needsRecreate) {
+        params.db.exec(`DROP TABLE IF EXISTS ${params.ftsTable}`);
+      }
       params.db.exec(
         `CREATE VIRTUAL TABLE IF NOT EXISTS ${params.ftsTable} USING fts5(\n` +
           `  text,\n` +
@@ -63,7 +84,8 @@ export function ensureMemoryIndexSchema(params: {
           `  source UNINDEXED,\n` +
           `  model UNINDEXED,\n` +
           `  start_line UNINDEXED,\n` +
-          `  end_line UNINDEXED\n` +
+          `  end_line UNINDEXED,\n` +
+          `  tokenize='trigram'\n` +
           `);`,
       );
       ftsAvailable = true;
@@ -77,31 +99,27 @@ export function ensureMemoryIndexSchema(params: {
   ensureColumn(params.db, "files", "source", "TEXT NOT NULL DEFAULT 'memory'");
   ensureColumn(params.db, "chunks", "source", "TEXT NOT NULL DEFAULT 'memory'");
 
-  // L0/L1 columns for progressive loading
+  // Legacy L0/L1 columns (kept for migration compatibility, no longer written)
   ensureColumn(params.db, "chunks", "l0_abstract", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(params.db, "chunks", "l1_overview", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(params.db, "chunks", "l1_status", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(params.db, "files", "l0_abstract", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(params.db, "files", "l0_embedding", "TEXT NOT NULL DEFAULT '[]'");
 
+  // New 3-layer architecture columns
+  // L0: factor projection tags { factorId: score, ... }
+  ensureColumn(params.db, "chunks", "l0_tags", "TEXT NOT NULL DEFAULT '{}'");
+  // L1: extractive key sentences [{ text, startChar, endChar }]
+  ensureColumn(params.db, "chunks", "l1_sentences", "TEXT NOT NULL DEFAULT '[]'");
   params.db.exec(`CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(path);`);
   params.db.exec(`CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source);`);
 
-  // Files FTS for hierarchical search keyword matching
+  // files_fts was used for hierarchical search (removed). Drop if exists.
   let filesFtsAvailable = false;
-  if (params.ftsEnabled) {
-    try {
-      params.db.exec(
-        `CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(\n` +
-          `  l0_abstract,\n` +
-          `  path UNINDEXED,\n` +
-          `  source UNINDEXED\n` +
-          `);`,
-      );
-      filesFtsAvailable = true;
-    } catch {
-      // files_fts not available — hierarchical keyword search will be skipped
-    }
+  try {
+    params.db.exec(`DROP TABLE IF EXISTS files_fts`);
+  } catch {
+    /* ignore */
   }
 
   return {

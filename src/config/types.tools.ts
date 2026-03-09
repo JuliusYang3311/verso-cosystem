@@ -291,7 +291,6 @@ export type MemorySearchConfig = {
   };
   /** Query behavior. */
   query?: {
-    maxResults?: number;
     minScore?: number;
     hybrid?: {
       /** Enable hybrid BM25 + vector search (default: true). */

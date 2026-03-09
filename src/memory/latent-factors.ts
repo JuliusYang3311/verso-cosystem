@@ -261,6 +261,56 @@ export function projectQueryToFactors(
 }
 
 /**
+ * Project a chunk embedding onto the factor space, returning raw cosine scores.
+ * Unlike query projection, this uses raw cosine (no weights, no softmax) because
+ * L0 tags need absolute similarity values, not relative ranking.
+ *
+ * Returns: { factorId: cosineScore } for all factors with score > 0.
+ */
+export function projectChunkToFactors(
+  chunkVec: number[],
+  space: LatentFactorSpace,
+  providerModel: string,
+): Record<string, number> {
+  if (chunkVec.length === 0 || space.factors.length === 0) {
+    return {};
+  }
+  const tags: Record<string, number> = {};
+  for (const factor of space.factors) {
+    const factorVec = factor.vectors[providerModel];
+    if (!factorVec || factorVec.length === 0) {
+      continue;
+    }
+    const score = cosine(chunkVec, factorVec);
+    if (score > 0) {
+      tags[factor.id] = Math.round(score * 1000) / 1000; // 3 decimal places
+    }
+  }
+  return tags;
+}
+
+/**
+ * Find the largest gap in a descending-sorted array of scores.
+ * Returns the index after which to cut (i.e., keep items 0..cutIndex-1).
+ * If no significant gap found, returns the full length.
+ */
+export function findGapCutoff(sortedDescScores: number[]): number {
+  if (sortedDescScores.length <= 1) {
+    return sortedDescScores.length;
+  }
+  let maxGap = 0;
+  let maxGapIdx = sortedDescScores.length; // default: keep all
+  for (let i = 0; i < sortedDescScores.length - 1; i++) {
+    const gap = sortedDescScores[i] - sortedDescScores[i + 1];
+    if (gap > maxGap) {
+      maxGap = gap;
+      maxGapIdx = i + 1; // cut after index i
+    }
+  }
+  return maxGapIdx;
+}
+
+/**
  * Coarse threshold gate: keep only factors whose softmax score >= threshold.
  * If nothing passes, returns the single highest-scoring factor as a fallback
  * so retrieval is never empty.

@@ -22,10 +22,27 @@ async function loadProviders() {
   const raw = config.models?.providers || {};
   const meta = await loadProviderMeta();
 
+  // Resolve current primary model from config
+  const primaryRef = config.agents?.defaults?.model?.primary || '';
+
   for (const [name, prov] of Object.entries(raw)) {
     const m = meta[name] || {};
     prov._providerType = m.providerType || inferProviderType(name, prov);
     prov._authMethod = m.authMethod || '';
+
+    // Mark _primary on the model that matches agents.defaults.model.primary
+    if (prov.models && primaryRef) {
+      prov.models = prov.models.map(model => {
+        const mid = typeof model === 'string' ? model : model.id;
+        const ref = `${name}/${mid}`;
+        if (typeof model === 'string') {
+          return ref === primaryRef ? { id: model, name: model, _primary: true } : { id: model, name: model };
+        }
+        if (ref === primaryRef) model._primary = true;
+        else delete model._primary;
+        return model;
+      });
+    }
   }
   providers = raw;
   window.providers = providers;
@@ -566,17 +583,7 @@ async function removeModel(providerName, modelId) {
     return id !== modelId;
   });
 
-  // If we removed the primary model, set the first remaining model as primary (UI-only)
-  if (providers[providerName].models.length > 0) {
-    const hasPrimary = providers[providerName].models.some(m => typeof m === 'object' && m._primary);
-    if (!hasPrimary) {
-      if (typeof providers[providerName].models[0] === 'string') {
-        providers[providerName].models[0] = { id: providers[providerName].models[0], name: providers[providerName].models[0], _primary: true };
-      } else {
-        providers[providerName].models[0]._primary = true;
-      }
-    }
-  }
+  // Note: if the primary model was removed, user must explicitly set a new primary
 
   await saveProviders();
   renderProviders();
@@ -619,20 +626,40 @@ function addNewProvider() {
 }
 
 async function setPrimaryModel(providerName, modelId) {
-  // Mark primary in local UI state (for display only)
+  // Clear _primary from ALL models across ALL providers
+  for (const [, prov] of Object.entries(providers)) {
+    if (!prov.models) continue;
+    prov.models = prov.models.map(m => {
+      if (typeof m === 'string') return { id: m, name: m };
+      const { _primary, ...rest } = m;
+      return rest;
+    });
+  }
+
+  // Set the new primary
   providers[providerName].models = providers[providerName].models.map(m => {
     const id = typeof m === 'string' ? m : m.id;
-    return { id, name: (typeof m === 'object' ? m.name : null) || id, _primary: (id === modelId) };
+    const name = (typeof m === 'object' ? m.name : null) || id;
+    return id === modelId ? { id, name, _primary: true } : { id, name };
   });
 
-  // Update agents.defaults.model.primary in config
+  // Build primary + fallbacks from all providers
   const modelRef = `${providerName}/${modelId}`;
-  await window.verso.saveConfig({
-    agents: { defaults: { model: { primary: modelRef } } }
-  });
+  const fallbacks = [];
+  for (const [pName, prov] of Object.entries(providers)) {
+    for (const m of (prov.models || [])) {
+      const mid = typeof m === 'string' ? m : m.id;
+      const ref = `${pName}/${mid}`;
+      if (ref !== modelRef) fallbacks.push(ref);
+    }
+  }
 
-  // Save providers in gateway-compatible format
+  // Save providers + update agents.defaults.model in one go
   await saveProviders();
+
+  await window.verso.saveConfig({
+    agents: { defaults: { model: { primary: modelRef, fallbacks } } }
+  });
 
   // Apply via gateway RPC (non-blocking)
   const latestConfig = await window.verso.getConfig();
@@ -706,7 +733,8 @@ async function saveProviders() {
   config.models.providers = gatewayProviders;
   config._replaceKeys = ['models.providers'];
   await window.verso.saveConfig(config);
-  saveProviderMeta(providerMeta);
+  delete config._replaceKeys; // clean before sending to gateway RPC
+  void saveProviderMeta(providerMeta);
 
   // Non-blocking gateway update (don't hang UI if gateway is down)
   if (typeof window.applyConfigToGateway === 'function') {

@@ -28,27 +28,12 @@ export type ContextParams = {
   recentRatioBase: number;
   recentRatioMin: number;
   recentRatioMax: number;
+  // Hybrid search: vectorWeight ∈ [0,1], textWeight = 1 - vectorWeight
   hybridVectorWeight: number;
-  hybridBm25Weight: number;
-  compactSafetyMargin: number;
-  flushSoftThreshold: number;
-  // Hierarchical search params
-  hierarchicalSearch?: boolean;
-  hierarchicalFileLimit?: number;
-  hierarchicalFileThreshold?: number;
-  hierarchicalFileThresholdFloor?: number;
-  hierarchicalAlpha?: number;
-  hierarchicalConvergenceRounds?: number;
-  fileVectorWeight?: number;
-  fileBm25Weight?: number;
-  // L0/L1 generation params
-  l0EmbeddingEnabled?: boolean;
-  l1GenerationEnabled?: boolean;
-  l1UseLlm?: boolean;
-  l1LlmRateLimitMs?: number;
+  // Hybrid search: minimum score threshold (evolver-learnable)
+  hybridMinScore: number;
   // Progressive loading params
   progressiveLoadingEnabled?: boolean;
-  progressiveL2MaxChunks?: number;
   // MMR diversity params
   mmrLambda?: number;
   // Write-side dedup params
@@ -61,16 +46,10 @@ export type ContextParams = {
   webSearchMmrLambda?: number;
   webSearchMmrMinGain?: number;
   webSearchBudgetTokens?: number;
-  dimensionWeights?: {
-    rel: number;
-    div: number;
-    time: number;
-    source: number;
-    level: number;
-  };
 };
 
 export type RetrievedChunk = {
+  id?: string;
   snippet: string;
   score: number;
   path: string;
@@ -78,9 +57,10 @@ export type RetrievedChunk = {
   startLine: number;
   endLine: number;
   timestamp?: number; // Message timestamp (used for time decay)
-  l0Abstract?: string;
-  l1Overview?: string;
-  level?: "l0" | "l1" | "l2";
+  /** L0 factor tags { factorId: score }. */
+  l0Tags?: Record<string, number>;
+  /** L1 extracted key sentences. */
+  l1Sentences?: Array<{ text: string; startChar: number; endChar: number }>;
   // Latent factor metadata (populated when latentFactorEnabled = true)
   factorsUsed?: Array<{ id: string; score: number }>;
   latentProjection?: { factorIds: string[]; scores: number[] };
@@ -107,11 +87,10 @@ export const DEFAULT_CONTEXT_PARAMS: ContextParams = {
   recentRatioMin: 0.2,
   recentRatioMax: 0.7,
   hybridVectorWeight: 0.7,
-  hybridBm25Weight: 0.3,
-  compactSafetyMargin: 1.2,
-  flushSoftThreshold: 4000,
+  hybridMinScore: 0.01,
   mmrLambda: 0.6,
   redundancyThreshold: 0.95,
+  progressiveLoadingEnabled: true,
 };
 
 // ---------- Load params from evolver assets ----------
@@ -238,6 +217,7 @@ export function selectRecentMessages(
 function toDiverseChunk(chunk: RetrievedChunk): DiverseChunk {
   return {
     key: `${chunk.path}:${chunk.startLine}`,
+    id: chunk.id,
     path: chunk.path,
     startLine: chunk.startLine,
     endLine: chunk.endLine,
@@ -245,9 +225,8 @@ function toDiverseChunk(chunk: RetrievedChunk): DiverseChunk {
     score: chunk.score,
     source: chunk.source,
     timestamp: chunk.timestamp,
-    l0Abstract: chunk.l0Abstract,
-    l1Overview: chunk.l1Overview,
-    level: chunk.level,
+    l0Tags: chunk.l0Tags,
+    l1Sentences: chunk.l1Sentences,
     factorsUsed: chunk.factorsUsed,
     latentProjection: chunk.latentProjection,
   };
@@ -255,6 +234,7 @@ function toDiverseChunk(chunk: RetrievedChunk): DiverseChunk {
 
 function fromDiverseChunk(chunk: DiverseChunk): RetrievedChunk {
   return {
+    id: chunk.id,
     path: chunk.path,
     startLine: chunk.startLine,
     endLine: chunk.endLine,
@@ -262,9 +242,8 @@ function fromDiverseChunk(chunk: DiverseChunk): RetrievedChunk {
     score: chunk.score,
     source: chunk.source,
     timestamp: chunk.timestamp,
-    l0Abstract: chunk.l0Abstract,
-    l1Overview: chunk.l1Overview,
-    level: chunk.level,
+    l0Tags: chunk.l0Tags,
+    l1Sentences: chunk.l1Sentences,
     factorsUsed: chunk.factorsUsed,
     latentProjection: chunk.latentProjection,
   };
@@ -310,17 +289,17 @@ function estimateSnippetTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-// ---------- Progressive loading (L0/L1/L2) ----------
+// ---------- Progressive loading ----------
 
 /**
- * Progressively load chunks into the token budget.
- * Loads all qualifying chunks until budget is exhausted.
- * Per chunk: tries L2 (full text) → L1 (overview) → L0 (abstract).
- * Never stops early due to a count limit — only the token budget decides.
+ * Load chunks into the token budget.
+ * In the 3-layer architecture, snippets already contain L1 key sentences.
+ * L2 full text is accessed on-demand via memory_get(chunkId).
+ * This function simply packs as many L1 snippets as fit in the budget.
  */
 export function progressiveLoadChunks(
   chunks: RetrievedChunk[],
-  params: ContextParams,
+  _params: ContextParams,
   budgetTokens: number,
 ): { chunks: RetrievedChunk[]; tokensUsed: number } {
   if (chunks.length === 0 || budgetTokens <= 0) {
@@ -331,27 +310,12 @@ export function progressiveLoadChunks(
   let tokensUsed = 0;
 
   for (const chunk of chunks) {
-    if (tokensUsed >= budgetTokens) {
-      break;
+    const chunkTokens = estimateSnippetTokens(chunk.snippet);
+    if (tokensUsed + chunkTokens <= budgetTokens) {
+      selected.push(chunk);
+      tokensUsed += chunkTokens;
     }
-
-    const l2Tokens = estimateSnippetTokens(chunk.snippet);
-    const l1Text = chunk.l1Overview || "";
-    const l1Tokens = l1Text ? estimateSnippetTokens(l1Text) : 0;
-    const l0Text = chunk.l0Abstract || "";
-    const l0Tokens = l0Text ? estimateSnippetTokens(l0Text) : 0;
-
-    if (tokensUsed + l2Tokens <= budgetTokens) {
-      selected.push({ ...chunk, level: "l2" });
-      tokensUsed += l2Tokens;
-    } else if (l1Text && tokensUsed + l1Tokens <= budgetTokens) {
-      selected.push({ ...chunk, snippet: l1Text, level: "l1" });
-      tokensUsed += l1Tokens;
-    } else if (l0Text && tokensUsed + l0Tokens <= budgetTokens) {
-      selected.push({ ...chunk, snippet: l0Text, level: "l0" });
-      tokensUsed += l0Tokens;
-    }
-    // If nothing fits for this chunk, skip it and try the next one
+    // Skip chunks that don't fit, try the next (smaller) one
   }
 
   return { chunks: selected, tokensUsed };

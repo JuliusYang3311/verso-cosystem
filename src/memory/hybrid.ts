@@ -21,10 +21,15 @@ export type HybridKeywordResult = {
   textScore: number;
 };
 
+/**
+ * Build an FTS5 query from raw user input.
+ * Supports Unicode (Chinese, Japanese, etc.) via \p{L} character class.
+ * For trigram tokenizer: wraps each token in double quotes for substring matching.
+ */
 export function buildFtsQuery(raw: string): string | null {
   const tokens =
     raw
-      .match(/[A-Za-z0-9_]+/g)
+      .match(/[\p{L}\p{N}_]+/gu)
       ?.map((t) => t.trim())
       .filter(Boolean) ?? [];
   if (tokens.length === 0) {
@@ -34,17 +39,47 @@ export function buildFtsQuery(raw: string): string | null {
   return quoted.join(" AND ");
 }
 
+/**
+ * Convert FTS5 bm25() rank to a score in (0, 1).
+ * FTS5 bm25() returns negative values — more negative = more relevant.
+ * Sigmoid maps this to (0, 1) while preserving ranking order.
+ */
 export function bm25RankToScore(rank: number): number {
-  const normalized = Number.isFinite(rank) ? Math.max(0, rank) : 999;
-  return 1 / (1 + normalized);
+  if (!Number.isFinite(rank)) {
+    return 0;
+  }
+  // rank is negative (e.g. -5.2 = very relevant, -0.3 = less relevant)
+  // sigmoid(-rank) maps: -5.2 → sigmoid(5.2) ≈ 0.99, -0.3 → sigmoid(0.3) ≈ 0.57
+  return 1 / (1 + Math.exp(rank));
 }
 
+/**
+ * Softmax: exp(s_i) / Σ exp(s_j), with log-sum-exp trick for numerical stability.
+ */
+function softmax(scores: number[]): number[] {
+  if (scores.length === 0) return [];
+  const max = Math.max(...scores);
+  const exps = scores.map((s) => Math.exp(s - max));
+  const sum = exps.reduce((a, b) => a + b, 0);
+  return exps.map((e) => e / sum);
+}
+
+/**
+ * Merge vector and keyword search results using softmax-normalized score fusion.
+ *
+ *   final = vectorWeight × softmax(vectorScores) + textWeight × softmax(textScores)
+ *
+ * Softmax independently normalizes each source into a smooth probability
+ * distribution, eliminating scale differences between cosine and BM25.
+ * Items appearing in both sources accumulate contributions from both.
+ */
 export function mergeHybridResults(params: {
   vector: HybridVectorResult[];
   keyword: HybridKeywordResult[];
   vectorWeight: number;
   textWeight: number;
 }): Array<{
+  id: string;
   path: string;
   startLine: number;
   endLine: number;
@@ -53,7 +88,7 @@ export function mergeHybridResults(params: {
   source: HybridSource;
   timestamp?: number;
 }> {
-  const byId = new Map<
+  const entryMap = new Map<
     string,
     {
       id: string;
@@ -62,135 +97,60 @@ export function mergeHybridResults(params: {
       endLine: number;
       source: HybridSource;
       snippet: string;
-      vectorScore: number;
-      textScore: number;
+      rawScore: number;
       timestamp?: number;
     }
   >();
 
-  for (const r of params.vector) {
-    byId.set(r.id, {
+  const vecSm = softmax(params.vector.map((r) => r.vectorScore));
+  for (let i = 0; i < params.vector.length; i++) {
+    const r = params.vector[i];
+    entryMap.set(r.id, {
       id: r.id,
       path: r.path,
       startLine: r.startLine,
       endLine: r.endLine,
       source: r.source,
       snippet: r.snippet,
-      vectorScore: r.vectorScore,
-      textScore: 0,
+      rawScore: params.vectorWeight * vecSm[i],
       timestamp: r.timestamp,
     });
   }
 
-  for (const r of params.keyword) {
-    const existing = byId.get(r.id);
+  const kwSm = softmax(params.keyword.map((r) => r.textScore));
+  for (let i = 0; i < params.keyword.length; i++) {
+    const r = params.keyword[i];
+    const contribution = params.textWeight * kwSm[i];
+    const existing = entryMap.get(r.id);
     if (existing) {
-      existing.textScore = r.textScore;
+      existing.rawScore += contribution;
       if (r.snippet && r.snippet.length > 0) {
         existing.snippet = r.snippet;
       }
     } else {
-      byId.set(r.id, {
+      entryMap.set(r.id, {
         id: r.id,
         path: r.path,
         startLine: r.startLine,
         endLine: r.endLine,
         source: r.source,
         snippet: r.snippet,
-        vectorScore: 0,
-        textScore: r.textScore,
+        rawScore: contribution,
+        timestamp: undefined,
       });
     }
   }
 
-  const merged = Array.from(byId.values()).map((entry) => {
-    const score = params.vectorWeight * entry.vectorScore + params.textWeight * entry.textScore;
-    return {
+  return Array.from(entryMap.values())
+    .map((entry) => ({
+      id: entry.id,
       path: entry.path,
       startLine: entry.startLine,
       endLine: entry.endLine,
-      score,
+      score: entry.rawScore,
       snippet: entry.snippet,
       source: entry.source,
       timestamp: entry.timestamp,
-    };
-  });
-
-  return merged.toSorted((a, b) => b.score - a.score);
-}
-
-// ---------- File-level hybrid merge (for hierarchical search) ----------
-
-export type HybridFileVectorResult = {
-  path: string;
-  source: HybridSource;
-  score: number;
-  l0Abstract: string;
-};
-
-export type HybridFileKeywordResult = {
-  path: string;
-  source: HybridSource;
-  score: number;
-  l0Abstract: string;
-};
-
-export function mergeHybridFileResults(params: {
-  vector: HybridFileVectorResult[];
-  keyword: HybridFileKeywordResult[];
-  vectorWeight: number;
-  textWeight: number;
-}): Array<{
-  path: string;
-  source: HybridSource;
-  score: number;
-  l0Abstract: string;
-}> {
-  const byPath = new Map<
-    string,
-    {
-      path: string;
-      source: HybridSource;
-      vectorScore: number;
-      textScore: number;
-      l0Abstract: string;
-    }
-  >();
-
-  for (const r of params.vector) {
-    byPath.set(r.path, {
-      path: r.path,
-      source: r.source,
-      vectorScore: r.score,
-      textScore: 0,
-      l0Abstract: r.l0Abstract,
-    });
-  }
-
-  for (const r of params.keyword) {
-    const existing = byPath.get(r.path);
-    if (existing) {
-      existing.textScore = r.score;
-      if (!existing.l0Abstract && r.l0Abstract) {
-        existing.l0Abstract = r.l0Abstract;
-      }
-    } else {
-      byPath.set(r.path, {
-        path: r.path,
-        source: r.source,
-        vectorScore: 0,
-        textScore: r.score,
-        l0Abstract: r.l0Abstract,
-      });
-    }
-  }
-
-  return Array.from(byPath.values())
-    .map((entry) => ({
-      path: entry.path,
-      source: entry.source,
-      score: params.vectorWeight * entry.vectorScore + params.textWeight * entry.textScore,
-      l0Abstract: entry.l0Abstract,
     }))
-    .toSorted((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score);
 }

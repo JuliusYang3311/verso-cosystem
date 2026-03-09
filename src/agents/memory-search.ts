@@ -56,12 +56,11 @@ export type ResolvedMemorySearchConfig = {
     };
   };
   query: {
-    maxResults: number;
     minScore: number;
     hybrid: {
       enabled: boolean;
-      vectorWeight: number;
-      textWeight: number;
+      vectorWeight?: number;
+      textWeight?: number;
       candidateMultiplier: number;
     };
   };
@@ -79,11 +78,11 @@ const DEFAULT_CHUNK_OVERLAP = 80;
 const DEFAULT_WATCH_DEBOUNCE_MS = 1500;
 const DEFAULT_SESSION_DELTA_BYTES = 100_000;
 const DEFAULT_SESSION_DELTA_MESSAGES = 50;
-const DEFAULT_MAX_RESULTS = 6;
-const DEFAULT_MIN_SCORE = 0.35;
+
+const DEFAULT_MIN_SCORE = 0;
 const DEFAULT_HYBRID_ENABLED = true;
 const DEFAULT_HYBRID_VECTOR_WEIGHT = 0.7;
-const DEFAULT_HYBRID_TEXT_WEIGHT = 0.3;
+// textWeight = 1 - vectorWeight, no separate default needed
 const DEFAULT_HYBRID_CANDIDATE_MULTIPLIER = 4;
 const DEFAULT_CACHE_ENABLED = true;
 const DEFAULT_SOURCES: Array<"memory" | "sessions"> = ["memory"];
@@ -220,7 +219,6 @@ function mergeConfig(
     },
   };
   const query = {
-    maxResults: overrides?.query?.maxResults ?? defaults?.query?.maxResults ?? DEFAULT_MAX_RESULTS,
     minScore: overrides?.query?.minScore ?? defaults?.query?.minScore ?? DEFAULT_MIN_SCORE,
   };
   const hybrid = {
@@ -228,14 +226,8 @@ function mergeConfig(
       overrides?.query?.hybrid?.enabled ??
       defaults?.query?.hybrid?.enabled ??
       DEFAULT_HYBRID_ENABLED,
-    vectorWeight:
-      overrides?.query?.hybrid?.vectorWeight ??
-      defaults?.query?.hybrid?.vectorWeight ??
-      DEFAULT_HYBRID_VECTOR_WEIGHT,
-    textWeight:
-      overrides?.query?.hybrid?.textWeight ??
-      defaults?.query?.hybrid?.textWeight ??
-      DEFAULT_HYBRID_TEXT_WEIGHT,
+    vectorWeight: overrides?.query?.hybrid?.vectorWeight ?? defaults?.query?.hybrid?.vectorWeight,
+    textWeight: overrides?.query?.hybrid?.textWeight ?? defaults?.query?.hybrid?.textWeight,
     candidateMultiplier:
       overrides?.query?.hybrid?.candidateMultiplier ??
       defaults?.query?.hybrid?.candidateMultiplier ??
@@ -248,11 +240,15 @@ function mergeConfig(
 
   const overlap = clampNumber(chunking.overlap, 0, Math.max(0, chunking.tokens - 1));
   const minScore = clampNumber(query.minScore, 0, 1);
-  const vectorWeight = clampNumber(hybrid.vectorWeight, 0, 1);
-  const textWeight = clampNumber(hybrid.textWeight, 0, 1);
-  const sum = vectorWeight + textWeight;
-  const normalizedVectorWeight = sum > 0 ? vectorWeight / sum : DEFAULT_HYBRID_VECTOR_WEIGHT;
-  const normalizedTextWeight = sum > 0 ? textWeight / sum : DEFAULT_HYBRID_TEXT_WEIGHT;
+  // hybrid weight: undefined means "use evolver params at search time"
+  // textWeight = 1 - vectorWeight, only one degree of freedom
+  let normalizedVectorWeight: number | undefined;
+  let normalizedTextWeight: number | undefined;
+  if (hybrid.vectorWeight != null || hybrid.textWeight != null) {
+    const vw = clampNumber(hybrid.vectorWeight ?? DEFAULT_HYBRID_VECTOR_WEIGHT, 0, 1);
+    normalizedVectorWeight = vw;
+    normalizedTextWeight = 1 - vw;
+  }
   const candidateMultiplier = clampInt(hybrid.candidateMultiplier, 1, 20);
   const deltaBytes = clampInt(sync.sessions.deltaBytes, 0, Number.MAX_SAFE_INTEGER);
   const deltaMessages = clampInt(sync.sessions.deltaMessages, 0, Number.MAX_SAFE_INTEGER);

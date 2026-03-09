@@ -1,4 +1,4 @@
 {
   "rules": {},
-  "ignorePatterns": ["apps/desktop/**", "src/app/**"]
+  "ignorePatterns": ["apps/desktop/**", "apps/macos/**", "src/app/**"]
 }
