@@ -7,6 +7,8 @@ on:
 jobs:
   build-win:
     runs-on: windows-latest
+    env:
+      NODE_OPTIONS: "--max-old-space-size=8192"
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +25,7 @@ jobs:
         run: pnpm run build
 
       - name: Install Windows native modules
+        shell: pwsh
         run: |
           $pkg = Get-Content package.json | ConvertFrom-Json
           $sqliteVer = if ($pkg.dependencies.'sqlite-vec') { $pkg.dependencies.'sqlite-vec' } else { "0.1.7-alpha.2" }
@@ -38,6 +41,7 @@ jobs:
 
       - name: Build Electron (Windows x64)
         working-directory: apps/windows
+        shell: cmd
         run: npx electron-builder --win --x64
 
       - name: Upload artifacts

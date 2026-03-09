@@ -16,7 +16,6 @@ const WINDOWS_DIR = path.resolve(SCRIPT_DIR, "..");
 const VERSO_ROOT = path.resolve(WINDOWS_DIR, "../..");
 
 const NODE_VERSION = "22.14.0";
-const PLATFORM = "win";
 const ARCH = process.argv[2] || "x64";
 
 console.log("=== Verso Desktop Build Preparation (Windows) ===");
@@ -68,7 +67,7 @@ async function main() {
   const nodeBin = path.join(buildResources, `node-${ARCH}.exe`);
 
   if (!fs.existsSync(nodeBin)) {
-    console.log(`\n=== Downloading Node.js ${NODE_VERSION} for ${PLATFORM}-${ARCH} ===`);
+    console.log(`\n=== Downloading Node.js ${NODE_VERSION} for win-${ARCH} ===`);
     fs.mkdirSync(buildResources, { recursive: true });
 
     const nodeUrl = `https://nodejs.org/dist/v${NODE_VERSION}/win-${ARCH}/node.exe`;
@@ -84,99 +83,64 @@ async function main() {
   fs.copyFileSync(nodeBin, gatewayNode);
   console.log("Copied Node.js binary to:", gatewayNode);
 
-  // 4. Ensure native modules for Windows
-  console.log("\n=== Ensuring native modules for Windows ===");
-  const pkg = JSON.parse(fs.readFileSync(path.join(VERSO_ROOT, "package.json"), "utf8"));
-
-  const ensureNativePkg = (name, version) => {
-    try {
-      const pnpmDir = path.join(VERSO_ROOT, "node_modules", ".pnpm");
-      const prefix = name.replace("/", "+");
-      const matches = fs.existsSync(pnpmDir)
-        ? fs.readdirSync(pnpmDir).filter((d) => d.startsWith(`${prefix}@${version}`))
-        : [];
-      if (matches.length > 0) {
-        console.log(`  OK: ${name}@${version}`);
-      } else {
-        console.log(`  Installing ${name}@${version}...`);
-        try {
-          execSync(`pnpm add -w ${name}@${version}`, { cwd: VERSO_ROOT, stdio: "pipe" });
-        } catch {
-          console.warn(`  Warning: Could not install ${name}`);
-        }
-      }
-    } catch {
-      console.warn(`  Warning: Could not check ${name}`);
-    }
-  };
-
-  const sqliteVecVersion = pkg.dependencies?.["sqlite-vec"] || "0.1.7-alpha.2";
-  ensureNativePkg(`sqlite-vec-win32-${ARCH}`, sqliteVecVersion);
-
-  const sharpVersion = (pkg.dependencies?.sharp || "0.34.5").replace("^", "");
-  ensureNativePkg(`@img/sharp-win32-${ARCH}`, sharpVersion);
-
-  // 5. Create lean production node_modules
+  // 4. Create lean production node_modules
+  // Use pure Node.js copying — robocopy doesn't support glob excludes,
+  // and rsync isn't available on Windows.
   console.log("\n=== Creating lean production node_modules ===");
   const staging = path.join(VERSO_ROOT, "build-node-modules");
-
-  // Use robocopy on Windows CI, rsync locally
-  const isWindows = process.platform === "win32";
 
   if (fs.existsSync(staging)) {
     fs.rmSync(staging, { recursive: true, force: true });
   }
+  fs.mkdirSync(staging, { recursive: true });
 
-  const excludePatterns = [
-    "electron@*", "@electron*",
-    "electron-builder@*", "app-builder-bin@*", "app-builder-lib@*",
-    "dmg-builder@*", "builder-util@*", "builder-util-runtime@*",
-    "typescript@*", "@typescript+native-preview*",
-    "tsdown@*", "@rolldown*", "rolldown@*",
-    "vitest@*", "@vitest*",
-    "oxlint*", "@oxlint*", "oxfmt*",
-    "node-llama-cpp@*", "@node-llama-cpp*",
-    "openclaw@*", "tsx@*",
-    "lit@*", "@lit*", "ollama@*",
-    "@types+*", "7zip-bin@*",
-    "esbuild@*", "@esbuild*",
-    "@cloudflare+workers-types@*",
-  ];
-
-  // Exclude non-Windows native binaries
-  const archExcludes = ARCH === "x64"
-    ? ["*-arm64@*", "*darwin-arm64*"]
-    : ["*-x64@*", "*darwin-x64*"];
-
-  const platformExcludes = ["*-darwin-*", "*-linux-*", "*-android-*"];
-
-  if (isWindows) {
-    // On Windows: use robocopy with exclude dirs
-    const allExcludes = [...excludePatterns, ...archExcludes, ...platformExcludes];
-    const excludeArgs = allExcludes.map((p) => `/XD .pnpm\\${p}`).join(" ");
-    try {
-      execSync(
-        `robocopy "${path.join(VERSO_ROOT, "node_modules")}" "${staging}" /E /NFL /NDL /NJH /NJS ${excludeArgs}`,
-        { cwd: VERSO_ROOT, stdio: "pipe" },
-      );
-    } catch {
-      // robocopy returns non-zero on success (1 = files copied)
-    }
-  } else {
-    // On macOS/Linux: use rsync (for local testing)
-    const rsyncExcludes = [
-      ...excludePatterns.map((p) => `--exclude=.pnpm/${p}`),
-      ...archExcludes.map((p) => `--exclude=.pnpm/${p}`),
-      ...platformExcludes.map((p) => `--exclude=.pnpm/${p}`),
-      "--exclude=.bin",
-    ];
-    execSync(
-      `rsync -a ${rsyncExcludes.join(" ")} "${path.join(VERSO_ROOT, "node_modules")}/" "${staging}/"`,
-      { cwd: VERSO_ROOT, stdio: "inherit" },
-    );
+  const sourceNM = path.join(VERSO_ROOT, "node_modules");
+  if (!fs.existsSync(sourceNM)) {
+    console.error("ERROR: node_modules not found at", sourceNM);
+    process.exit(1);
   }
 
-  // Clean broken symlinks (cross-platform)
+  // Patterns to exclude from .pnpm/ store (matched against directory names)
+  const excludePrefixes = [
+    "electron@", "@electron",
+    "electron-builder@", "app-builder-bin@", "app-builder-lib@",
+    "dmg-builder@", "builder-util@", "builder-util-runtime@",
+    "typescript@", "@typescript+native-preview",
+    "tsdown@", "@rolldown", "rolldown@",
+    "vitest@", "@vitest",
+    "oxlint", "@oxlint", "oxfmt",
+    "node-llama-cpp@", "@node-llama-cpp",
+    "openclaw@", "tsx@",
+    "lit@", "@lit",
+    "ollama@", "@types+",
+    "7zip-bin@", "esbuild@", "@esbuild",
+    "@cloudflare+workers-types@",
+  ];
+
+  // Exclude non-Windows and wrong-arch native binaries
+  const platformExcludes = ["-darwin-", "-linux-", "-android-"];
+  const archExcludes = ARCH === "x64"
+    ? ["-arm64@", "darwin-arm64"]
+    : ["-x64@", "darwin-x64"];
+
+  function shouldExcludePnpmDir(name) {
+    for (const prefix of excludePrefixes) {
+      if (name.startsWith(prefix)) return true;
+    }
+    for (const pat of platformExcludes) {
+      if (name.includes(pat)) return true;
+    }
+    for (const pat of archExcludes) {
+      if (name.includes(pat)) return true;
+    }
+    return false;
+  }
+
+  // Copy node_modules, filtering .pnpm/ contents and skipping .bin/
+  console.log("Copying production node_modules (filtering dev packages)...");
+  copyNodeModules(sourceNM, staging, shouldExcludePnpmDir);
+
+  // Clean broken symlinks
   console.log("Cleaning broken symlinks...");
   cleanBrokenSymlinks(staging);
 
@@ -184,17 +148,20 @@ async function main() {
   console.log("Stripping non-runtime files...");
   stripNonRuntimeFiles(path.join(staging, ".pnpm"));
 
-  const origSize = dirSizeMB(path.join(VERSO_ROOT, "node_modules"));
-  const leanSize = dirSizeMB(staging);
-  console.log(`Original node_modules: ~${origSize}MB`);
-  console.log(`Lean node_modules:     ~${leanSize}MB`);
+  // Final broken-symlink sweep
+  console.log("Final broken-symlink sweep...");
+  cleanBrokenSymlinks(staging);
 
-  // 6. Copy shared electron files (main.js, preload.js, renderer/, auth/, gateway/)
+  // Remove empty directories
+  removeEmptyDirs(staging);
+
+  console.log("Lean node_modules created at:", staging);
+
+  // 5. Copy shared electron files (main.js, preload.js, renderer/, auth/, gateway/)
   console.log("\n=== Copying shared Electron files ===");
   const electronDir = path.join(VERSO_ROOT, "apps", "electron");
-  const filesToCopy = ["main.js", "preload.js"];
 
-  for (const f of filesToCopy) {
+  for (const f of ["main.js", "preload.js"]) {
     const src = path.join(electronDir, f);
     const dest = path.join(WINDOWS_DIR, f);
     if (fs.existsSync(src)) {
@@ -203,8 +170,7 @@ async function main() {
     }
   }
 
-  const dirsToCopy = ["renderer", "auth", "gateway"];
-  for (const d of dirsToCopy) {
+  for (const d of ["renderer", "auth", "gateway"]) {
     const src = path.join(electronDir, d);
     const dest = path.join(WINDOWS_DIR, d);
     if (fs.existsSync(src)) {
@@ -213,7 +179,7 @@ async function main() {
     }
   }
 
-  // 7. Clean packaging-incompatible symlinks in extensions
+  // 6. Clean packaging-incompatible symlinks in extensions
   console.log("\n=== Cleaning packaging-incompatible symlinks ===");
   const extDir = path.join(VERSO_ROOT, "extensions");
   if (fs.existsSync(extDir)) {
@@ -224,19 +190,75 @@ async function main() {
   console.log(`You can now run: cd ${WINDOWS_DIR} && npx electron-builder --win --x64`);
 }
 
+// --- Copy node_modules with .pnpm filtering ---
+
+function copyNodeModules(src, dest, shouldExclude) {
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    // Skip .bin directory
+    if (entry.name === ".bin") continue;
+
+    if (entry.isSymbolicLink()) {
+      // Copy symlinks as-is (pnpm structure)
+      try {
+        const target = fs.readlinkSync(srcPath);
+        // Skip workspace-escaping symlinks
+        if (target.startsWith("../../../")) continue;
+        fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        fs.symlinkSync(target, destPath, entry.isDirectory() ? "junction" : "file");
+      } catch { /* skip broken symlinks */ }
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      if (entry.name === ".pnpm") {
+        // Filter .pnpm contents
+        fs.mkdirSync(destPath, { recursive: true });
+        const pnpmEntries = fs.readdirSync(srcPath, { withFileTypes: true });
+        for (const pe of pnpmEntries) {
+          if (pe.isDirectory() && shouldExclude(pe.name)) continue;
+          const peSrc = path.join(srcPath, pe.name);
+          const peDest = path.join(destPath, pe.name);
+          if (pe.isSymbolicLink()) {
+            try {
+              const target = fs.readlinkSync(peSrc);
+              fs.symlinkSync(target, peDest, "junction");
+            } catch { /* skip */ }
+          } else if (pe.isDirectory()) {
+            copyDirSync(peSrc, peDest);
+          } else {
+            fs.copyFileSync(peSrc, peDest);
+          }
+        }
+      } else {
+        copyDirSync(srcPath, destPath);
+      }
+    } else {
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
 // --- Utility functions ---
 
 function cleanBrokenSymlinks(dir) {
   if (!fs.existsSync(dir)) return;
   let found = true;
-  while (found) {
+  let passes = 0;
+  while (found && passes < 10) {
     found = false;
-    walkDir(dir, (filePath) => {
+    passes++;
+    walkLinks(dir, (filePath) => {
       try {
         const stat = fs.lstatSync(filePath);
         if (stat.isSymbolicLink()) {
           try {
-            fs.statSync(filePath); // resolves symlink
+            fs.statSync(filePath); // resolves symlink — throws if broken
           } catch {
             fs.unlinkSync(filePath);
             found = true;
@@ -247,32 +269,46 @@ function cleanBrokenSymlinks(dir) {
   }
 }
 
+function walkLinks(dir, callback) {
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        callback(fullPath);
+      } else if (entry.isDirectory()) {
+        walkLinks(fullPath, callback);
+      }
+    }
+  } catch { /* ignore permission errors */ }
+}
+
 function stripNonRuntimeFiles(dir) {
   if (!fs.existsSync(dir)) return;
-  const deletePatterns = [".map", ".d.ts", ".d.mts", ".d.cts"];
-  const deleteNames = [
-    "README.md", "README.txt", "README", "CHANGELOG.md", "CHANGELOG.txt",
-    "HISTORY.md", "AUTHORS", "AUTHORS.md", "CONTRIBUTING.md",
-  ];
-  const deleteDirs = ["test", "tests", "__tests__", "spec", "example", "examples", "demo", "fixture", "fixtures"];
+  const deleteExts = [".map", ".d.ts", ".d.mts", ".d.cts"];
+  const deleteNames = new Set([
+    "readme.md", "readme.txt", "readme", "changelog.md", "changelog.txt",
+    "history.md", "authors", "authors.md", "contributing.md",
+  ]);
+  const deleteDirs = new Set([
+    "test", "tests", "__tests__", "spec", "example", "examples",
+    "demo", "fixture", "fixtures",
+  ]);
 
-  walkDir(dir, (filePath) => {
+  walkDir(dir, (filePath, isDir) => {
     const basename = path.basename(filePath);
-    const ext = path.extname(filePath);
-
     try {
-      const stat = fs.lstatSync(filePath);
-      if (stat.isDirectory()) {
-        if (deleteDirs.includes(basename)) {
+      if (isDir) {
+        if (deleteDirs.has(basename)) {
           fs.rmSync(filePath, { recursive: true, force: true });
         }
         return;
       }
-      if (deletePatterns.some((p) => filePath.endsWith(p))) {
+      if (deleteExts.some((ext) => filePath.endsWith(ext))) {
         fs.unlinkSync(filePath);
-      } else if (deleteNames.some((n) => basename.toLowerCase() === n.toLowerCase())) {
+      } else if (deleteNames.has(basename.toLowerCase())) {
         fs.unlinkSync(filePath);
-      } else if (ext === ".ts" && !filePath.endsWith(".d.ts")) {
+      } else if (filePath.endsWith(".ts") && !filePath.endsWith(".d.ts")) {
         fs.unlinkSync(filePath);
       }
     } catch { /* ignore */ }
@@ -284,12 +320,31 @@ function walkDir(dir, callback) {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      callback(fullPath);
+      callback(fullPath, entry.isDirectory());
       if (entry.isDirectory()) {
         walkDir(fullPath, callback);
       }
     }
   } catch { /* ignore permission errors */ }
+}
+
+function removeEmptyDirs(dir) {
+  try {
+    const entries = fs.readdirSync(dir);
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          removeEmptyDirs(fullPath);
+          // Re-check if now empty
+          if (fs.readdirSync(fullPath).length === 0) {
+            fs.rmdirSync(fullPath);
+          }
+        }
+      } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
 }
 
 function copyDirSync(src, dest) {
@@ -298,20 +353,16 @@ function copyDirSync(src, dest) {
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
+    if (entry.isSymbolicLink()) {
+      try {
+        const target = fs.readlinkSync(srcPath);
+        fs.symlinkSync(target, destPath, entry.isDirectory() ? "junction" : "file");
+      } catch { /* skip broken */ }
+    } else if (entry.isDirectory()) {
       copyDirSync(srcPath, destPath);
     } else {
       fs.copyFileSync(srcPath, destPath);
     }
-  }
-}
-
-function dirSizeMB(dir) {
-  try {
-    const result = execSync(`du -sm "${dir}" 2>/dev/null || echo "0"`, { encoding: "utf8" });
-    return parseInt(result.split("\t")[0]) || 0;
-  } catch {
-    return 0;
   }
 }
 
