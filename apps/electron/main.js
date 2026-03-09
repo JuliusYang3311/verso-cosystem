@@ -3,6 +3,7 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 
 const { app, BrowserWindow, ipcMain, Menu, Tray, powerSaveBlocker } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const WebSocket = require('ws');
@@ -385,7 +386,61 @@ function showSettings() {
   mainWindow.show();
 }
 
-void app.whenReady().then(() => {
+function loadLicenseText() {
+  const candidates = [
+    path.join(process.resourcesPath, 'LICENSE.txt'),
+    path.join(__dirname, '..', '..', 'LICENSE.txt'),
+    path.join(__dirname, 'LICENSE.txt'),
+  ];
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8'); } catch {}
+  }
+  return null;
+}
+
+function showEula() {
+  return new Promise((resolve) => {
+    const eulaWin = new BrowserWindow({
+      width: 600,
+      height: 720,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      titleBarStyle: 'hiddenInset',
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+      },
+      show: false,
+    });
+
+    eulaWin.loadFile('renderer/eula.html');
+
+    eulaWin.once('ready-to-show', () => {
+      const text = loadLicenseText() || 'License file not found. By using this software you agree to the End User License Agreement.';
+      eulaWin.webContents.send('eula-content', text);
+      eulaWin.show();
+    });
+
+    ipcMain.once('eula-response', (_e, accepted) => {
+      eulaWin.close();
+      resolve(accepted);
+    });
+
+    eulaWin.on('closed', () => resolve(false));
+  });
+}
+
+void app.whenReady().then(async () => {
+  const eulaAcceptedPath = path.join(app.getPath('userData'), '.eula-accepted');
+  if (!fs.existsSync(eulaAcceptedPath)) {
+    const accepted = await showEula();
+    if (!accepted) { app.quit(); return; }
+    fs.mkdirSync(path.dirname(eulaAcceptedPath), { recursive: true });
+    fs.writeFileSync(eulaAcceptedPath, new Date().toISOString());
+  }
+
   // Prevent system sleep while Verso is running
   const sleepBlockerId = powerSaveBlocker.start('prevent-app-suspension');
   app.on('will-quit', () => powerSaveBlocker.stop(sleepBlockerId));

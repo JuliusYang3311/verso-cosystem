@@ -45,16 +45,20 @@ jobs:
         env:
           DEBUG: ""
         run: |
-          # Try NSIS build first; if it fails (RangeError on large node_modules), fall back to dir + zip
-          try {
-            npx electron-builder --win --x64 --publish never 2>&1 | Out-Null
+          # Try NSIS installer first
+          npx electron-builder --win --x64 --publish never 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) {
             Write-Host "NSIS build succeeded"
-          } catch {
-            Write-Host "NSIS build failed, falling back to --dir + zip"
-            npx electron-builder --win --x64 --dir --publish never 2>&1 | Out-Null
-            Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\Verso-1.0.0-x64.zip" -Force
-            Write-Host "Zip package created"
+            exit 0
           }
+          Write-Host "NSIS build failed (exit $LASTEXITCODE), falling back to --dir + zip"
+          npx electron-builder --win --x64 --dir --publish never 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Dir build also failed (exit $LASTEXITCODE)"
+            exit 1
+          }
+          Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\Verso-1.0.0-x64.zip" -Force
+          Write-Host "Zip package created"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
