@@ -26,8 +26,11 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "differentialPackage": false
     },
+    "asar": true,
+    "compression": "normal",
     "files": [
       "main.js",
       "preload.js",
@@ -81,6 +84,6 @@
   },
   "devDependencies": {
     "electron": "^32.3.3",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^25.1.8"
   }
 }

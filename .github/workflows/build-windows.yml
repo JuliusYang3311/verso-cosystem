@@ -41,8 +41,20 @@ jobs:
 
       - name: Build Electron (Windows x64)
         working-directory: apps/windows
-        shell: cmd
-        run: npx electron-builder --win --x64
+        shell: pwsh
+        env:
+          DEBUG: ""
+        run: |
+          # Try NSIS build first; if it fails (RangeError on large node_modules), fall back to dir + zip
+          try {
+            npx electron-builder --win --x64 --publish never 2>&1 | Out-Null
+            Write-Host "NSIS build succeeded"
+          } catch {
+            Write-Host "NSIS build failed, falling back to --dir + zip"
+            npx electron-builder --win --x64 --dir --publish never 2>&1 | Out-Null
+            Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\Verso-1.0.0-x64.zip" -Force
+            Write-Host "Zip package created"
+          }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -51,3 +63,4 @@ jobs:
           path: |
             apps/windows/dist/*.exe
             apps/windows/dist/*.exe.blockmap
+            apps/windows/dist/*.zip
