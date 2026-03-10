@@ -266,14 +266,10 @@ function launchGateway(port) {
 
   console.log('[Main] Gateway root:', resolvedGatewayRoot);
 
-  // Use Electron's own Node.js runtime via ELECTRON_RUN_AS_NODE — already signed
-  // and trusted by the OS, avoiding security blocks on bundled standalone binaries.
-  const nodeBin = app.isPackaged ? process.execPath : 'node';
-
+  const nodeBin = app.isPackaged ? path.join(resolvedGatewayRoot, 'node') : 'node';
   console.log('[Main] Starting embedded gateway:', nodeBin, gatewayPath);
 
   const env = { ...process.env };
-  env.ELECTRON_RUN_AS_NODE = '1';
   env.VERSO_GATEWAY_PORT = port;
   env.VERSO_GATEWAY_TOKEN = gatewayToken;
   env.VERSO_EMBEDDED = 'true';
