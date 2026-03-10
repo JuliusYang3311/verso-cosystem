@@ -84,7 +84,8 @@ describe("CronService delivery plan consistency", () => {
 
     const result = await cron.run(job.id, "force");
     expect(result).toEqual({ ok: true, ran: true });
-    expect(enqueueSystemEvent).toHaveBeenCalledWith("Cron: done", { agentId: undefined });
+    // Isolated job result injection is now handled inside run.ts, not the timer layer.
+    expect(enqueueSystemEvent).not.toHaveBeenCalled();
 
     cron.stop();
     await store.cleanup();

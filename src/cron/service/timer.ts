@@ -1,7 +1,6 @@
 import type { HeartbeatRunResult } from "../../infra/heartbeat-wake.js";
 import type { CronJob } from "../types.js";
 import type { CronEvent, CronServiceState } from "./state.js";
-import { resolveCronDeliveryPlan } from "../delivery.js";
 import {
   computeJobNextRunAtMs,
   nextWakeAtMs,
@@ -422,32 +421,8 @@ async function executeJobCore(
     message: job.payload.message,
   });
 
-  // Post a short summary back to the main session.
-  const summaryText = res.summary?.trim();
-  const deliveryPlan = resolveCronDeliveryPlan(job);
-  if (summaryText && deliveryPlan.requested) {
-    const prefix = "Cron";
-    const label =
-      res.status === "error" ? `${prefix} (error): ${summaryText}` : `${prefix}: ${summaryText}`;
-    state.deps.enqueueSystemEvent(label, { agentId: job.agentId });
-    if (job.wakeMode === "now") {
-      state.deps.requestHeartbeatNow({ reason: `cron:${job.id}` });
-    }
-  }
-
-  // Inject the full output directly into the main session transcript.
-  const outputText = res.outputText?.trim();
-  if (state.deps.injectMainSessionMessage && outputText) {
-    try {
-      await state.deps.injectMainSessionMessage({
-        agentId: job.agentId,
-        text: outputText,
-        jobId: job.id,
-      });
-    } catch {
-      // Best-effort: don't fail the cron job if transcript injection fails.
-    }
-  }
+  // Cron result injection into the main session transcript is handled
+  // inside run.ts (the isolated agent runner) — no duplicate delivery here.
 
   return {
     status: res.status,

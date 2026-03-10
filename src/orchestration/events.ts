@@ -9,6 +9,51 @@ const logger = {
   error: (...args: unknown[]) => console.error("[orchestration-events]", ...args),
 };
 
+// ---------------------------------------------------------------------------
+// Gateway RPC helper with retry + exponential backoff
+// ---------------------------------------------------------------------------
+
+async function callGatewayWithRetry(opts: {
+  method: string;
+  params: Record<string, unknown>;
+  timeoutMs: number;
+  config: VersoConfig;
+  maxRetries?: number;
+}): Promise<unknown> {
+  const { method, params, timeoutMs, config, maxRetries = 3 } = opts;
+  const { callGateway } = await import("../gateway/call.js");
+  const { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } =
+    await import("../utils/message-channel.js");
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await callGateway({
+        method,
+        params,
+        timeoutMs,
+        config,
+        clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+        clientDisplayName: "orchestrator",
+        mode: GATEWAY_CLIENT_MODES.BACKEND,
+      });
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        const delayMs = Math.min(1000 * 2 ** attempt, 8000);
+        logger.warn(
+          `Gateway RPC ${method} failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delayMs}ms`,
+          {
+            error: String(err),
+          },
+        );
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export type OrchestrationEvent =
   | { type: "orchestration.started"; orchestrationId: string; userPrompt: string }
   | {
@@ -74,26 +119,56 @@ export async function broadcastOrchestrationEvent(
   const effectiveConfig = config ?? loadConfig();
 
   try {
-    // Broadcast event via gateway
-    const { callGateway } = await import("../gateway/call.js");
-    const { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } =
-      await import("../utils/message-channel.js");
-    await callGateway({
+    // Broadcast event via gateway (fire-and-forget, no retry needed for UI updates)
+    await callGatewayWithRetry({
       method: "orchestration.broadcast",
-      params: {
-        event: event.type,
-        payload: event,
-      },
+      params: { event: event.type, payload: event },
       timeoutMs: 5000,
       config: effectiveConfig,
-      clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
-      clientDisplayName: "orchestrator",
-      mode: GATEWAY_CLIENT_MODES.BACKEND,
+      maxRetries: 1,
     });
 
     logger.info("Successfully broadcasted orchestration event via gateway", {
       type: event.type,
     });
+
+    // For subtask completion/failure, send progress update to originating channel
+    if (event.type === "orchestration.subtask") {
+      const { orchestrationId, subtaskId, status, title } = event.payload;
+      if (status === "completed" || status === "failed") {
+        try {
+          const { loadOrchestration } = await import("./store.js");
+          const orch = await loadOrchestration(orchestrationId);
+          if (orch?.delivery?.channel && orch.delivery.to) {
+            const subtasks = orch.plan?.subtasks ?? [];
+            const done = subtasks.filter((s) => s.status === "completed").length;
+            const total = subtasks.length;
+            const icon = status === "completed" ? "✅" : "⚠️";
+            const progressMsg = `${icon} [${done}/${total}] ${title ?? subtaskId} — ${status}`;
+            await callGatewayWithRetry({
+              method: "send",
+              params: {
+                channel: orch.delivery.channel,
+                to: orch.delivery.to,
+                message: progressMsg,
+                idempotencyKey: `orch-progress-${orchestrationId}-${subtaskId}-${status}`,
+              },
+              timeoutMs: 10000,
+              config: effectiveConfig,
+              maxRetries: 1,
+            }).catch((err) => {
+              logger.warn("Failed to send subtask progress update (non-fatal)", {
+                orchestrationId,
+                subtaskId,
+                error: String(err),
+              });
+            });
+          }
+        } catch {
+          // Non-fatal: progress updates are best-effort
+        }
+      }
+    }
 
     // For completion/failure events, send notification via message.send
     // AND process the queue to start the next orchestration
@@ -120,39 +195,73 @@ export async function broadcastOrchestrationEvent(
           notificationMessage = `❌ Orchestration ${orchId} failed.\n\nError: ${error}`;
         }
 
-        // Inject notification into agent:main:main session
-        logger.info("Injecting notification into agent:main:main", {
-          orchId,
-          messageLength: notificationMessage.length,
-        });
-
-        try {
-          const { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } =
-            await import("../utils/message-channel.js");
-
-          const sendResult = await callGateway({
-            method: "chat.inject",
-            params: {
-              sessionKey: "agent:main:main",
-              message: notificationMessage,
-            },
-            timeoutMs: 10000,
-            config: effectiveConfig,
-            clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
-            clientDisplayName: "orchestrator",
-            mode: GATEWAY_CLIENT_MODES.BACKEND,
-          });
-
-          logger.info("Successfully injected orchestration notification", {
+        // Mutually exclusive delivery: outbound if configured, inject into main session if not
+        if (orch.delivery?.channel && orch.delivery?.to) {
+          // Outbound delivery via gateway "send" RPC (daemon has no channel plugins)
+          logger.info("Delivering orchestration notification outbound via gateway send", {
             orchId,
-            type: event.type,
-            result: sendResult,
+            channel: orch.delivery.channel,
+            to: orch.delivery.to,
           });
-        } catch (err) {
-          logger.error("Failed to inject orchestration notification", {
+
+          try {
+            await callGatewayWithRetry({
+              method: "send",
+              params: {
+                channel: orch.delivery.channel,
+                to: orch.delivery.to,
+                message: notificationMessage,
+                idempotencyKey: `orch-notify-${orchId}-${event.type}`,
+              },
+              timeoutMs: 30000,
+              config: effectiveConfig,
+            });
+
+            logger.info("Successfully delivered orchestration notification outbound", {
+              orchId,
+              channel: orch.delivery.channel,
+            });
+          } catch (err) {
+            if (!orch.delivery.bestEffort) {
+              logger.error("Failed to deliver orchestration notification outbound", {
+                orchId,
+                error: String(err),
+              });
+            } else {
+              logger.warn("Best-effort delivery failed (ignored)", {
+                orchId,
+                error: String(err),
+              });
+            }
+          }
+        } else {
+          // No outbound delivery configured — inject into main session
+          logger.info("Injecting notification into agent:main:main", {
             orchId,
-            error: String(err),
+            messageLength: notificationMessage.length,
           });
+
+          try {
+            await callGatewayWithRetry({
+              method: "chat.inject",
+              params: {
+                sessionKey: "agent:main:main",
+                message: notificationMessage,
+              },
+              timeoutMs: 10000,
+              config: effectiveConfig,
+            });
+
+            logger.info("Successfully injected orchestration notification", {
+              orchId,
+              type: event.type,
+            });
+          } catch (err) {
+            logger.error("Failed to inject orchestration notification", {
+              orchId,
+              error: String(err),
+            });
+          }
         }
       }
 

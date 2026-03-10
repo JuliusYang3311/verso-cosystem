@@ -317,6 +317,7 @@ describe("cron tool", () => {
     };
     expect(call?.params?.delivery).toEqual({
       mode: "announce",
+      channel: "whatsapp",
       to: "alice",
     });
   });

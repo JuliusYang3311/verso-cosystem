@@ -2,7 +2,6 @@ import type { CliDeps } from "../cli/deps.js";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { loadConfig } from "../config/config.js";
 import { resolveAgentMainSessionKey } from "../config/sessions.js";
-import { appendAssistantMessageToSessionTranscript } from "../config/sessions/transcript.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
 import { appendCronRunLog, resolveCronRunLogPath } from "../cron/run-log.js";
 import { CronService } from "../cron/service.js";
@@ -77,18 +76,6 @@ export function buildGatewayCronService(params: {
       });
     },
     log: getChildLogger({ module: "cron", storePath }),
-    injectMainSessionMessage: async ({ agentId, text, jobId }) => {
-      const { agentId: resolved, cfg: runtimeConfig } = resolveCronAgent(agentId);
-      const sessionKey = resolveAgentMainSessionKey({
-        cfg: runtimeConfig,
-        agentId: resolved,
-      });
-      await appendAssistantMessageToSessionTranscript({
-        agentId: resolved,
-        sessionKey,
-        text: `[Cron ${jobId}] ${text}`,
-      });
-    },
     onEvent: (evt) => {
       params.broadcast("cron", evt, { dropIfSlow: true });
       if (evt.action === "finished") {

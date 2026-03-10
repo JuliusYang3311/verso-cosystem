@@ -7,6 +7,7 @@ import { Type } from "@sinclair/typebox";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import type { VersoConfig } from "../config/types.js";
 import { jsonResult, readStringParam } from "../agents/tools/common.js";
+import { autoDetectDelivery } from "../cron/isolated-agent/delivery-target.js";
 import { getOrchestratorStatus, submitOrchestration } from "./orchestrator.js";
 
 const OrchestratorTriggerSchema = Type.Object({
@@ -38,6 +39,7 @@ export function createOrchestratorTriggerTool(opts: OrchestratorTriggerToolOptio
     label: "Orchestrator",
     name: "orchestrator",
     description: `Submit complex tasks to the orchestrator daemon for multi-agent parallel execution.
+Completion/failure notifications are automatically delivered back to the channel the user messaged from (e.g. Telegram, WhatsApp). If no inbound route is detected, notifications are injected into the main session.
 
 ACTIONS:
 - submit: Submit a new orchestration request. The daemon will decompose the task, dispatch workers, run acceptance tests, and handle fix loops automatically. Requires: userPrompt. Optional: baseProjectDir (path to existing project to enhance).
@@ -67,7 +69,7 @@ WORKFLOW:
 1. Call orchestrator with action "submit" and the user's task description
 2. The daemon will process the request in the background
 3. Results will be written to an output directory when complete
-4. You can check orchestration status via the orchestration.get gateway method`,
+4. Completion notification is automatically sent back to the originating channel`,
     parameters: OrchestratorTriggerSchema,
     async execute(_toolCallId: string, params: Record<string, unknown>) {
       const action = readStringParam(params, "action", { required: true });
@@ -76,11 +78,15 @@ WORKFLOW:
         case "submit": {
           const userPrompt = readStringParam(params, "userPrompt", { required: true });
           const baseProjectDir = readStringParam(params, "baseProjectDir");
+          // Auto-detect delivery target from session route
+          const delivery = (await autoDetectDelivery(opts.config, opts.agentId)) ?? undefined;
+
           try {
             const result = await submitOrchestration(userPrompt, {
               cfg: opts.config,
               agentId: opts.agentId,
               baseProjectDir,
+              delivery,
               provider: opts.provider,
               model: opts.model,
             });

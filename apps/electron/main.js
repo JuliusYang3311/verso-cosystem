@@ -415,7 +415,7 @@ function showEula() {
       show: false,
     });
 
-    eulaWin.loadFile('renderer/eula.html');
+    void eulaWin.loadFile('renderer/eula.html');
 
     eulaWin.once('ready-to-show', () => {
       const text = loadLicenseText() || 'License file not found. By using this software you agree to the End User License Agreement.';

@@ -1,6 +1,13 @@
 // src/orchestration/types.ts — Multi-agent orchestration data model
 
+import type { ChannelId } from "../channels/plugins/types.js";
 import type { WorkerSpecialization } from "./specializations/index.js";
+
+export type OrchestrationDelivery = {
+  channel: ChannelId;
+  to: string;
+  bestEffort?: boolean;
+};
 
 export type TaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
@@ -84,6 +91,9 @@ export type Orchestration = {
   chatSessionKey: string;
   /** Base project directory to enhance (if provided, copied to sandbox before orchestration starts). */
   baseProjectDir?: string;
+  /** Optional outbound delivery config. When set, completion/failure notifications are
+   *  delivered to this channel instead of being injected into the main session transcript. */
+  delivery?: OrchestrationDelivery;
   plan?: OrchestrationPlan;
   fixTasks: FixTask[];
   acceptanceResults: AcceptanceResult[];
@@ -119,6 +129,7 @@ export function createOrchestration(params: {
   workspaceDir: string;
   sourceWorkspaceDir: string;
   baseProjectDir?: string;
+  delivery?: OrchestrationDelivery;
   maxFixCycles?: number;
 }): Orchestration {
   const now = Date.now();
@@ -130,8 +141,9 @@ export function createOrchestration(params: {
     status: "planning",
     workspaceDir: params.workspaceDir,
     sourceWorkspaceDir: params.sourceWorkspaceDir,
-    chatSessionKey: "agent:main:main", // Hardcoded notification target
+    chatSessionKey: "agent:main:main",
     baseProjectDir: params.baseProjectDir,
+    delivery: params.delivery,
     fixTasks: [],
     acceptanceResults: [],
     maxFixCycles: params.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,

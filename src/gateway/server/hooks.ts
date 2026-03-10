@@ -61,11 +61,15 @@ export function createGatewayHooksRequestHandler(params: {
         model: value.model,
         thinking: value.thinking,
         timeoutSeconds: value.timeoutSeconds,
-        deliver: value.deliver,
-        channel: value.channel,
-        to: value.to,
         allowUnsafeExternalContent: value.allowUnsafeExternalContent,
       },
+      delivery: value.deliver
+        ? {
+            mode: "announce",
+            channel: value.channel !== "last" ? value.channel : undefined,
+            to: value.to,
+          }
+        : undefined,
       state: { nextRunAtMs: now },
     };
 

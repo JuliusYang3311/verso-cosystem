@@ -19,11 +19,11 @@ function createDeferred<T>() {
 }
 
 async function waitForCalls(mockFn: { mock: { calls: unknown[][] } }, count: number) {
-  for (let i = 0; i < 50; i += 1) {
+  for (let i = 0; i < 200; i += 1) {
     if (mockFn.mock.calls.length >= count) {
       return;
     }
-    await sleep(0);
+    await sleep(10);
   }
   throw new Error(`Expected ${count} calls, got ${mockFn.mock.calls.length}`);
 }

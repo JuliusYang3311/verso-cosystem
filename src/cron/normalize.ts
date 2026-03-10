@@ -1,7 +1,6 @@
 import type { CronJobCreate, CronJobPatch } from "./types.js";
 import { sanitizeAgentId } from "../routing/session-key.js";
 import { parseAbsoluteTimeMs } from "./parse.js";
-import { migrateLegacyCronPayload } from "./payload-migration.js";
 import { inferLegacyName } from "./service/normalize.js";
 
 type UnknownRecord = Record<string, unknown>;
@@ -64,8 +63,6 @@ function coerceSchedule(schedule: UnknownRecord) {
 
 function coercePayload(payload: UnknownRecord) {
   const next: UnknownRecord = { ...payload };
-  // Back-compat: older configs used `provider` for delivery channel.
-  migrateLegacyCronPayload(next);
   const kindRaw = typeof next.kind === "string" ? next.kind.trim().toLowerCase() : "";
   if (kindRaw === "agentturn") {
     next.kind = "agentTurn";
@@ -132,6 +129,12 @@ function coercePayload(payload: UnknownRecord) {
   ) {
     delete next.allowUnsafeExternalContent;
   }
+  // Strip legacy delivery fields from payload — they belong in `delivery`.
+  delete next.deliver;
+  delete next.channel;
+  delete next.to;
+  delete next.bestEffortDeliver;
+  delete next.provider;
   return next;
 }
 
@@ -166,53 +169,6 @@ function coerceDelivery(delivery: UnknownRecord) {
     }
   }
   return next;
-}
-
-function hasLegacyDeliveryHints(payload: UnknownRecord) {
-  if (typeof payload.deliver === "boolean") {
-    return true;
-  }
-  if (typeof payload.bestEffortDeliver === "boolean") {
-    return true;
-  }
-  if (typeof payload.to === "string" && payload.to.trim()) {
-    return true;
-  }
-  return false;
-}
-
-function buildDeliveryFromLegacyPayload(payload: UnknownRecord): UnknownRecord {
-  const deliver = payload.deliver;
-  const mode = deliver === false ? "none" : "announce";
-  const channelRaw =
-    typeof payload.channel === "string" ? payload.channel.trim().toLowerCase() : "";
-  const toRaw = typeof payload.to === "string" ? payload.to.trim() : "";
-  const next: UnknownRecord = { mode };
-  if (channelRaw) {
-    next.channel = channelRaw;
-  }
-  if (toRaw) {
-    next.to = toRaw;
-  }
-  if (typeof payload.bestEffortDeliver === "boolean") {
-    next.bestEffort = payload.bestEffortDeliver;
-  }
-  return next;
-}
-
-function stripLegacyDeliveryFields(payload: UnknownRecord) {
-  if ("deliver" in payload) {
-    delete payload.deliver;
-  }
-  if ("channel" in payload) {
-    delete payload.channel;
-  }
-  if ("to" in payload) {
-    delete payload.to;
-  }
-  if ("bestEffortDeliver" in payload) {
-    delete payload.bestEffortDeliver;
-  }
 }
 
 function unwrapJob(raw: UnknownRecord) {
@@ -268,35 +224,6 @@ function copyTopLevelAgentTurnFields(next: UnknownRecord, payload: UnknownRecord
     typeof next.allowUnsafeExternalContent === "boolean"
   ) {
     payload.allowUnsafeExternalContent = next.allowUnsafeExternalContent;
-  }
-}
-
-function copyTopLevelLegacyDeliveryFields(next: UnknownRecord, payload: UnknownRecord) {
-  if (typeof payload.deliver !== "boolean" && typeof next.deliver === "boolean") {
-    payload.deliver = next.deliver;
-  }
-  if (
-    typeof payload.channel !== "string" &&
-    typeof next.channel === "string" &&
-    next.channel.trim()
-  ) {
-    payload.channel = next.channel.trim();
-  }
-  if (typeof payload.to !== "string" && typeof next.to === "string" && next.to.trim()) {
-    payload.to = next.to.trim();
-  }
-  if (
-    typeof payload.bestEffortDeliver !== "boolean" &&
-    typeof next.bestEffortDeliver === "boolean"
-  ) {
-    payload.bestEffortDeliver = next.bestEffortDeliver;
-  }
-  if (
-    typeof payload.provider !== "string" &&
-    typeof next.provider === "string" &&
-    next.provider.trim()
-  ) {
-    payload.provider = next.provider.trim();
   }
 }
 
@@ -389,7 +316,30 @@ export function normalizeCronJobInput(
     next.payload = coercePayload(base.payload);
   }
 
-  if (isRecord(base.delivery)) {
+  // Build delivery from legacy top-level fields if no explicit delivery object.
+  if (!isRecord(base.delivery)) {
+    const deliver = base.deliver;
+    const channelRaw = typeof base.channel === "string" ? base.channel.trim().toLowerCase() : "";
+    const toRaw = typeof base.to === "string" ? base.to.trim() : "";
+    const providerRaw = typeof base.provider === "string" ? base.provider.trim().toLowerCase() : "";
+    const bestEffort =
+      typeof base.bestEffortDeliver === "boolean" ? base.bestEffortDeliver : undefined;
+    const hasLegacy =
+      typeof deliver === "boolean" ||
+      Boolean(toRaw) ||
+      Boolean(channelRaw) ||
+      Boolean(providerRaw) ||
+      bestEffort !== undefined;
+    if (hasLegacy) {
+      const legacyDelivery: UnknownRecord = {};
+      legacyDelivery.mode = deliver === false ? "none" : "announce";
+      const ch = channelRaw || providerRaw;
+      if (ch) legacyDelivery.channel = ch;
+      if (toRaw) legacyDelivery.to = toRaw;
+      if (bestEffort !== undefined) legacyDelivery.bestEffort = bestEffort;
+      next.delivery = legacyDelivery;
+    }
+  } else {
     next.delivery = coerceDelivery(base.delivery);
   }
 
@@ -400,7 +350,6 @@ export function normalizeCronJobInput(
   const payload = isRecord(next.payload) ? next.payload : null;
   if (payload && payload.kind === "agentTurn") {
     copyTopLevelAgentTurnFields(next, payload);
-    copyTopLevelLegacyDeliveryFields(next, payload);
   }
   stripLegacyTopLevelFields(next);
 
@@ -443,20 +392,13 @@ export function normalizeCronJobInput(
     ) {
       next.deleteAfterRun = true;
     }
-    const payload = isRecord(next.payload) ? next.payload : null;
     const payloadKind = payload && typeof payload.kind === "string" ? payload.kind : "";
     const sessionTarget = typeof next.sessionTarget === "string" ? next.sessionTarget : "";
     const isIsolatedAgentTurn =
       sessionTarget === "isolated" || (sessionTarget === "" && payloadKind === "agentTurn");
     const hasDelivery = "delivery" in next && next.delivery !== undefined;
-    const hasLegacyDelivery = payload ? hasLegacyDeliveryHints(payload) : false;
     if (!hasDelivery && isIsolatedAgentTurn && payloadKind === "agentTurn") {
-      if (payload && hasLegacyDelivery) {
-        next.delivery = buildDeliveryFromLegacyPayload(payload);
-        stripLegacyDeliveryFields(payload);
-      } else {
-        next.delivery = { mode: "announce" };
-      }
+      next.delivery = { mode: "announce" };
     }
   }
 

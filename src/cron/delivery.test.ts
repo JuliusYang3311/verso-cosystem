@@ -26,20 +26,27 @@ describe("resolveCronDeliveryPlan", () => {
         delivery: { channel: "telegram", to: "123", mode: undefined as never },
       }),
     );
-    expect(plan.mode).toBe("announce");
-    expect(plan.requested).toBe(true);
+    expect(plan.mode).toBe("none");
+    expect(plan.requested).toBe(false);
     expect(plan.channel).toBe("telegram");
     expect(plan.to).toBe("123");
   });
 
-  it("respects legacy payload deliver=false", () => {
-    const plan = resolveCronDeliveryPlan(
-      makeJob({
-        delivery: undefined,
-        payload: { kind: "agentTurn", message: "hello", deliver: false },
-      }),
-    );
+  it("returns not-requested when no delivery configured", () => {
+    const plan = resolveCronDeliveryPlan(makeJob({ delivery: undefined }));
     expect(plan.mode).toBe("none");
     expect(plan.requested).toBe(false);
+  });
+
+  it("returns requested for announce mode", () => {
+    const plan = resolveCronDeliveryPlan(
+      makeJob({
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      }),
+    );
+    expect(plan.mode).toBe("announce");
+    expect(plan.requested).toBe(true);
+    expect(plan.channel).toBe("telegram");
+    expect(plan.to).toBe("123");
   });
 });

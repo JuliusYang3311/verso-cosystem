@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { VersoConfig } from "../config/types.js";
+import type { OrchestrationDelivery } from "./types.js";
 import { resolveDefaultAgentWorkspaceDir } from "../agents/workspace.js";
 import { resolveStateDir } from "../config/paths.js";
 import { saveOrchestration } from "./store.js";
@@ -324,6 +325,7 @@ export async function submitOrchestration(
     cfg?: VersoConfig;
     agentId?: string;
     baseProjectDir?: string;
+    delivery?: OrchestrationDelivery;
     provider?: string;
     model?: string;
   },
@@ -355,6 +357,7 @@ export async function submitOrchestration(
     workspaceDir: "", // Will be set by daemon
     sourceWorkspaceDir: workspace,
     baseProjectDir,
+    delivery: opts?.delivery,
     maxFixCycles,
   });
 

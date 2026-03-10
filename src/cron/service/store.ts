@@ -2,120 +2,9 @@ import fs from "node:fs";
 import type { CronJob } from "../types.js";
 import type { CronServiceState } from "./state.js";
 import { parseAbsoluteTimeMs } from "../parse.js";
-import { migrateLegacyCronPayload } from "../payload-migration.js";
 import { loadCronStore, saveCronStore } from "../store.js";
 import { recomputeNextRuns } from "./jobs.js";
 import { inferLegacyName, normalizeOptionalText } from "./normalize.js";
-
-function hasLegacyDeliveryHints(payload: Record<string, unknown>) {
-  if (typeof payload.deliver === "boolean") {
-    return true;
-  }
-  if (typeof payload.bestEffortDeliver === "boolean") {
-    return true;
-  }
-  if (typeof payload.to === "string" && payload.to.trim()) {
-    return true;
-  }
-  return false;
-}
-
-function buildDeliveryFromLegacyPayload(payload: Record<string, unknown>) {
-  const deliver = payload.deliver;
-  const mode = deliver === false ? "none" : "announce";
-  const channelRaw =
-    typeof payload.channel === "string" ? payload.channel.trim().toLowerCase() : "";
-  const toRaw = typeof payload.to === "string" ? payload.to.trim() : "";
-  const next: Record<string, unknown> = { mode };
-  if (channelRaw) {
-    next.channel = channelRaw;
-  }
-  if (toRaw) {
-    next.to = toRaw;
-  }
-  if (typeof payload.bestEffortDeliver === "boolean") {
-    next.bestEffort = payload.bestEffortDeliver;
-  }
-  return next;
-}
-
-function buildDeliveryPatchFromLegacyPayload(payload: Record<string, unknown>) {
-  const deliver = payload.deliver;
-  const channelRaw =
-    typeof payload.channel === "string" ? payload.channel.trim().toLowerCase() : "";
-  const toRaw = typeof payload.to === "string" ? payload.to.trim() : "";
-  const next: Record<string, unknown> = {};
-  let hasPatch = false;
-
-  if (deliver === false) {
-    next.mode = "none";
-    hasPatch = true;
-  } else if (deliver === true || toRaw) {
-    next.mode = "announce";
-    hasPatch = true;
-  }
-  if (channelRaw) {
-    next.channel = channelRaw;
-    hasPatch = true;
-  }
-  if (toRaw) {
-    next.to = toRaw;
-    hasPatch = true;
-  }
-  if (typeof payload.bestEffortDeliver === "boolean") {
-    next.bestEffort = payload.bestEffortDeliver;
-    hasPatch = true;
-  }
-
-  return hasPatch ? next : null;
-}
-
-function mergeLegacyDeliveryInto(
-  delivery: Record<string, unknown>,
-  payload: Record<string, unknown>,
-) {
-  const patch = buildDeliveryPatchFromLegacyPayload(payload);
-  if (!patch) {
-    return { delivery, mutated: false };
-  }
-
-  const next = { ...delivery };
-  let mutated = false;
-
-  if ("mode" in patch && patch.mode !== next.mode) {
-    next.mode = patch.mode;
-    mutated = true;
-  }
-  if ("channel" in patch && patch.channel !== next.channel) {
-    next.channel = patch.channel;
-    mutated = true;
-  }
-  if ("to" in patch && patch.to !== next.to) {
-    next.to = patch.to;
-    mutated = true;
-  }
-  if ("bestEffort" in patch && patch.bestEffort !== next.bestEffort) {
-    next.bestEffort = patch.bestEffort;
-    mutated = true;
-  }
-
-  return { delivery: next, mutated };
-}
-
-function stripLegacyDeliveryFields(payload: Record<string, unknown>) {
-  if ("deliver" in payload) {
-    delete payload.deliver;
-  }
-  if ("channel" in payload) {
-    delete payload.channel;
-  }
-  if ("to" in payload) {
-    delete payload.to;
-  }
-  if ("bestEffortDeliver" in payload) {
-    delete payload.bestEffortDeliver;
-  }
-}
 
 function normalizePayloadKind(payload: Record<string, unknown>) {
   const raw = typeof payload.kind === "string" ? payload.kind.trim().toLowerCase() : "";
@@ -181,75 +70,91 @@ function copyTopLevelAgentTurnFields(
     mutated = true;
   }
 
-  if (typeof payload.deliver !== "boolean" && typeof raw.deliver === "boolean") {
-    payload.deliver = raw.deliver;
-    mutated = true;
-  }
-  if (
-    typeof payload.channel !== "string" &&
-    typeof raw.channel === "string" &&
-    raw.channel.trim()
-  ) {
-    payload.channel = raw.channel.trim();
-    mutated = true;
-  }
-  if (typeof payload.to !== "string" && typeof raw.to === "string" && raw.to.trim()) {
-    payload.to = raw.to.trim();
-    mutated = true;
-  }
-  if (
-    typeof payload.bestEffortDeliver !== "boolean" &&
-    typeof raw.bestEffortDeliver === "boolean"
-  ) {
-    payload.bestEffortDeliver = raw.bestEffortDeliver;
-    mutated = true;
-  }
-  if (
-    typeof payload.provider !== "string" &&
-    typeof raw.provider === "string" &&
-    raw.provider.trim()
-  ) {
-    payload.provider = raw.provider.trim();
-    mutated = true;
-  }
-
   return mutated;
 }
 
+function stripLegacyPayloadDeliveryFields(payload: Record<string, unknown>) {
+  let mutated = false;
+  for (const field of ["deliver", "channel", "to", "bestEffortDeliver", "provider"] as const) {
+    if (field in payload) {
+      delete payload[field];
+      mutated = true;
+    }
+  }
+  return mutated;
+}
+
+function buildDeliveryFromLegacyTopLevel(
+  raw: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const deliver = raw.deliver;
+  const channelRaw = typeof raw.channel === "string" ? raw.channel.trim().toLowerCase() : "";
+  const providerRaw = typeof raw.provider === "string" ? raw.provider.trim().toLowerCase() : "";
+  const toRaw = typeof raw.to === "string" ? raw.to.trim() : "";
+  const bestEffort = typeof raw.bestEffortDeliver === "boolean" ? raw.bestEffortDeliver : undefined;
+  const hasLegacy =
+    typeof deliver === "boolean" ||
+    Boolean(toRaw) ||
+    Boolean(channelRaw) ||
+    Boolean(providerRaw) ||
+    bestEffort !== undefined;
+  if (!hasLegacy) return null;
+  const next: Record<string, unknown> = { mode: deliver === false ? "none" : "announce" };
+  const ch = channelRaw || providerRaw;
+  if (ch) next.channel = ch;
+  if (toRaw) next.to = toRaw;
+  if (bestEffort !== undefined) next.bestEffort = bestEffort;
+  return next;
+}
+
+function buildDeliveryFromLegacyPayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const deliver = payload.deliver;
+  const channelRaw =
+    typeof payload.channel === "string" ? payload.channel.trim().toLowerCase() : "";
+  const providerRaw =
+    typeof payload.provider === "string" ? payload.provider.trim().toLowerCase() : "";
+  const toRaw = typeof payload.to === "string" ? payload.to.trim() : "";
+  const bestEffort =
+    typeof payload.bestEffortDeliver === "boolean" ? payload.bestEffortDeliver : undefined;
+  const hasLegacy =
+    typeof deliver === "boolean" ||
+    Boolean(toRaw) ||
+    Boolean(channelRaw) ||
+    Boolean(providerRaw) ||
+    bestEffort !== undefined;
+  if (!hasLegacy) return null;
+  const next: Record<string, unknown> = { mode: deliver === false ? "none" : "announce" };
+  const ch = channelRaw || providerRaw;
+  if (ch) next.channel = ch;
+  if (toRaw) next.to = toRaw;
+  if (bestEffort !== undefined) next.bestEffort = bestEffort;
+  return next;
+}
+
 function stripLegacyTopLevelFields(raw: Record<string, unknown>) {
-  if ("model" in raw) {
-    delete raw.model;
+  const fields = [
+    "model",
+    "thinking",
+    "timeoutSeconds",
+    "allowUnsafeExternalContent",
+    "message",
+    "text",
+    "deliver",
+    "channel",
+    "to",
+    "bestEffortDeliver",
+    "provider",
+  ] as const;
+  let had = false;
+  for (const field of fields) {
+    if (field in raw) {
+      delete raw[field];
+      had = true;
+    }
   }
-  if ("thinking" in raw) {
-    delete raw.thinking;
-  }
-  if ("timeoutSeconds" in raw) {
-    delete raw.timeoutSeconds;
-  }
-  if ("allowUnsafeExternalContent" in raw) {
-    delete raw.allowUnsafeExternalContent;
-  }
-  if ("message" in raw) {
-    delete raw.message;
-  }
-  if ("text" in raw) {
-    delete raw.text;
-  }
-  if ("deliver" in raw) {
-    delete raw.deliver;
-  }
-  if ("channel" in raw) {
-    delete raw.channel;
-  }
-  if ("to" in raw) {
-    delete raw.to;
-  }
-  if ("bestEffortDeliver" in raw) {
-    delete raw.bestEffortDeliver;
-  }
-  if ("provider" in raw) {
-    delete raw.provider;
-  }
+  return had;
 }
 
 async function getFileMtimeMs(path: string): Promise<number | null> {
@@ -270,21 +175,17 @@ export async function ensureLoaded(
     skipRecompute?: boolean;
   },
 ) {
-  // Fast path: store is already in memory. Other callers (add, list, run, …)
-  // trust the in-memory copy to avoid a stat syscall on every operation.
   if (state.store && !opts?.forceReload) {
     return;
   }
-  // Force reload always re-reads the file to avoid missing cross-service
-  // edits on filesystems with coarse mtime resolution.
 
   const fileMtimeMs = await getFileMtimeMs(state.deps.storePath);
   const loaded = await loadCronStore(state.deps.storePath);
   const jobs = (loaded.jobs ?? []) as unknown as Array<Record<string, unknown>>;
   let mutated = false;
   for (const raw of jobs) {
-    const state = raw.state;
-    if (!state || typeof state !== "object" || Array.isArray(state)) {
+    const rawState = raw.state;
+    if (!rawState || typeof rawState !== "object" || Array.isArray(rawState)) {
       raw.state = {};
       mutated = true;
     }
@@ -344,27 +245,57 @@ export async function ensureLoaded(
       }
     }
 
-    const hadLegacyTopLevelFields =
-      "model" in raw ||
-      "thinking" in raw ||
-      "timeoutSeconds" in raw ||
-      "allowUnsafeExternalContent" in raw ||
-      "message" in raw ||
-      "text" in raw ||
-      "deliver" in raw ||
-      "channel" in raw ||
-      "to" in raw ||
-      "bestEffortDeliver" in raw ||
-      "provider" in raw;
-    if (hadLegacyTopLevelFields) {
-      stripLegacyTopLevelFields(raw);
+    // Build delivery from legacy sources before stripping.
+    const delivery = raw.delivery;
+    const hasDelivery = delivery && typeof delivery === "object" && !Array.isArray(delivery);
+    if (!hasDelivery) {
+      // Try legacy top-level fields first, then payload fields.
+      const fromTopLevel = buildDeliveryFromLegacyTopLevel(raw);
+      const fromPayload = payloadRecord ? buildDeliveryFromLegacyPayload(payloadRecord) : null;
+      const legacyDelivery = fromTopLevel ?? fromPayload;
+      if (legacyDelivery) {
+        raw.delivery = legacyDelivery;
+        mutated = true;
+      } else {
+        // Default: isolated agentTurn jobs get announce delivery.
+        const payloadKind =
+          payloadRecord && typeof payloadRecord.kind === "string" ? payloadRecord.kind : "";
+        const sessionTarget =
+          typeof raw.sessionTarget === "string" ? raw.sessionTarget.trim().toLowerCase() : "";
+        const isIsolatedAgentTurn =
+          sessionTarget === "isolated" || (sessionTarget === "" && payloadKind === "agentTurn");
+        if (isIsolatedAgentTurn && payloadKind === "agentTurn") {
+          raw.delivery = { mode: "announce" };
+          mutated = true;
+        }
+      }
+    } else {
+      const deliveryRecord = delivery as Record<string, unknown>;
+      const modeRaw = deliveryRecord.mode;
+      if (typeof modeRaw === "string") {
+        const lowered = modeRaw.trim().toLowerCase();
+        if (lowered === "deliver") {
+          deliveryRecord.mode = "announce";
+          mutated = true;
+        }
+      } else if (modeRaw === undefined || modeRaw === null) {
+        deliveryRecord.mode = "announce";
+        mutated = true;
+      }
+    }
+
+    // Strip all legacy fields after delivery migration.
+    if (stripLegacyTopLevelFields(raw)) {
+      mutated = true;
+    }
+    if (payloadRecord && stripLegacyPayloadDeliveryFields(payloadRecord)) {
       mutated = true;
     }
 
-    if (payloadRecord) {
-      if (migrateLegacyCronPayload(payloadRecord)) {
-        mutated = true;
-      }
+    const isolation = raw.isolation;
+    if (isolation && typeof isolation === "object" && !Array.isArray(isolation)) {
+      delete raw.isolation;
+      mutated = true;
     }
 
     const schedule = raw.schedule;
@@ -414,62 +345,6 @@ export async function ensureLoaded(
         }
       }
     }
-
-    const delivery = raw.delivery;
-    if (delivery && typeof delivery === "object" && !Array.isArray(delivery)) {
-      const modeRaw = (delivery as { mode?: unknown }).mode;
-      if (typeof modeRaw === "string") {
-        const lowered = modeRaw.trim().toLowerCase();
-        if (lowered === "deliver") {
-          (delivery as { mode?: unknown }).mode = "announce";
-          mutated = true;
-        }
-      } else if (modeRaw === undefined || modeRaw === null) {
-        // Explicitly persist the default so existing jobs don't silently
-        // change behaviour when the runtime default shifts.
-        (delivery as { mode?: unknown }).mode = "announce";
-        mutated = true;
-      }
-    }
-
-    const isolation = raw.isolation;
-    if (isolation && typeof isolation === "object" && !Array.isArray(isolation)) {
-      delete raw.isolation;
-      mutated = true;
-    }
-
-    const payloadKind =
-      payloadRecord && typeof payloadRecord.kind === "string" ? payloadRecord.kind : "";
-    const sessionTarget =
-      typeof raw.sessionTarget === "string" ? raw.sessionTarget.trim().toLowerCase() : "";
-    const isIsolatedAgentTurn =
-      sessionTarget === "isolated" || (sessionTarget === "" && payloadKind === "agentTurn");
-    const hasDelivery = delivery && typeof delivery === "object" && !Array.isArray(delivery);
-    const hasLegacyDelivery = payloadRecord ? hasLegacyDeliveryHints(payloadRecord) : false;
-
-    if (isIsolatedAgentTurn && payloadKind === "agentTurn") {
-      if (!hasDelivery) {
-        raw.delivery =
-          payloadRecord && hasLegacyDelivery
-            ? buildDeliveryFromLegacyPayload(payloadRecord)
-            : { mode: "announce" };
-        mutated = true;
-      }
-      if (payloadRecord && hasLegacyDelivery) {
-        if (hasDelivery) {
-          const merged = mergeLegacyDeliveryInto(
-            delivery as Record<string, unknown>,
-            payloadRecord,
-          );
-          if (merged.mutated) {
-            raw.delivery = merged.delivery;
-            mutated = true;
-          }
-        }
-        stripLegacyDeliveryFields(payloadRecord);
-        mutated = true;
-      }
-    }
   }
   state.store = { version: 1, jobs: jobs as unknown as CronJob[] };
   state.storeLoadedAtMs = state.deps.nowMs();
@@ -503,6 +378,5 @@ export async function persist(state: CronServiceState) {
     return;
   }
   await saveCronStore(state.deps.storePath, state.store);
-  // Update file mtime after save to prevent immediate reload
   state.storeFileMtimeMs = await getFileMtimeMs(state.deps.storePath);
 }

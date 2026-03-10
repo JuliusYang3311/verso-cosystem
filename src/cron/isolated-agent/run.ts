@@ -1,4 +1,3 @@
-import type { MessagingToolSend } from "../../agents/pi-embedded-messaging.js";
 import type { VersoConfig } from "../../config/config.js";
 import type { AgentDefaultsConfig } from "../../config/types.js";
 import type { CronJob } from "../../cron/types.js";
@@ -61,41 +60,15 @@ import { resolveCronDeliveryPlan } from "../delivery.js";
 import { resolveDeliveryTarget } from "./delivery-target.js";
 import {
   isHeartbeatOnlyResponse,
+  matchesMessagingToolDeliveryTarget,
   pickLastDeliverablePayload,
   pickLastNonEmptyTextFromPayloads,
   pickSummaryFromOutput,
   pickSummaryFromPayloads,
+  resolveCronDeliveryBestEffort,
   resolveHeartbeatAckMaxChars,
 } from "./helpers.js";
 import { resolveCronSession } from "./session.js";
-
-function matchesMessagingToolDeliveryTarget(
-  target: MessagingToolSend,
-  delivery: { channel: string; to?: string; accountId?: string },
-): boolean {
-  if (!delivery.to || !target.to) {
-    return false;
-  }
-  const channel = delivery.channel.trim().toLowerCase();
-  const provider = target.provider?.trim().toLowerCase();
-  if (provider && provider !== "message" && provider !== channel) {
-    return false;
-  }
-  if (target.accountId && delivery.accountId && target.accountId !== delivery.accountId) {
-    return false;
-  }
-  return target.to === delivery.to;
-}
-
-function resolveCronDeliveryBestEffort(job: CronJob): boolean {
-  if (typeof job.delivery?.bestEffort === "boolean") {
-    return job.delivery.bestEffort;
-  }
-  if (job.payload.kind === "agentTurn" && typeof job.payload.bestEffortDeliver === "boolean") {
-    return job.payload.bestEffortDeliver;
-  }
-  return false;
-}
 
 export type RunCronAgentTurnResult = {
   status: "ok" | "error" | "skipped";
@@ -324,10 +297,6 @@ export async function runCronIsolatedAgentTurn(params: {
     // Internal/trusted source - use original format
     commandBody = `${base}\n${timeLine}`.trim();
   }
-  if (deliveryRequested) {
-    commandBody =
-      `${commandBody}\n\nReturn your summary as plain text; it will be delivered automatically. If the task explicitly calls for messaging a specific external recipient, note who/where it should go instead of sending it yourself.`.trim();
-  }
 
   const existingSnapshot = cronSession.sessionEntry.skillsSnapshot;
   const skillsSnapshotVersion = getSkillsSnapshotVersion(workspaceDir);
@@ -458,82 +427,90 @@ export async function runCronIsolatedAgentTurn(params: {
   const summary = pickSummaryFromPayloads(payloads) ?? pickSummaryFromOutput(firstText);
   const outputText = pickLastNonEmptyTextFromPayloads(payloads);
   const synthesizedText = outputText?.trim() || summary?.trim() || undefined;
-  const deliveryPayload = pickLastDeliverablePayload(payloads);
-  const deliveryPayloads =
-    deliveryPayload !== undefined
-      ? [deliveryPayload]
-      : synthesizedText
-        ? [{ text: synthesizedText }]
-        : [];
-  const deliveryPayloadHasStructuredContent =
-    Boolean(deliveryPayload?.mediaUrl) ||
-    (deliveryPayload?.mediaUrls?.length ?? 0) > 0 ||
-    Object.keys(deliveryPayload?.channelData ?? {}).length > 0;
-  const deliveryBestEffort = resolveCronDeliveryBestEffort(params.job);
 
-  // Skip delivery for heartbeat-only responses (HEARTBEAT_OK with no real content).
-  const ackMaxChars = resolveHeartbeatAckMaxChars(agentCfg);
-  const skipHeartbeatDelivery = deliveryRequested && isHeartbeatOnlyResponse(payloads, ackMaxChars);
-  const skipMessagingToolDelivery =
-    deliveryRequested &&
-    runResult.didSendViaMessagingTool === true &&
-    (runResult.messagingToolSentTargets ?? []).some((target) =>
-      matchesMessagingToolDeliveryTarget(target, {
-        channel: resolvedDelivery.channel,
-        to: resolvedDelivery.to,
-        accountId: resolvedDelivery.accountId,
-      }),
-    );
-
-  if (deliveryRequested && !skipHeartbeatDelivery && !skipMessagingToolDelivery) {
-    if (resolvedDelivery.error) {
-      if (!deliveryBestEffort) {
-        return withRunSession({
-          status: "error",
-          error: resolvedDelivery.error.message,
-          summary,
-          outputText,
-        });
-      }
-      logWarn(`[cron:${params.job.id}] ${resolvedDelivery.error.message}`);
-      return withRunSession({ status: "ok", summary, outputText });
-    }
-    if (!resolvedDelivery.to) {
-      const message = "cron delivery target is missing";
-      if (!deliveryBestEffort) {
-        return withRunSession({
-          status: "error",
-          error: message,
-          summary,
-          outputText,
-        });
-      }
-      logWarn(`[cron:${params.job.id}] ${message}`);
-      return withRunSession({ status: "ok", summary, outputText });
-    }
-    // Deliver structured or text-based payloads via direct outbound delivery.
-    if (deliveryPayloadHasStructuredContent || synthesizedText) {
+  // Clean up the temporary cron transcript file — cron runs are ephemeral.
+  {
+    const sessionFile = resolveSessionTranscriptPath(cronSession.sessionEntry.sessionId, agentId);
+    if (sessionFile) {
       try {
-        await deliverOutboundPayloads({
-          cfg: cfgWithAgentDefaults,
-          channel: resolvedDelivery.channel,
-          to: resolvedDelivery.to,
-          accountId: resolvedDelivery.accountId,
-          threadId: resolvedDelivery.threadId,
-          payloads: deliveryPayloads,
-          bestEffort: deliveryBestEffort,
-          deps: createOutboundSendDeps(params.deps),
-        });
-      } catch (err) {
-        if (!deliveryBestEffort) {
-          return withRunSession({ status: "error", summary, outputText, error: String(err) });
+        const fs = await import("node:fs");
+        if (fs.existsSync(sessionFile)) {
+          fs.unlinkSync(sessionFile);
         }
+      } catch {
+        // Best-effort cleanup
       }
     }
   }
 
-  // Inject cron result summary into the main session transcript.
-  if (synthesizedText) {
+  // Delivery strategy: outbound if configured, otherwise inject into main session transcript.
+  if (deliveryRequested) {
+    const deliveryPayload = pickLastDeliverablePayload(payloads);
+    const deliveryPayloads =
+      deliveryPayload !== undefined
+        ? [deliveryPayload]
+        : synthesizedText
+          ? [{ text: synthesizedText }]
+          : [];
+    const deliveryPayloadHasStructuredContent =
+      Boolean(deliveryPayload?.mediaUrl) ||
+      (deliveryPayload?.mediaUrls?.length ?? 0) > 0 ||
+      Object.keys(deliveryPayload?.channelData ?? {}).length > 0;
+    const deliveryBestEffort = resolveCronDeliveryBestEffort(params.job);
+    const ackMaxChars = resolveHeartbeatAckMaxChars(agentCfg);
+    const skipHeartbeat = isHeartbeatOnlyResponse(payloads, ackMaxChars);
+    const skipMessaging =
+      runResult.didSendViaMessagingTool === true &&
+      (runResult.messagingToolSentTargets ?? []).some((target) =>
+        matchesMessagingToolDeliveryTarget(target, {
+          channel: resolvedDelivery.channel,
+          to: resolvedDelivery.to,
+          accountId: resolvedDelivery.accountId,
+        }),
+      );
+
+    if (!skipHeartbeat && !skipMessaging) {
+      if (resolvedDelivery.error) {
+        if (!deliveryBestEffort) {
+          return withRunSession({
+            status: "error",
+            error: resolvedDelivery.error.message,
+            summary,
+            outputText,
+          });
+        }
+        logWarn(`[cron:${params.job.id}] ${resolvedDelivery.error.message}`);
+      } else if (!resolvedDelivery.to) {
+        if (!deliveryBestEffort) {
+          return withRunSession({
+            status: "error",
+            error: "cron delivery target is missing",
+            summary,
+            outputText,
+          });
+        }
+        logWarn(`[cron:${params.job.id}] cron delivery target is missing`);
+      } else if (deliveryPayloadHasStructuredContent || synthesizedText) {
+        try {
+          await deliverOutboundPayloads({
+            cfg: cfgWithAgentDefaults,
+            channel: resolvedDelivery.channel,
+            to: resolvedDelivery.to,
+            accountId: resolvedDelivery.accountId,
+            threadId: resolvedDelivery.threadId,
+            payloads: deliveryPayloads,
+            bestEffort: deliveryBestEffort,
+            deps: createOutboundSendDeps(params.deps),
+          });
+        } catch (err) {
+          if (!deliveryBestEffort) {
+            return withRunSession({ status: "error", summary, outputText, error: String(err) });
+          }
+        }
+      }
+    }
+  } else if (synthesizedText) {
+    // No outbound delivery configured — inject result into main session transcript.
     try {
       const mainSessionKey = resolveAgentMainSessionKey({ cfg: params.cfg, agentId });
       const mainStorePath = resolveStorePath(params.cfg.session?.store, { agentId });
@@ -571,21 +548,5 @@ export async function runCronIsolatedAgentTurn(params: {
     }
   }
 
-  // Clean up the temporary cron transcript file — cron runs are ephemeral.
-  // Only remove the file; do NOT touch the session store (we never wrote to it).
-  {
-    const sessionFile = resolveSessionTranscriptPath(cronSession.sessionEntry.sessionId, agentId);
-    if (sessionFile) {
-      try {
-        const fs = await import("node:fs");
-        if (fs.existsSync(sessionFile)) {
-          fs.unlinkSync(sessionFile);
-        }
-      } catch {
-        // Best-effort cleanup
-      }
-    }
-  }
-
-  return { status: "ok", summary, outputText };
+  return withRunSession({ status: "ok", summary, outputText });
 }

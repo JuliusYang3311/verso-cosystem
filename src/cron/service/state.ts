@@ -39,12 +39,6 @@ export type CronServiceDeps = {
     sessionKey?: string;
   }>;
   onEvent?: (evt: CronEvent) => void;
-  /** Inject a message directly into the agent's main session transcript. */
-  injectMainSessionMessage?: (params: {
-    agentId?: string;
-    text: string;
-    jobId: string;
-  }) => Promise<void>;
 };
 
 export type CronServiceDepsInternal = Omit<CronServiceDeps, "nowMs"> & {

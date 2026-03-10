@@ -1,3 +1,5 @@
+import type { MessagingToolSend } from "../../agents/pi-embedded-messaging.js";
+import type { CronJob } from "../types.js";
 import {
   DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
   stripHeartbeatToken,
@@ -79,4 +81,31 @@ export function isHeartbeatOnlyResponse(payloads: DeliveryPayload[], ackMaxChars
 export function resolveHeartbeatAckMaxChars(agentCfg?: { heartbeat?: { ackMaxChars?: number } }) {
   const raw = agentCfg?.heartbeat?.ackMaxChars ?? DEFAULT_HEARTBEAT_ACK_MAX_CHARS;
   return Math.max(0, raw);
+}
+
+/**
+ * Check if a messaging tool send target matches the delivery target.
+ */
+export function matchesMessagingToolDeliveryTarget(
+  target: MessagingToolSend,
+  delivery: { channel?: string; to?: string; accountId?: string },
+): boolean {
+  if (!delivery.channel || !delivery.to) return false;
+  const targetChannel = (target.provider ?? target.tool ?? "").toLowerCase();
+  const deliveryChannel = delivery.channel.toLowerCase();
+  if (targetChannel !== deliveryChannel) return false;
+  const targetTo = (target.to ?? "").toLowerCase();
+  const deliveryTo = delivery.to.toLowerCase();
+  if (targetTo !== deliveryTo) return false;
+  if (delivery.accountId && target.accountId && target.accountId !== delivery.accountId) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Resolve whether a cron job's delivery is best-effort (failures don't fail the job).
+ */
+export function resolveCronDeliveryBestEffort(job: CronJob): boolean {
+  return job.delivery?.bestEffort === true;
 }
