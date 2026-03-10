@@ -1,6 +1,7 @@
 // src/orchestration/orchestrator-tools.ts — The orchestrate agent tool
 
 import { Type } from "@sinclair/typebox";
+import type { WorkerPool } from "./worker-pool.js";
 import { stringEnum } from "../agents/schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "../agents/tools/common.js";
 import { broadcastOrchestrationEvent, buildOrchestrationSnapshot } from "./events.js";
@@ -10,13 +11,7 @@ import {
   copyMissionToOutput,
   cleanupMissionWorkspace,
 } from "./store.js";
-import {
-  type Subtask,
-  type FixTask,
-  createSubtask,
-  isSubtaskReady,
-  ORCHESTRATION_DEFAULTS,
-} from "./types.js";
+import { type Subtask, createSubtask, isSubtaskReady, ORCHESTRATION_DEFAULTS } from "./types.js";
 import { runWorkerPool } from "./worker-runner.js";
 
 const logger = {
@@ -30,7 +25,7 @@ const ORCHESTRATE_ACTIONS = [
   "dispatch",
   "check-status",
   "run-acceptance",
-  "create-fix-tasks",
+  "revise-plan",
   "complete",
   "abort",
 ] as const;
@@ -55,11 +50,28 @@ const OrchestrateToolSchema = Type.Object({
     ),
   ),
   orchestrationId: Type.Optional(Type.String()),
-  fixes: Type.Optional(
+  cancelTaskIds: Type.Optional(
+    Type.Array(
+      Type.String({ description: "IDs of subtasks to cancel (and their blocked dependents)" }),
+    ),
+  ),
+  addSubtasks: Type.Optional(
     Type.Array(
       Type.Object({
-        subtaskId: Type.String({ description: "ID of the failed subtask to fix" }),
-        description: Type.String({ description: "What the fix worker should do" }),
+        title: Type.String(),
+        description: Type.String(),
+        acceptanceCriteria: Type.Array(Type.String()),
+        specialization: Type.String(),
+        dependsOn: Type.Optional(Type.Array(Type.String())),
+      }),
+    ),
+  ),
+  rewireDeps: Type.Optional(
+    Type.Array(
+      Type.Object({
+        taskId: Type.String({ description: "ID of the task whose dependencies to update" }),
+        oldDepId: Type.String({ description: "Old dependency ID to replace" }),
+        newDepId: Type.String({ description: "New dependency ID (e.g., a newly added task)" }),
       }),
     ),
   ),
@@ -83,11 +95,17 @@ export type OrchestrateToolOptions = {
   agentSessionKey: string;
   agentId: string;
   workspaceDir: string;
-  maxWorkers?: number;
+  /** Persistent worker pool — pre-created sessions reused across dispatch cycles. */
+  pool: WorkerPool;
+  /** Persistent acceptance session — carries context across evaluations. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  acceptanceSession: any;
   maxFixCycles?: number;
   maxOrchestrations?: number;
   verifyCmd?: string;
   config?: import("../config/types.js").VersoConfig;
+  /** Isolated memory manager shared across orchestrator, workers, and acceptance. */
+  memoryManager?: import("../memory/types.js").MemorySearchManager;
 };
 
 export function createOrchestrateTool(opts: OrchestrateToolOptions): AnyAgentTool {
@@ -103,11 +121,11 @@ ACTIONS:
 - dispatch: Run all ready subtasks via in-memory worker pool. Blocks until all workers complete. Requires: orchestrationId.
 - check-status: Check status of all subtasks. Requires: orchestrationId.
 - run-acceptance: Run acceptance tests on completed subtasks. Requires: orchestrationId. Optional: verifyCmd (overrides plan's verifyCmd if specified).
-- create-fix-tasks: Create fix tasks for failed acceptance criteria. Requires: orchestrationId, fixes array.
+- revise-plan: Modify the plan mid-flight. Cancel tasks, add new ones, rewire dependencies. Use this after acceptance fails or when dispatch reports exhausted tasks that need a different approach. Requires: orchestrationId. Optional: cancelTaskIds (cancel tasks + their blocked dependents), addSubtasks (new tasks with IDs auto-assigned), rewireDeps (update dependency references).
 - complete: Copy results to output directory. Requires: orchestrationId. Optional: outputDir (relative path like "./my-app"), summary. If outputDir not specified, creates ./orchestrator-output/<orchestrationId>/
 - abort: Cancel orchestration. Requires: orchestrationId.
 
-WORKFLOW: create-plan → dispatch → run-acceptance → complete (or create-fix-tasks → dispatch → ...)
+WORKFLOW: create-plan → dispatch → run-acceptance → complete (or revise-plan → dispatch → ...)
 
 VERIFY COMMAND: Specify at create-plan time for the project type. Should include lint for code quality:
 - Node.js/TypeScript: "npm run lint && npm test" or "pnpm lint && pnpm build && vitest run"
@@ -136,8 +154,8 @@ OUTPUT DIRECTORY: Results are copied to this directory in the source workspace:
           return await handleCheckStatus(params);
         case "run-acceptance":
           return await handleRunAcceptance(params, opts);
-        case "create-fix-tasks":
-          return await handleCreateFixTasks(params, opts);
+        case "revise-plan":
+          return await handleRevisePlan(params, opts);
         case "complete":
           return await handleComplete(params, opts);
         case "abort":
@@ -272,106 +290,26 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
     opts.config,
   );
 
-  const maxWorkers = opts.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers;
-
   try {
-    const results = await runWorkerPool({
+    // runWorkerPool handles the full dispatch cycle including auto-fix:
+    // - Executes ready tasks via worker pool
+    // - When a task fails and blocks dependents, auto-creates fix tasks (up to 2 retries)
+    // - Fix tasks are executed in the same dispatch cycle (no extra dispatch call needed)
+    // - Tasks that exhaust retries are reported back for Orchestrator re-planning
+    const dispatchResult = await runWorkerPool({
       orchestration: orch,
-      maxWorkers,
+      pool: opts.pool,
       config: opts.config,
+      memoryManager: opts.memoryManager,
     });
 
+    const { results, autoFixTasks: autoFixes, exhaustedTasks } = dispatchResult;
     const completed = results.filter((r) => r.ok).length;
     const failed = results.filter((r) => !r.ok).length;
 
-    // After dispatch, check for pending tasks with failed dependencies
-    // Automatically create fix tasks for failed dependencies and update dependency relationships
-    const allSubtasks = orch.plan?.subtasks ?? [];
-    const failedSubtaskIds = new Set(
-      allSubtasks.filter((s) => s.status === "failed").map((s) => s.id),
-    );
-    const pendingBlockedTasks: Subtask[] = [];
-
-    // Find pending tasks that depend on failed tasks
-    for (const subtask of allSubtasks) {
-      if (subtask.status === "pending" && subtask.dependsOn && subtask.dependsOn.length > 0) {
-        const hasFailedDep = subtask.dependsOn.some((depId) => failedSubtaskIds.has(depId));
-        if (hasFailedDep) {
-          pendingBlockedTasks.push(subtask);
-        }
-      }
-    }
-
-    let autoFixCount = 0;
-    if (pendingBlockedTasks.length > 0 && failed > 0) {
-      // Create fix tasks for failed dependencies
-      const failedDepsToFix = new Set<string>();
-      for (const blockedTask of pendingBlockedTasks) {
-        for (const depId of blockedTask.dependsOn ?? []) {
-          if (failedSubtaskIds.has(depId)) {
-            failedDepsToFix.add(depId);
-          }
-        }
-      }
-
-      // Generate fix tasks
-      const newFixTasks: FixTask[] = [];
-      const newFixSubtasks: Subtask[] = [];
-      const sourceToFixMap = new Map<string, string>();
-
-      for (const failedDepId of failedDepsToFix) {
-        const failedDep = allSubtasks.find((s) => s.id === failedDepId);
-        if (!failedDep) {
-          continue;
-        }
-
-        const fixId = `fix-auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        sourceToFixMap.set(failedDepId, fixId);
-
-        newFixTasks.push({
-          id: fixId,
-          sourceSubtaskId: failedDepId,
-          description: `Fix failed task: ${failedDep.title}\n\nOriginal error: ${failedDep.error ?? "Unknown error"}\n\nOriginal task description:\n${failedDep.description}`,
-          status: "pending",
-          createdAtMs: Date.now(),
-        });
-
-        newFixSubtasks.push({
-          id: fixId,
-          title: `Fix: ${failedDep.title}`,
-          description: `Fix failed task: ${failedDep.title}\n\nOriginal error: ${failedDep.error ?? "Unknown error"}\n\nOriginal task description:\n${failedDep.description}`,
-          acceptanceCriteria: failedDep.acceptanceCriteria,
-          specialization: failedDep.specialization || "code-implementer", // Inherit or default to implementer
-          status: "pending",
-          dependsOn: failedDep.dependsOn, // Inherit dependencies from original task
-          retryCount: 0,
-          createdAtMs: Date.now(),
-        });
-      }
-
-      // Mark original failed tasks as cancelled
-      for (const failedDepId of failedDepsToFix) {
-        const failedDep = allSubtasks.find((s) => s.id === failedDepId);
-        if (failedDep && failedDep.status === "failed") {
-          failedDep.status = "cancelled";
-        }
-      }
-
-      // Update dependencies: blocked tasks now depend on fix tasks
-      for (const blockedTask of pendingBlockedTasks) {
-        if (blockedTask.dependsOn) {
-          blockedTask.dependsOn = blockedTask.dependsOn.map((depId) => {
-            const fixId = sourceToFixMap.get(depId);
-            return fixId ?? depId;
-          });
-        }
-      }
-
-      // Add fix tasks to orchestration
-      orch.plan.subtasks.push(...newFixSubtasks);
-      orch.fixTasks.push(...newFixTasks);
-      autoFixCount = newFixTasks.length;
-
+    // Persist auto-fix records to orchestration
+    if (autoFixes.length > 0) {
+      orch.fixTasks.push(...autoFixes);
       await saveOrchestration(orch);
       await broadcastOrchestrationEvent({
         type: "orchestration.updated",
@@ -379,16 +317,46 @@ async function handleDispatch(params: Record<string, unknown>, opts: Orchestrate
       });
     }
 
+    // If tasks exhausted auto-retry, skip acceptance — Orchestrator must re-plan
+    // Note: do NOT increment fixCycle here — revise-plan does it uniformly.
+    if (exhaustedTasks.length > 0) {
+      orch.status = "fixing";
+      await saveOrchestration(orch);
+
+      const names = exhaustedTasks.map((t) => `"${t.title}" (${t.retryCount} retries)`).join(", ");
+      return jsonResult({
+        orchestrationId: orchId,
+        status: orch.status,
+        dispatched: results.length,
+        completed,
+        failed,
+        autoFixCreated: autoFixes.length,
+        fixCycle: orch.currentFixCycle,
+        maxFixCycles: orch.maxFixCycles,
+        exhaustedTasks,
+        message:
+          `Dispatch complete: ${completed} succeeded, ${failed} failed. ` +
+          `${exhaustedTasks.length} tasks exhausted auto-retry: ${names}. ` +
+          `Call revise-plan to cancel exhausted tasks and add replacement tasks with a different approach. Do NOT run acceptance until blocking tasks are resolved.`,
+      });
+    }
+
+    // Normal completion
+    const message =
+      `Dispatch complete: ${completed} succeeded, ${failed} failed.` +
+      (autoFixes.length > 0 ? ` (${autoFixes.length} auto-fixes executed inline.)` : "") +
+      (failed > 0
+        ? " Some tasks failed - run acceptance to evaluate overall result."
+        : " All tasks succeeded - run acceptance tests next.");
+
     return jsonResult({
       orchestrationId: orchId,
       status: orch.status,
       dispatched: results.length,
       completed,
       failed,
-      autoFixCreated: autoFixCount,
-      // Minimal response to reduce context accumulation
-      // Use check-status if you need detailed task information
-      message: `Dispatch complete: ${completed} succeeded, ${failed} failed.${autoFixCount > 0 ? ` Auto-created ${autoFixCount} fix tasks for blocked dependencies. MUST call dispatch again to execute fix tasks before running acceptance.` : failed > 0 ? " Some tasks failed - check if there are pending tasks. If no pending tasks, run acceptance to evaluate." : " All tasks succeeded - check if there are pending tasks. If no pending tasks, run acceptance tests next."}`,
+      autoFixCreated: autoFixes.length,
+      message,
     });
   } catch (err) {
     return jsonResult({
@@ -492,8 +460,9 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
     orchestration: orch,
     workspaceDir: orch.workspaceDir,
     verifyCmd,
-    agentId: opts.agentId,
-    agentSessionKey: opts.agentSessionKey,
+    session: opts.acceptanceSession,
+    evaluationCount: orch.acceptanceResults.length,
+    memoryManager: opts.memoryManager,
   });
 
   orch.acceptanceResults.push(result);
@@ -579,17 +548,25 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
         : "All acceptance tests passed. Call complete to copy results to output directory."
       : orch.status === "failed"
         ? `Acceptance failed after ${orch.maxFixCycles} fix cycles. Orchestration marked as failed.`
-        : `Acceptance failed: ${highConfidenceFailures.length} high-confidence issues need fixes (${lowConfidenceFailures.length} low-confidence issues ignored). If verifyCmd is incorrect, you can correct it by calling run-acceptance with verifyCmd parameter. Otherwise, call create-fix-tasks to fix code issues.`,
+        : `Acceptance failed: ${highConfidenceFailures.length} high-confidence issues need fixes (${lowConfidenceFailures.length} low-confidence issues ignored). If verifyCmd is incorrect, you can correct it by calling run-acceptance with verifyCmd parameter. Otherwise, call revise-plan to add fix tasks.`,
   });
 }
 
-async function handleCreateFixTasks(params: Record<string, unknown>, opts: OrchestrateToolOptions) {
+/**
+ * revise-plan: Modify the plan mid-flight.
+ *
+ * Three operations (all optional, applied in order):
+ *   1. cancelTaskIds — cancel these tasks + cascade to pending dependents
+ *   2. addSubtasks   — add new tasks (IDs auto-assigned as r1, r2, ...)
+ *   3. rewireDeps    — repoint existing task dependencies to new tasks
+ *
+ * Use cases:
+ *   - Acceptance failed → add fix tasks targeting specific issues
+ *   - Task exhausted auto-retry → cancel old chain, add replacement chain
+ *   - Approach doesn't work → cancel + replace with different strategy
+ */
+async function handleRevisePlan(params: Record<string, unknown>, opts: OrchestrateToolOptions) {
   const orchId = readStringParam(params, "orchestrationId", { required: true });
-  const rawFixes = params.fixes;
-  if (!Array.isArray(rawFixes) || rawFixes.length === 0) {
-    return jsonResult({ error: "fixes array is required" });
-  }
-
   const orch = await loadOrchestration(orchId);
   if (!orch) {
     return jsonResult({ error: `Orchestration ${orchId} not found` });
@@ -598,70 +575,110 @@ async function handleCreateFixTasks(params: Record<string, unknown>, opts: Orche
     return jsonResult({ error: "No plan found" });
   }
 
-  orch.currentFixCycle += 1;
+  const cancelTaskIds = Array.isArray(params.cancelTaskIds)
+    ? (params.cancelTaskIds as string[])
+    : [];
+  const rawAddSubtasks = Array.isArray(params.addSubtasks)
+    ? (params.addSubtasks as Array<Record<string, unknown>>)
+    : [];
+  const rawRewireDeps = Array.isArray(params.rewireDeps)
+    ? (params.rewireDeps as Array<Record<string, unknown>>)
+    : [];
 
-  // Create fix tasks and convert them to subtasks
-  const newFixes: FixTask[] = rawFixes.map((raw: Record<string, unknown>, i: number) => ({
-    id: `fix-c${orch.currentFixCycle}-${i + 1}`,
-    sourceSubtaskId: String((raw.subtaskId as string) ?? ""),
-    description: String((raw.description as string) ?? ""),
-    status: "pending" as const,
-    createdAtMs: Date.now(),
-  }));
-
-  // Convert fix tasks to subtasks so they can be picked up by workers
-  const fixSubtasks: Subtask[] = newFixes.map((fix) => {
-    const sourceTask = orch.plan!.subtasks.find((s) => s.id === fix.sourceSubtaskId);
-    return {
-      id: fix.id,
-      title: `Fix: ${sourceTask?.title || fix.sourceSubtaskId}`,
-      description: fix.description,
-      acceptanceCriteria: sourceTask?.acceptanceCriteria || [],
-      specialization: sourceTask?.specialization || "code-implementer", // Inherit from source or default to implementer for fixes
-      status: "pending" as const,
-      retryCount: 0,
-      createdAtMs: Date.now(),
-    };
-  });
-
-  // Mark original failed subtasks as cancelled to prevent reprocessing
-  const fixedSubtaskIds = new Set(newFixes.map((f) => f.sourceSubtaskId));
-  const sourceToFixMap = new Map(newFixes.map((f) => [f.sourceSubtaskId, f.id]));
-  let cancelledCount = 0;
-
-  for (const subtask of orch.plan.subtasks) {
-    if (fixedSubtaskIds.has(subtask.id) && subtask.status === "failed") {
-      subtask.status = "cancelled";
-      cancelledCount++;
-    }
+  if (cancelTaskIds.length === 0 && rawAddSubtasks.length === 0 && rawRewireDeps.length === 0) {
+    return jsonResult({
+      error: "At least one of cancelTaskIds, addSubtasks, or rewireDeps is required",
+    });
   }
 
-  // Update dependencies: if a subtask depends on a cancelled task, update it to depend on the fix task
-  let updatedDependencies = 0;
-  for (const subtask of orch.plan.subtasks) {
-    if (subtask.dependsOn && subtask.dependsOn.length > 0) {
-      const updatedDeps = subtask.dependsOn.map((depId) => {
-        // If this dependency was cancelled and has a fix task, update to the fix task
-        if (fixedSubtaskIds.has(depId)) {
-          const fixId = sourceToFixMap.get(depId);
-          if (fixId) {
-            updatedDependencies++;
-            return fixId;
+  orch.currentFixCycle += 1;
+  const allSubtasks = orch.plan.subtasks;
+
+  // --- 1. Cancel tasks + cascade to blocked dependents ---
+  let cancelledCount = 0;
+  if (cancelTaskIds.length > 0) {
+    const toCancel = new Set(cancelTaskIds);
+
+    // Cascade: if a pending/failed task depends on a cancelled task, cancel it too
+    // Must propagate through failed nodes — otherwise orphaned pending tasks
+    // behind a failed intermediate remain stuck forever.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const s of allSubtasks) {
+        if ((s.status === "pending" || s.status === "failed") && !toCancel.has(s.id)) {
+          const blockedByCancel = s.dependsOn?.some((depId) => toCancel.has(depId));
+          if (blockedByCancel) {
+            toCancel.add(s.id);
+            changed = true;
           }
         }
-        return depId;
-      });
-      subtask.dependsOn = updatedDeps;
+      }
+    }
+
+    for (const s of allSubtasks) {
+      if (toCancel.has(s.id) && (s.status === "pending" || s.status === "failed")) {
+        s.status = "cancelled";
+        cancelledCount++;
+      }
     }
   }
 
-  // Add fix subtasks to the plan so workers can pick them up
-  orch.plan.subtasks.push(...fixSubtasks);
-  orch.fixTasks.push(...newFixes);
+  // --- 2. Add new subtasks ---
+  const addedTasks: Array<{ id: string; title: string }> = [];
+  if (rawAddSubtasks.length > 0) {
+    // Find next revision task counter
+    const existingRevisionIds = allSubtasks
+      .filter((s) => s.id.startsWith("r"))
+      .map((s) => parseInt(s.id.slice(1), 10))
+      .filter((n) => !isNaN(n));
+    let counter = existingRevisionIds.length > 0 ? Math.max(...existingRevisionIds) + 1 : 1;
+
+    for (const raw of rawAddSubtasks) {
+      const id = `r${counter++}`;
+      const specialization =
+        typeof raw.specialization === "string" ? raw.specialization : "generic";
+
+      const subtask = createSubtask({
+        id,
+        title: typeof raw.title === "string" ? raw.title : `Revision task ${id}`,
+        description: typeof raw.description === "string" ? raw.description : "",
+        acceptanceCriteria: Array.isArray(raw.acceptanceCriteria)
+          ? (raw.acceptanceCriteria as string[]).map(String)
+          : [],
+        specialization: specialization as Subtask["specialization"],
+        dependsOn: Array.isArray(raw.dependsOn)
+          ? (raw.dependsOn as string[]).map(String)
+          : undefined,
+      });
+
+      allSubtasks.push(subtask);
+      addedTasks.push({ id, title: subtask.title });
+    }
+  }
+
+  // --- 3. Rewire dependencies ---
+  let rewiredCount = 0;
+  if (rawRewireDeps.length > 0) {
+    for (const raw of rawRewireDeps) {
+      const taskId = typeof raw.taskId === "string" ? raw.taskId : "";
+      const oldDepId = typeof raw.oldDepId === "string" ? raw.oldDepId : "";
+      const newDepId = typeof raw.newDepId === "string" ? raw.newDepId : "";
+
+      const task = allSubtasks.find((s) => s.id === taskId);
+      if (!task || !task.dependsOn) continue;
+
+      const idx = task.dependsOn.indexOf(oldDepId);
+      if (idx >= 0) {
+        task.dependsOn[idx] = newDepId;
+        rewiredCount++;
+      }
+    }
+  }
+
   orch.status = "dispatching";
   await saveOrchestration(orch);
 
-  // Broadcast status update
   await broadcastOrchestrationEvent(
     {
       type: "orchestration.updated",
@@ -673,14 +690,23 @@ async function handleCreateFixTasks(params: Record<string, unknown>, opts: Orche
   return jsonResult({
     orchestrationId: orchId,
     fixCycle: orch.currentFixCycle,
-    cancelledSubtasks: cancelledCount,
-    updatedDependencies,
-    fixTasks: newFixes.map((f) => ({
-      id: f.id,
-      sourceSubtaskId: f.sourceSubtaskId,
-      description: f.description.slice(0, 100),
-    })),
-    message: `Created ${newFixes.length} fix tasks (cycle ${orch.currentFixCycle}/${orch.maxFixCycles}). Cancelled ${cancelledCount} failed subtasks. Updated ${updatedDependencies} dependencies. Call dispatch to start fix workers.`,
+    maxFixCycles: orch.maxFixCycles,
+    cancelled: cancelledCount,
+    added: addedTasks,
+    rewired: rewiredCount,
+    message: [
+      `Plan revised (cycle ${orch.currentFixCycle}/${orch.maxFixCycles}).`,
+      cancelledCount > 0
+        ? `Cancelled ${cancelledCount} tasks (including cascaded dependents).`
+        : null,
+      addedTasks.length > 0
+        ? `Added ${addedTasks.length} new tasks: ${addedTasks.map((t) => `${t.id}:"${t.title}"`).join(", ")}.`
+        : null,
+      rewiredCount > 0 ? `Rewired ${rewiredCount} dependencies.` : null,
+      "Call dispatch to execute.",
+    ]
+      .filter(Boolean)
+      .join(" "),
   });
 }
 

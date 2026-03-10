@@ -95,6 +95,8 @@ export type EmbeddedRunAttemptParams = {
   streamParams?: AgentStreamParams;
   ownerNumbers?: string[];
   enforceFinalTag?: boolean;
+  /** Pre-resolved memory manager — bypasses config resolution. Used by orchestrator workers. */
+  memoryManager?: import("../../../memory/types.js").MemorySearchManager;
 };
 
 export type EmbeddedRunAttemptResult = {

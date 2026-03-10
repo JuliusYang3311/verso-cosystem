@@ -15,8 +15,8 @@ if (isPackaged) {
   // The main process passes VERSO_GATEWAY_ROOT for clarity.
   gatewayRoot = process.env.VERSO_GATEWAY_ROOT || path.join(__dirname, '..', '..', 'gateway');
 } else {
-  // In development, use the root project directory (gateway/ -> electron/ -> apps/ -> verso/)
-  gatewayRoot = path.join(__dirname, '../../..');
+  // In development: gateway/ -> electron/ -> apps/ -> verso/
+  gatewayRoot = path.join(__dirname, '..', '..', '..');
 }
 
 const port = process.env.VERSO_GATEWAY_PORT || '18789';
@@ -37,7 +37,8 @@ process.chdir(gatewayRoot);
 // Import and run
 async function boot() {
   try {
-    await import(versoBin);
+    const { pathToFileURL } = require('url');
+    await import(pathToFileURL(versoBin).href);
   } catch (err) {
     console.error('[Gateway] Failed to load gateway runtime:', err);
     console.error('[Gateway] Attempted to load:', versoBin);

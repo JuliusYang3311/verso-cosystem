@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>License Agreement — Verso</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    -webkit-app-region: drag;
+  }
+  .header {
+    padding: 28px 32px 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 6px;
+  }
+  .header p {
+    font-size: 13px;
+    color: #888;
+  }
+  .license-container {
+    flex: 1;
+    margin: 0 32px;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+    overflow: hidden;
+    -webkit-app-region: no-drag;
+  }
+  .license-text {
+    height: 100%;
+    overflow-y: auto;
+    padding: 24px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #ccc;
+    white-space: pre-wrap;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #12121f;
+  }
+  .license-text::-webkit-scrollbar { width: 6px; }
+  .license-text::-webkit-scrollbar-track { background: transparent; }
+  .license-text::-webkit-scrollbar-thumb { background: #3a3a5a; border-radius: 3px; }
+  .footer {
+    padding: 20px 32px 28px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+  }
+  button {
+    padding: 10px 32px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  .btn-agree {
+    background: #4a6cf7;
+    color: #fff;
+  }
+  .btn-decline {
+    background: transparent;
+    color: #888;
+    border: 1px solid #333;
+  }
+  .btn-decline:hover { color: #bbb; border-color: #555; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>End User License Agreement</h1>
+    <p>Please read and accept the license agreement to use Verso.</p>
+  </div>
+  <div class="license-container">
+    <div class="license-text" id="licenseText">Loading...</div>
+  </div>
+  <div class="footer">
+    <button class="btn-decline" id="btnDecline">Decline</button>
+    <button class="btn-agree" id="btnAgree">I Agree</button>
+  </div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    ipcRenderer.on('eula-content', (_e, text) => {
+      document.getElementById('licenseText').textContent = text;
+    });
+    document.getElementById('btnAgree').addEventListener('click', () => {
+      ipcRenderer.send('eula-response', true);
+    });
+    document.getElementById('btnDecline').addEventListener('click', () => {
+      ipcRenderer.send('eula-response', false);
+    });
+  </script>
+</body>
+</html>

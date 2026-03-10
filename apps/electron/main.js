@@ -244,8 +244,8 @@ function launchGateway(port) {
         path.join(process.resourcesPath, 'gateway'),
       ]
     : [
-        // Dev mode: electron/  →  apps/  →  verso/
-        path.resolve(__dirname, '..', '..', '..'),
+        // Dev mode: electron/ → apps/ → verso/
+        path.resolve(__dirname, '..', '..'),
         // Read workspace from config
         (() => {
           try {
@@ -266,16 +266,14 @@ function launchGateway(port) {
 
   console.log('[Main] Gateway root:', resolvedGatewayRoot);
 
-  // Use bundled node if available, otherwise system node
-  const bundledNode = app.isPackaged
-    ? path.join(process.resourcesPath, 'gateway', 'node')
-    : null;
-  const nodeBin = (bundledNode && fs.existsSync(bundledNode)) ? bundledNode : 'node';
+  // Use Electron's own Node.js runtime via ELECTRON_RUN_AS_NODE — already signed
+  // and trusted by the OS, avoiding security blocks on bundled standalone binaries.
+  const nodeBin = app.isPackaged ? process.execPath : 'node';
 
   console.log('[Main] Starting embedded gateway:', nodeBin, gatewayPath);
 
   const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
+  env.ELECTRON_RUN_AS_NODE = '1';
   env.VERSO_GATEWAY_PORT = port;
   env.VERSO_GATEWAY_TOKEN = gatewayToken;
   env.VERSO_EMBEDDED = 'true';

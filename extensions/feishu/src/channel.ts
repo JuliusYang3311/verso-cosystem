@@ -93,7 +93,6 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount> = {
         },
         requireMention: { type: "boolean" },
         historyLimit: { type: "integer", minimum: 0 },
-        dmHistoryLimit: { type: "integer", minimum: 0 },
         textChunkLimit: { type: "integer", minimum: 1 },
         chunkMode: { type: "string", enum: ["length", "newline"] },
         mediaMaxMb: { type: "number", minimum: 0 },

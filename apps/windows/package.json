@@ -70,10 +70,6 @@
         "to": "gateway/package.json"
       },
       {
-        "from": "../../node.exe",
-        "to": "gateway/node.exe"
-      },
-      {
         "from": "../../docs/reference/templates",
         "to": "gateway/docs/reference/templates"
       }

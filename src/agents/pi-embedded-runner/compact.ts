@@ -49,7 +49,6 @@ import { createOpenClawCodingTools } from "../pi-tools.js";
 import { resolveSandboxContext } from "../sandbox.js";
 import { repairSessionFileIfNeeded } from "../session-file-repair.js";
 import { guardSessionManager } from "../session-tool-result-guard-wrapper.js";
-import { sanitizeToolUseResultPairing } from "../session-transcript-repair.js";
 import { acquireSessionWriteLock } from "../session-write-lock.js";
 import { detectRuntimeShell } from "../shell-utils.js";
 import {
@@ -66,7 +65,6 @@ import {
   sanitizeSessionHistory,
   sanitizeToolsForGoogle,
 } from "./google.js";
-import { getDmHistoryLimitFromSessionKey, limitHistoryTurns } from "./history.js";
 import { resolveGlobalLane, resolveSessionLane } from "./lanes.js";
 import { log } from "./logger.js";
 import { buildModelAliasLines, resolveModel } from "./model.js";
@@ -572,20 +570,10 @@ export async function compactEmbeddedPiSessionDirect(
         const validated = transcriptPolicy.validateAnthropicTurns
           ? validateAnthropicTurns(validatedGemini)
           : validatedGemini;
-        // Capture full message history BEFORE limiting — plugins need the complete conversation
+        // Capture full message history BEFORE compaction — plugins need the complete conversation
         const preCompactionMessages = [...session.messages];
-        const truncated = limitHistoryTurns(
-          validated,
-          getDmHistoryLimitFromSessionKey(params.sessionKey, params.config),
-        );
-        // Re-run tool_use/tool_result pairing repair after truncation, since
-        // limitHistoryTurns can orphan tool_result blocks by removing the
-        // assistant message that contained the matching tool_use.
-        const limited = transcriptPolicy.repairToolUseResultPairing
-          ? sanitizeToolUseResultPairing(truncated)
-          : truncated;
-        if (limited.length > 0) {
-          session.agent.replaceMessages(limited);
+        if (validated.length > 0) {
+          session.agent.replaceMessages(validated);
         }
         // Run before_compaction hooks (fire-and-forget).
         // The session JSONL already contains all messages on disk, so plugins
@@ -604,7 +592,7 @@ export async function compactEmbeddedPiSessionDirect(
             .runBeforeCompaction(
               {
                 messageCount: preCompactionMessages.length,
-                compactingCount: limited.length,
+                compactingCount: validated.length,
                 messages: preCompactionMessages,
                 sessionFile: params.sessionFile,
               },
@@ -656,7 +644,7 @@ export async function compactEmbeddedPiSessionDirect(
               {
                 messageCount: session.messages.length,
                 tokenCount: tokensAfter,
-                compactedCount: limited.length - session.messages.length,
+                compactedCount: validated.length - session.messages.length,
                 sessionFile: params.sessionFile,
               },
               hookCtx,

@@ -8,7 +8,6 @@ import {
   createOrchestrationMemoryDir,
   initOrchestrationMemory,
   cleanupOrchestrationMemory,
-  getOrchestrationMemoryEnv,
 } from "../orchestrator-memory.js";
 
 describe("Orchestrator Memory", () => {
@@ -111,24 +110,6 @@ describe("Orchestrator Memory", () => {
 
       // Directory should be removed
       expect(fs.existsSync(context.memoryDir)).toBe(false);
-    });
-  });
-
-  describe("getOrchestrationMemoryEnv", () => {
-    it("should return correct environment variables", () => {
-      const memoryDir = "/path/to/memory";
-      const env = getOrchestrationMemoryEnv(memoryDir);
-
-      expect(env.MEMORY_DIR).toBe(memoryDir);
-      expect(env.VERSO_MEMORY_DIR).toBe(memoryDir);
-    });
-
-    it("should handle paths with spaces", () => {
-      const memoryDir = "/path/with spaces/memory";
-      const env = getOrchestrationMemoryEnv(memoryDir);
-
-      expect(env.MEMORY_DIR).toBe(memoryDir);
-      expect(env.VERSO_MEMORY_DIR).toBe(memoryDir);
     });
   });
 });

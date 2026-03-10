@@ -8,6 +8,7 @@ import { loadWebMedia } from "../../../web/media.js";
 import { assertSandboxPath } from "../../sandbox-paths.js";
 import { sanitizeImageBlocks } from "../../tool-images.js";
 import { log } from "../logger.js";
+import { modelSupportsNativeImages } from "./multimodal.js";
 
 /**
  * Common image file extensions for detection.
@@ -256,9 +257,10 @@ export async function loadImageFromRef(
  *
  * @param model The model object with input capability array
  * @returns True if the model supports image input
+ * @deprecated Use `modelSupportsNativeImages` from `./multimodal.js` instead.
  */
 export function modelSupportsImages(model: { input?: string[] }): boolean {
-  return model.input?.includes("image") ?? false;
+  return modelSupportsNativeImages(model);
 }
 
 /**

@@ -138,3 +138,16 @@ skills/novel-writer/style/
 # Docker
 docker-compose.extra.yml
 
+node.exe
+*.exe
+
+# Platform app build artifacts
+apps/macos/.build/
+apps/macos/.swiftpm/
+apps/windows/build-resources/
+apps/windows/node_modules/
+apps/windows/package-lock.json
+apps/ios/build/
+apps/android/.gradle/
+apps/android/build/
+apps/android/app/build/

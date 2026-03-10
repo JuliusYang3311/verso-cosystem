@@ -3,12 +3,14 @@ import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { VersoConfig } from "../../config/config.js";
+import type { DynamicContextRuntime } from "../pi-extensions/dynamic-context/runtime.js";
 import { resolveContextWindowInfo } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { setCompactionSafeguardRuntime } from "../pi-extensions/compaction-safeguard-runtime.js";
 import { setContextPruningRuntime } from "../pi-extensions/context-pruning/runtime.js";
 import { computeEffectiveSettings } from "../pi-extensions/context-pruning/settings.js";
 import { makeToolPrunablePredicate } from "../pi-extensions/context-pruning/tools.js";
+import { setDynamicContextRuntime } from "../pi-extensions/dynamic-context/runtime.js";
 import { ensurePiCompactionReserveTokens } from "../pi-settings.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "./cache-ttl.js";
 
@@ -77,8 +79,17 @@ export function buildEmbeddedExtensionPaths(params: {
   provider: string;
   modelId: string;
   model: Model<Api> | undefined;
+  /** Dynamic context runtime — when provided, registers the dynamic-context extension. */
+  dynamicContext?: DynamicContextRuntime;
 }): string[] {
   const paths: string[] = [];
+
+  // Layer 1: Dynamic Context (always registered when runtime is provided)
+  if (params.dynamicContext) {
+    setDynamicContextRuntime(params.sessionManager, params.dynamicContext);
+    paths.push(resolvePiExtensionPath("dynamic-context"));
+  }
+
   if (resolveCompactionMode(params.cfg) === "safeguard") {
     const compactionCfg = params.cfg?.agents?.defaults?.compaction;
     const contextWindowInfo = resolveContextWindowInfo({

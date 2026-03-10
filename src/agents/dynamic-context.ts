@@ -355,7 +355,7 @@ export function buildDynamicContext(options: {
 
   // Total available budget
   const summaryTokens = compactionSummary ? estimateSnippetTokens(compactionSummary) : 0;
-  const totalBudget = contextLimit - systemPromptTokens - reserveForReply - summaryTokens;
+  const totalBudget = contextLimit * 0.8 - systemPromptTokens - reserveForReply - summaryTokens;
 
   if (totalBudget <= 0) {
     return {

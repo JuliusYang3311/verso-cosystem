@@ -136,8 +136,6 @@ export type DiscordAccountConfig = {
   maxLinesPerMessage?: number;
   mediaMaxMb?: number;
   historyLimit?: number;
-  /** Max DM turns to keep as history context. */
-  dmHistoryLimit?: number;
   /** Per-DM config overrides keyed by user ID. */
   dms?: Record<string, DmConfig>;
   /** Retry policy for outbound Discord API calls. */

@@ -1,0 +1,1423 @@
+// Dashboard functions for all sections
+
+// ==================== HELPERS ====================
+
+function formatNumber(num) {
+  if (num == null) return '0';
+  return Number(num).toLocaleString();
+}
+
+function formatCost(cost) {
+  if (cost == null || cost === 0) return '$0.00';
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(2)}`;
+}
+
+function formatDate(ts) {
+  if (!ts) return 'N/A';
+  const d = typeof ts === 'number' ? new Date(ts) : new Date(ts);
+  return d.toLocaleString();
+}
+
+function relativeTime(ts) {
+  if (!ts) return '';
+  const now = Date.now();
+  const ms = typeof ts === 'number' ? ts : new Date(ts).getTime();
+  const diff = now - ms;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return `${Math.floor(diff / 86400000)}d ago`;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+let chatUnreadCount = 0;
+
+function isChatNearBottom() {
+  const el = document.getElementById('chat-messages');
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+}
+
+function updateScrollButton() {
+  const btn = document.getElementById('chat-scroll-btn');
+  if (!btn) return;
+  const nearBottom = isChatNearBottom();
+  btn.classList.toggle('visible', !nearBottom);
+  if (nearBottom) {
+    chatUnreadCount = 0;
+    const badge = btn.querySelector('.unread-badge');
+    if (badge) badge.remove();
+  }
+}
+
+function scrollChatToBottom(force = false) {
+  if (!force && !isChatNearBottom()) {
+    // Not near bottom — increment unread badge
+    chatUnreadCount++;
+    const btn = document.getElementById('chat-scroll-btn');
+    if (btn) {
+      btn.classList.add('visible');
+      let badge = btn.querySelector('.unread-badge');
+      if (!badge) { badge = document.createElement('span'); badge.className = 'unread-badge'; btn.appendChild(badge); }
+      badge.textContent = chatUnreadCount > 99 ? '99+' : chatUnreadCount;
+    }
+    return;
+  }
+  chatUnreadCount = 0;
+  const el = document.getElementById('chat-messages');
+  if (!el) return;
+  const last = el.lastElementChild;
+  if (last) last.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  updateScrollButton();
+}
+window.scrollChatToBottom = scrollChatToBottom;
+
+// Listen for scroll to show/hide the scroll-to-bottom button
+requestAnimationFrame(() => {
+  const el = document.getElementById('chat-messages');
+  if (el) el.addEventListener('scroll', () => updateScrollButton(), { passive: true });
+});
+
+function formatMsgTime(ts) {
+  if (!ts) {
+    const now = new Date();
+    return now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+  }
+  const d = typeof ts === 'number' ? new Date(ts) : new Date(ts);
+  return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+}
+
+function truncate(str, len = 80) {
+  if (!str) return '';
+  return str.length > len ? str.slice(0, len) + '...' : str;
+}
+
+function showNotification(message, type = 'success') {
+  const el = document.createElement('div');
+  el.className = 'notification';
+  el.textContent = message;
+  el.style.background = type === 'error' ? '#d32f2f' : type === 'warning' ? '#ff9800' : '#4caf50';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+window.showNotification = showNotification;
+
+// ==================== OVERVIEW ====================
+
+async function loadOverview() {
+  try {
+    const [healthResult, sessionsResult] = await Promise.all([
+      window.gatewayClient.getHealth({ probe: false }).catch(() => null),
+      window.gatewayClient.listSessions().catch(() => null),
+    ]);
+
+    const sessions = sessionsResult?.sessions || [];
+    const channels = healthResult?.channels || {};
+    const connectedChannels = Object.values(channels).filter(ch => {
+      if (Array.isArray(ch)) return ch.some(a => a.connected);
+      return ch?.connected;
+    }).length;
+
+    document.getElementById('overview-status').textContent = healthResult ? 'Running' : 'Unknown';
+    document.getElementById('overview-status').style.color = healthResult ? '#4caf50' : '#888';
+    document.getElementById('overview-sessions').textContent = sessions.length;
+    document.getElementById('overview-channels').textContent = connectedChannels;
+
+    // Agents
+    try {
+      const agentsResult = await window.gatewayClient.listAgents();
+      const agents = agentsResult?.agents || [];
+      const agentsDiv = document.getElementById('overview-agents');
+      if (agents.length === 0) {
+        agentsDiv.innerHTML = '<div style="color:#888;font-size:13px;">No agents configured</div>';
+      } else {
+        agentsDiv.innerHTML = agents.map(a => `
+          <div class="list-item">
+            <div class="list-item-content">
+              <div class="list-item-title">${escapeHtml(a.name || a.id)}</div>
+              <div class="list-item-meta">${escapeHtml(a.id)} &middot; ${escapeHtml(a.workspace || 'no workspace')}</div>
+            </div>
+          </div>
+        `).join('');
+      }
+    } catch { document.getElementById('overview-agents').innerHTML = '<div style="color:#888;font-size:13px;">Could not load agents</div>'; }
+
+    // Presence / devices
+    try {
+      const presenceResult = await window.gatewayClient.getPresence();
+      const presence = presenceResult?.entries || presenceResult?.presence || [];
+      document.getElementById('overview-devices').textContent = Array.isArray(presence) ? presence.length : 0;
+
+      const activityDiv = document.getElementById('overview-activity');
+      if (Array.isArray(presence) && presence.length > 0) {
+        activityDiv.innerHTML = presence.slice(0, 5).map(p => `
+          <div class="list-item">
+            <div class="list-item-content">
+              <div class="list-item-title">${escapeHtml(p.displayName || p.host || p.deviceId || 'Unknown')}</div>
+              <div class="list-item-meta">${escapeHtml(p.mode || '')} &middot; ${escapeHtml(p.platform || '')}${p.lastInputSeconds != null ? ` &middot; Last input: ${p.lastInputSeconds}s ago` : ''}</div>
+            </div>
+            <div class="status-dot ${p.connected !== false ? 'green' : 'gray'}"></div>
+          </div>
+        `).join('');
+      } else {
+        activityDiv.innerHTML = '<div style="color:#888;font-size:13px;">No recent activity</div>';
+      }
+    } catch {
+      document.getElementById('overview-devices').textContent = '0';
+      document.getElementById('overview-activity').innerHTML = '<div style="color:#888;font-size:13px;">Could not load presence</div>';
+    }
+  } catch (err) {
+    console.error('Failed to load overview:', err);
+    document.getElementById('overview-status').textContent = 'Error';
+    document.getElementById('overview-status').style.color = '#f44336';
+  }
+}
+
+// ==================== CHAT ====================
+
+function getChatSession() {
+  return document.getElementById('chat-session-select')?.value || 'agent:main:main';
+}
+let chatRunId = null;
+let chatStreamingEl = null;
+let chatSafetyTimer = null;
+
+async function loadChatSessions() {
+  try {
+    const result = await window.gatewayClient.listSessions();
+    const sessions = result?.sessions || [];
+    const select = document.getElementById('chat-session-select');
+    const current = select.value;
+    select.innerHTML = '';
+
+    // Always include default
+    const keys = new Set(['agent:main:main']);
+    sessions.forEach(s => { if (s.key) keys.add(s.key); });
+
+    for (const key of keys) {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = key;
+      if (key === current) opt.selected = true;
+      select.appendChild(opt);
+    }
+  } catch (err) {
+    console.error('Failed to load chat sessions:', err);
+  }
+}
+
+async function loadChatHistory() {
+  const messagesDiv = document.getElementById('chat-messages');
+  const wasNearBottom = isChatNearBottom();
+
+  try {
+    const result = await window.gatewayClient.chatHistory({ sessionKey: getChatSession(), limit: 100 });
+    const messages = result?.messages || [];
+
+    if (messages.length === 0) {
+      messagesDiv.innerHTML = '<div class="chat-empty">No messages yet. Start chatting!</div>';
+      return;
+    }
+
+    messagesDiv.innerHTML = '';
+    for (const msg of messages) {
+      appendChatMessage(msg.role || 'system', msg.content || '', false, msg.timestamp || msg.createdAt || null);
+    }
+    // Only auto-scroll if user was already near the bottom
+    if (wasNearBottom) scrollChatToBottom(true);
+  } catch (err) {
+    console.error('Failed to load chat history:', err);
+    messagesDiv.innerHTML = '<div class="chat-empty">Could not load history</div>';
+  }
+}
+
+// Extract displayable text from any message content format.
+// Mirrors the content handling in chat-sanitize.ts:
+//   - string → direct text
+//   - Array<{type:"text",text}> → Anthropic / OpenAI multimodal content blocks
+//   - {text: string} → Google parts or legacy format
+//   - {parts: [{text}]} → Google Gemini format
+//   - nested content/message wrappers
+function extractTextContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map(block => {
+        if (typeof block === 'string') return block;
+        if (!block || typeof block !== 'object') return '';
+        if (block.type === 'text' && typeof block.text === 'string') return block.text;
+        if (block.type === 'thinking') return '';
+        if (block.type === 'tool_use') return `[Tool: ${block.name || 'unknown'}]`;
+        if (block.type === 'tool_result') {
+          if (typeof block.content === 'string') return block.content;
+          if (Array.isArray(block.content)) return extractTextContent(block.content);
+          return '';
+        }
+        // Google part: {text: "..."}
+        if (typeof block.text === 'string') return block.text;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (content && typeof content === 'object') {
+    if (content.type === 'text' && typeof content.text === 'string') return content.text;
+    if (typeof content.text === 'string') return content.text;
+    // Google: {parts: [{text: "..."}]}
+    if (Array.isArray(content.parts)) return extractTextContent(content.parts);
+    // Nested wrappers
+    if (typeof content.content === 'string') return content.content;
+    if (Array.isArray(content.content)) return extractTextContent(content.content);
+    return JSON.stringify(content);
+  }
+  return String(content || '');
+}
+
+function appendChatMessage(role, content, scroll = true, timestamp = null) {
+  const messagesDiv = document.getElementById('chat-messages');
+  const empty = messagesDiv.querySelector('.chat-empty');
+  if (empty) empty.remove();
+
+  const el = document.createElement('div');
+  const roleClass = role === 'user' ? 'user' : role === 'assistant' ? 'assistant' : 'system';
+  el.className = `chat-msg ${roleClass}`;
+
+  // Message grouping — check if previous message is from same role
+  const prev = messagesDiv.lastElementChild;
+  const prevRole = prev?.classList.contains(roleClass);
+  if (prevRole && prev) {
+    // Previous message is same role — update its grouping class
+    if (prev.classList.contains('group-single')) {
+      prev.classList.remove('group-single');
+      prev.classList.add('group-first');
+    } else if (prev.classList.contains('group-last')) {
+      prev.classList.remove('group-last');
+      prev.classList.add('group-middle');
+    }
+    el.classList.add('group-last');
+    // Hide header on continuation messages
+    el.dataset.continuation = '1';
+  } else {
+    el.classList.add('group-single');
+  }
+
+  const textContent = extractTextContent(content);
+
+  // Simple markdown-like rendering
+  let html = escapeHtml(textContent);
+  html = html.replace(/```([\s\S]*?)```/g, '<pre>$1</pre>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\n/g, '<br>');
+
+  const time = formatMsgTime(timestamp);
+  const showHeader = !el.dataset.continuation;
+  const avatarHtml = (roleClass === 'assistant' && showHeader)
+    ? '<img src="../assets/icon.png" class="msg-avatar" alt="V">'
+    : '';
+  const headerHtml = showHeader
+    ? `<div class="msg-header">${avatarHtml}<span class="msg-role">${roleClass === 'assistant' ? 'Verso' : ''}</span><span class="msg-time">${time}</span></div>`
+    : '';
+  el.innerHTML = `${headerHtml}<div class="msg-body">${html}</div>`;
+  messagesDiv.appendChild(el);
+  if (scroll) scrollChatToBottom(true);
+  return el;
+}
+
+// Pending attachments
+let chatPendingAttachments = [];
+
+function renderAttachmentPreviews() {
+  const preview = document.getElementById('chat-attachments-preview');
+  if (!preview) return;
+  preview.innerHTML = '';
+  preview.classList.toggle('has-items', chatPendingAttachments.length > 0);
+  chatPendingAttachments.forEach((att, i) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'chat-attachment-thumb';
+    thumb.innerHTML = `<img src="data:${att.mimeType};base64,${att.content}" alt="${escapeHtml(att.fileName)}"><button class="chat-attachment-remove" onclick="removeChatAttachment(${i})">&times;</button>`;
+    preview.appendChild(thumb);
+  });
+}
+
+window.removeChatAttachment = function(idx) {
+  chatPendingAttachments.splice(idx, 1);
+  renderAttachmentPreviews();
+};
+
+// File input handler
+requestAnimationFrame(() => {
+  const attachBtn = document.getElementById('chat-attach-btn');
+  const fileInput = document.getElementById('chat-file-input');
+  if (attachBtn && fileInput) {
+    attachBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      for (const file of e.target.files) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const b64 = reader.result.split(',')[1];
+          chatPendingAttachments.push({
+            type: 'image',
+            mimeType: file.type || 'image/png',
+            fileName: file.name,
+            content: b64
+          });
+          renderAttachmentPreviews();
+        };
+        reader.readAsDataURL(file);
+      }
+      fileInput.value = '';
+    });
+  }
+
+  // Paste images from clipboard
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) {
+    chatInput.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) continue;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const b64 = reader.result.split(',')[1];
+            chatPendingAttachments.push({ type: 'image', mimeType: file.type, fileName: 'pasted-image.png', content: b64 });
+            renderAttachmentPreviews();
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    });
+  }
+
+  // Drag-and-drop images onto chat area
+  const chatMessages = document.getElementById('chat-messages');
+  if (chatMessages) {
+    chatMessages.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+    chatMessages.addEventListener('drop', (e) => {
+      e.preventDefault();
+      for (const file of e.dataTransfer.files) {
+        if (!file.type.startsWith('image/')) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const b64 = reader.result.split(',')[1];
+          chatPendingAttachments.push({ type: 'image', mimeType: file.type, fileName: file.name, content: b64 });
+          renderAttachmentPreviews();
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+});
+
+async function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  const message = input.value.trim();
+  const attachments = [...chatPendingAttachments];
+  if (!message && attachments.length === 0) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+
+  // Show user message with attachment thumbnails
+  const userEl = appendChatMessage('user', message || '(image)');
+  if (attachments.length > 0) {
+    const imgContainer = document.createElement('div');
+    imgContainer.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;';
+    for (const att of attachments) {
+      const img = document.createElement('img');
+      img.src = `data:${att.mimeType};base64,${att.content}`;
+      img.className = 'msg-image';
+      img.alt = att.fileName;
+      imgContainer.appendChild(img);
+    }
+    userEl.appendChild(imgContainer);
+  }
+
+  // Clear attachments
+  chatPendingAttachments = [];
+  renderAttachmentPreviews();
+
+  const abortBtn = document.getElementById('chat-abort-btn');
+  const sendBtn = document.getElementById('chat-send-btn');
+  abortBtn.style.display = 'inline-block';
+  sendBtn.disabled = true;
+
+  chatStreamingEl = appendChatMessage('assistant', 'Thinking...');
+  chatStreamingEl.classList.add('chat-streaming');
+  requestAnimationFrame(() => scrollChatToBottom(true));
+
+  try {
+    const sendParams = {
+      sessionKey: getChatSession(),
+      message: message || '',
+      idempotencyKey: `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    };
+    if (attachments.length > 0) sendParams.attachments = attachments;
+    const result = await window.gatewayClient.chatSend(sendParams);
+    chatRunId = result?.runId;
+    // UI updates are driven by gateway chat events (delta/final).
+    // Safety timeout prevents UI from being stuck forever if agent never responds.
+    if (chatSafetyTimer) clearTimeout(chatSafetyTimer);
+    chatSafetyTimer = setTimeout(async () => {
+      chatSafetyTimer = null;
+      if (chatStreamingEl) {
+        chatStreamingEl.remove();
+        chatStreamingEl = null;
+      }
+      await loadChatHistory();
+      abortBtn.style.display = 'none';
+      sendBtn.disabled = false;
+    }, 120000);
+  } catch (err) {
+    console.error('Failed to send chat:', err);
+    if (chatStreamingEl) {
+      const body = chatStreamingEl.querySelector('.msg-body');
+      if (body) body.innerHTML = `<span style="color:#f44336;">Error: ${escapeHtml(err.message)}</span>`;
+      chatStreamingEl.classList.remove('chat-streaming');
+      chatStreamingEl = null;
+    }
+    abortBtn.style.display = 'none';
+    sendBtn.disabled = false;
+  }
+}
+window.sendChatMessage = sendChatMessage;
+
+async function abortChat() {
+  try {
+    await window.gatewayClient.chatAbort({ sessionKey: getChatSession(), runId: chatRunId });
+    showNotification('Chat aborted');
+  } catch (err) {
+    showNotification('Failed to abort: ' + err.message, 'error');
+  }
+  document.getElementById('chat-abort-btn').style.display = 'none';
+  document.getElementById('chat-send-btn').disabled = false;
+  if (chatStreamingEl) {
+    chatStreamingEl.remove();
+    chatStreamingEl = null;
+  }
+}
+
+// Listen for chat events (streaming)
+window.addEventListener('gateway-event', (e) => {
+  const { event, data } = e.detail || {};
+  if (event === 'chat' && data) {
+    if (data.sessionKey && data.sessionKey !== getChatSession()) return;
+    if (data.delta && chatStreamingEl) {
+      const body = chatStreamingEl.querySelector('.msg-body');
+      if (body && body.textContent === 'Thinking...') {
+        body.innerHTML = escapeHtml(data.delta).replace(/\n/g, '<br>');
+      } else if (body) {
+        body.innerHTML += escapeHtml(data.delta).replace(/\n/g, '<br>');
+      }
+      scrollChatToBottom();
+    }
+    if (data.state === 'delta' && data.message && chatStreamingEl) {
+      const deltaText = extractTextContent(data.message.content || data.message);
+      if (deltaText) {
+        const body = chatStreamingEl.querySelector('.msg-body');
+        if (body) body.innerHTML = escapeHtml(deltaText).replace(/\n/g, '<br>');
+        scrollChatToBottom();
+      }
+    }
+
+    if (data.state === 'final' || data.status === 'done') {
+      const finalText = data.message ? extractTextContent(data.message.content || data.message) : '';
+      // Ignore empty finals from async dispatch — agent hasn't responded yet
+      if (!finalText && chatStreamingEl) return;
+
+      if (chatSafetyTimer) { clearTimeout(chatSafetyTimer); chatSafetyTimer = null; }
+      if (chatStreamingEl) {
+        if (finalText) {
+          const body = chatStreamingEl.querySelector('.msg-body');
+          if (body) body.innerHTML = escapeHtml(finalText).replace(/\n/g, '<br>');
+        }
+        chatStreamingEl.classList.remove('chat-streaming');
+        chatStreamingEl = null;
+      }
+      document.getElementById('chat-abort-btn').style.display = 'none';
+      document.getElementById('chat-send-btn').disabled = false;
+      scrollChatToBottom();
+    }
+  }
+});
+
+// ==================== SESSIONS ====================
+
+async function loadSessions() {
+  try {
+    const result = await window.gatewayClient.listSessions();
+    const sessions = result?.sessions || [];
+    const listDiv = document.getElementById('sessions-list');
+
+    if (sessions.length === 0) {
+      listDiv.innerHTML = '<div style="color:#888;padding:16px;">No sessions</div>';
+      return;
+    }
+
+    listDiv.innerHTML = sessions.map(s => `
+      <div class="list-item">
+        <div class="list-item-content">
+          <div class="list-item-title">${escapeHtml(s.key || s.sessionKey || 'Unknown')}</div>
+          <div class="list-item-meta">
+            Agent: ${escapeHtml(s.agentId || 'N/A')} &middot;
+            Model: ${escapeHtml(s.model || 'N/A')} &middot;
+            Messages: ${s.messageCount || 0}
+            ${s.label ? ` &middot; ${escapeHtml(s.label)}` : ''}
+            ${s.updatedAt ? ` &middot; ${relativeTime(s.updatedAt)}` : ''}
+          </div>
+        </div>
+        <div class="list-item-actions">
+          <button class="btn btn-small btn-secondary" onclick="viewSession('${escapeHtml(s.key || s.sessionKey)}')">View</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.error('Failed to load sessions:', err);
+    document.getElementById('sessions-list').innerHTML = '<div style="color:#f44336;padding:16px;">Failed to load sessions</div>';
+  }
+}
+
+let currentSessionKey = null;
+
+window.viewSession = async function(sessionKey) {
+  currentSessionKey = sessionKey;
+  document.getElementById('sessions-list-card').style.display = 'none';
+  document.getElementById('session-detail-card').style.display = 'block';
+  document.getElementById('session-detail-title').textContent = sessionKey;
+
+  const infoDiv = document.getElementById('session-detail-info');
+  const msgsDiv = document.getElementById('session-detail-messages');
+  infoDiv.innerHTML = 'Loading...';
+  msgsDiv.innerHTML = '';
+
+  try {
+    // Load session preview
+    const preview = await window.gatewayClient.previewSessions({ keys: [sessionKey], limit: 50 });
+    const p = preview?.previews?.[0];
+
+    infoDiv.innerHTML = `
+      <div><strong>Key:</strong> ${escapeHtml(sessionKey)}</div>
+      <div><strong>Status:</strong> ${escapeHtml(p?.status || 'unknown')}</div>
+    `;
+
+    // Load chat history
+    try {
+      const history = await window.gatewayClient.chatHistory({ sessionKey, limit: 100 });
+      const messages = history?.messages || [];
+
+      if (messages.length === 0) {
+        msgsDiv.innerHTML = '<div style="color:#888;font-size:13px;">No messages in this session</div>';
+      } else {
+        msgsDiv.innerHTML = messages.map(msg => {
+          const role = msg.role || 'system';
+          const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '');
+          return `
+            <div style="padding:8px 12px;margin-bottom:6px;background:${role === 'user' ? '#0a3d6e' : '#2a2a2a'};border-radius:6px;">
+              <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:3px;">${escapeHtml(role)}</div>
+              <div style="font-size:13px;white-space:pre-wrap;">${escapeHtml(truncate(content, 500))}</div>
+            </div>
+          `;
+        }).join('');
+      }
+    } catch {
+      msgsDiv.innerHTML = '<div style="color:#888;font-size:13px;">Could not load message history</div>';
+    }
+  } catch (err) {
+    infoDiv.innerHTML = `<div style="color:#f44336;">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+window.sessionBack = function() {
+  document.getElementById('sessions-list-card').style.display = 'block';
+  document.getElementById('session-detail-card').style.display = 'none';
+  currentSessionKey = null;
+  void loadSessions();
+}
+
+window.resetSession = async function() {
+  if (!currentSessionKey || !confirm(`Reset session ${currentSessionKey}? This clears the message history.`)) return;
+  try {
+    await window.gatewayClient.resetSession({ key: currentSessionKey });
+    showNotification('Session reset');
+    viewSession(currentSessionKey);
+  } catch (err) {
+    showNotification('Failed to reset: ' + err.message, 'error');
+  }
+}
+
+window.compactSession = async function() {
+  if (!currentSessionKey) return;
+  try {
+    const result = await window.gatewayClient.compactSession({ key: currentSessionKey });
+    showNotification(result?.compacted ? 'Session compacted' : 'Nothing to compact');
+    viewSession(currentSessionKey);
+  } catch (err) {
+    showNotification('Failed to compact: ' + err.message, 'error');
+  }
+}
+
+window.deleteSession = async function() {
+  if (!currentSessionKey || !confirm(`Delete session ${currentSessionKey}?`)) return;
+  try {
+    await window.gatewayClient.deleteSession({ key: currentSessionKey, deleteTranscript: true });
+    showNotification('Session deleted');
+    sessionBack();
+  } catch (err) {
+    showNotification('Failed to delete: ' + err.message, 'error');
+  }
+}
+
+// ==================== CHANNELS ====================
+
+function formatRelativeTime(ts) {
+  if (!ts) return null;
+  const diff = Date.now() - ts;
+  if (diff < 0) return 'just now';
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function renderAccountStatusBadges(acc) {
+  const badges = [];
+  if (acc.enabled === false) badges.push('<span class="ch-badge ch-badge-off">Disabled</span>');
+  if (acc.configured === false) badges.push('<span class="ch-badge ch-badge-warn">Not configured</span>');
+  if (acc.linked === true) badges.push('<span class="ch-badge ch-badge-ok">Linked</span>');
+  if (acc.running === true) badges.push('<span class="ch-badge ch-badge-ok">Running</span>');
+  else if (acc.running === false && acc.enabled !== false) badges.push('<span class="ch-badge ch-badge-off">Stopped</span>');
+  return badges.join(' ');
+}
+
+function renderAccountDetails(acc) {
+  const rows = [];
+  if (acc.dmPolicy) rows.push(`DM: ${escapeHtml(acc.dmPolicy)}`);
+  if (acc.mode) rows.push(`Mode: ${escapeHtml(acc.mode)}`);
+  if (acc.lastConnectedAt) rows.push(`Connected: ${formatRelativeTime(acc.lastConnectedAt)}`);
+  if (acc.lastInboundAt) rows.push(`Last msg in: ${formatRelativeTime(acc.lastInboundAt)}`);
+  if (acc.lastOutboundAt) rows.push(`Last msg out: ${formatRelativeTime(acc.lastOutboundAt)}`);
+  if (acc.reconnectAttempts > 0) rows.push(`Reconnects: ${acc.reconnectAttempts}`);
+  if (acc.allowFrom && acc.allowFrom.length > 0) rows.push(`Allow: ${escapeHtml(acc.allowFrom.join(', '))}`);
+  return rows.length > 0
+    ? `<div class="ch-details">${rows.map(r => `<span class="ch-detail-item">${r}</span>`).join('')}</div>`
+    : '';
+}
+
+async function loadChannels() {
+  try {
+    const result = await window.gatewayClient.getChannelsStatus({ probe: false });
+    const channels = result?.channels || {};
+    const channelAccountsMap = result?.channelAccounts || {};
+    const supportedChannels = new Set(['telegram', 'whatsapp', 'discord', 'slack', 'web']);
+    const channelOrder = (result?.channelOrder || Object.keys(channels)).filter(ch => supportedChannels.has(ch));
+    const channelLabels = result?.channelLabels || {};
+    const listDiv = document.getElementById('channels-list');
+
+    if (channelOrder.length === 0) {
+      listDiv.innerHTML = '<div style="color:#888;padding:16px;">No channels configured</div>';
+      return;
+    }
+
+    listDiv.innerHTML = channelOrder.map(name => {
+      // Prefer channelAccounts (detailed) over channels summary
+      const detailedAccounts = channelAccountsMap[name];
+      const channel = channels[name];
+      if (!channel && !detailedAccounts) return '';
+      const label = channelLabels[name] || name;
+      const accounts = Array.isArray(detailedAccounts) && detailedAccounts.length > 0
+        ? detailedAccounts
+        : (Array.isArray(channel) ? channel : (channel?.accounts || [channel]));
+      const hasConnected = accounts.some(a => a.connected || a.status === 'connected');
+      const allDisabled = accounts.every(a => a.enabled === false);
+
+      // Channel-level summary from channels[name]
+      const summary = channels[name];
+      const configured = summary?.configured !== false;
+
+      return `
+        <div class="channel-card ${allDisabled ? 'channel-disabled' : ''}">
+          <div class="channel-card-header">
+            <div class="channel-card-title">
+              <span class="status-dot ${hasConnected ? 'green' : (allDisabled ? 'red' : 'gray')}"></span>
+              ${escapeHtml(label)}
+              ${!configured ? '<span class="ch-badge ch-badge-warn" style="margin-left:6px;">Not configured</span>' : ''}
+              ${allDisabled ? '<span class="ch-badge ch-badge-off" style="margin-left:6px;">Plugin disabled</span>' : ''}
+            </div>
+            <span style="font-size:12px;color:#888;">${accounts.length} account${accounts.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div class="channel-accounts">
+            ${accounts.map((acc, i) => {
+              const accId = acc.accountId || acc.id || `#${i}`;
+              const connected = acc.connected || acc.status === 'connected';
+              const statusText = connected ? 'Connected' : (acc.enabled === false ? 'Disabled' : (acc.lastError || acc.error ? 'Error' : (acc.status || 'Disconnected')));
+              const statusColor = connected ? '#4caf50' : ((acc.lastError || acc.error) ? '#f44336' : (acc.enabled === false ? '#ff9800' : '#888'));
+              const errorMsg = acc.lastError || acc.error || '';
+              return `
+                <div class="channel-account">
+                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div style="flex:1;min-width:0;">
+                      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <span style="font-weight:500;">${escapeHtml(acc.name || acc.displayName || accId)}</span>
+                        ${renderAccountStatusBadges(acc)}
+                      </div>
+                      <div style="color:${statusColor};font-size:12px;margin-top:3px;">${escapeHtml(statusText)}</div>
+                      ${errorMsg ? `<div style="color:#f44336;font-size:11px;margin-top:2px;word-break:break-word;">${escapeHtml(truncate(errorMsg, 150))}</div>` : ''}
+                      ${renderAccountDetails(acc)}
+                    </div>
+                    <div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">
+                      ${connected ? `<button class="btn btn-small btn-secondary" onclick="logoutChannel('${escapeHtml(name)}','${escapeHtml(accId)}')">Disconnect</button>` : ''}
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+          <div style="margin-top:8px;">
+            <button class="btn btn-small btn-secondary" onclick="configureChannel('${escapeHtml(name)}')">Configure & Pair</button>
+          </div>
+        </div>
+      `;
+    }).filter(Boolean).join('');
+  } catch (err) {
+    console.error('Failed to load channels:', err);
+    document.getElementById('channels-list').innerHTML = '<div style="color:#f44336;padding:16px;">Failed to load channels</div>';
+  }
+}
+
+window.logoutChannel = async function(channel, accountId) {
+  if (!confirm(`Disconnect ${channel} account ${accountId}?`)) return;
+  try {
+    await window.gatewayClient.channelsLogout({ channel, accountId });
+    showNotification(`Disconnected ${channel}`);
+    void loadChannels();
+  } catch (err) {
+    showNotification('Failed to disconnect: ' + err.message, 'error');
+  }
+}
+
+// ==================== CRON JOBS ====================
+
+function formatCronSchedule(schedule) {
+  if (!schedule || typeof schedule !== 'object') return 'N/A';
+  if (schedule.kind === 'every' && schedule.everyMs) {
+    const ms = schedule.everyMs;
+    if (ms >= 86400000) return `Every ${Math.round(ms / 86400000)}d`;
+    if (ms >= 3600000) return `Every ${Math.round(ms / 3600000)}h`;
+    if (ms >= 60000) return `Every ${Math.round(ms / 60000)}m`;
+    return `Every ${Math.round(ms / 1000)}s`;
+  }
+  if (schedule.kind === 'cron' && schedule.cron) return schedule.cron;
+  if (schedule.kind === 'at' && schedule.at) return `At ${schedule.at}`;
+  return JSON.stringify(schedule);
+}
+
+async function loadCronJobs(_retried) {
+  try {
+    // Load status
+    try {
+      const status = await window.gatewayClient.getCronStatus();
+      const statusBar = document.getElementById('cron-status-info');
+      statusBar.innerHTML = `Service: ${status?.running !== false ? '<span style="color:#4caf50">Active</span>' : '<span style="color:#888">Inactive</span>'}${status?.nextWake ? ` &middot; Next wake: ${formatDate(status.nextWake)}` : ''}`;
+    } catch { /* ignore */ }
+
+    const result = await window.gatewayClient.listCronJobs({ includeDisabled: true });
+    const jobs = result?.jobs || [];
+    const listDiv = document.getElementById('cron-list');
+
+    if (jobs.length === 0) {
+      listDiv.innerHTML = '<div style="color:#888;padding:16px;">No cron jobs configured</div>';
+      return;
+    }
+
+    listDiv.innerHTML = jobs.map(job => {
+      const enabled = job.enabled !== false;
+      const scheduleText = formatCronSchedule(job.schedule);
+      const payloadMsg = job.payload?.kind === 'agentTurn' ? job.payload.message : job.payload?.text;
+      return `
+        <div class="list-item" style="opacity:${enabled ? 1 : 0.6};">
+          <div class="list-item-content">
+            <div class="list-item-title">${escapeHtml(job.label || job.name || job.id || 'Unnamed')}</div>
+            <div class="list-item-meta">
+              Schedule: ${escapeHtml(scheduleText)}
+              ${job.timezone ? ` (${escapeHtml(job.timezone)})` : ''}
+              &middot; ${enabled ? 'Enabled' : 'Disabled'}
+              ${job.nextRun ? ` &middot; Next: ${formatDate(job.nextRun)}` : ''}
+              ${job.lastRun ? ` &middot; Last: ${relativeTime(job.lastRun)}` : ''}
+            </div>
+            ${payloadMsg ? `<div style="color:#aaa;font-size:12px;margin-top:4px;">${escapeHtml(truncate(payloadMsg, 100))}</div>` : ''}
+          </div>
+          <div class="list-item-actions">
+            <button class="btn btn-small btn-secondary" onclick="toggleCronJob(this, '${escapeHtml(job.id)}', ${enabled})">${enabled ? 'Disable' : 'Enable'}</button>
+            <button class="btn btn-small btn-secondary" onclick="runCronJobNow(this, '${escapeHtml(job.id)}')">Run Now</button>
+            <button class="btn btn-small btn-secondary" onclick="viewCronRuns('${escapeHtml(job.id)}')">History</button>
+            <button class="btn btn-small btn-danger" onclick="removeCronJob(this, '${escapeHtml(job.id)}')">Delete</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Failed to load cron jobs:', err);
+    // Retry once after 2s — gateway may not be fully ready after handshake
+    if (!_retried) {
+      document.getElementById('cron-list').innerHTML = '<div style="color:#888;padding:16px;">Loading cron jobs...</div>';
+      setTimeout(() => loadCronJobs(true), 2000);
+      return;
+    }
+    document.getElementById('cron-list').innerHTML = '<div style="color:#f44336;padding:16px;">Failed to load cron jobs</div>';
+  }
+}
+
+window.toggleCronJob = async function(btn, jobId, currentlyEnabled) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = currentlyEnabled ? 'Disabling...' : 'Enabling...';
+  try {
+    await window.gatewayClient.updateCronJob({ id: jobId, patch: { enabled: !currentlyEnabled } });
+    showNotification(currentlyEnabled ? 'Job disabled' : 'Job enabled');
+    void loadCronJobs();
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+    btn.textContent = orig;
+    btn.disabled = false;
+  }
+}
+
+window.runCronJobNow = async function(btn, jobId) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  try {
+    await window.gatewayClient.runCronJob({ id: jobId, mode: 'force' });
+    showNotification('Job triggered');
+    btn.textContent = 'Run Now';
+    btn.disabled = false;
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+    btn.textContent = 'Run Now';
+    btn.disabled = false;
+  }
+}
+
+window.removeCronJob = async function(btn, jobId) {
+  if (!confirm('Delete this cron job?')) return;
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = 'Deleting...';
+  try {
+    await window.gatewayClient.removeCronJob({ id: jobId });
+    showNotification('Job deleted');
+    void loadCronJobs();
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+    btn.textContent = 'Delete';
+    btn.disabled = false;
+  }
+}
+
+window.viewCronRuns = async function(jobId) {
+  const modal = document.getElementById('cron-runs-modal');
+  const content = document.getElementById('cron-runs-content');
+  content.innerHTML = 'Loading...';
+  modal.classList.add('active');
+
+  try {
+    const result = await window.gatewayClient.getCronRuns({ id: jobId, limit: 20 });
+    const entries = result?.entries || [];
+
+    if (entries.length === 0) {
+      content.innerHTML = '<div style="color:#888;">No run history</div>';
+      return;
+    }
+
+    content.innerHTML = entries.map(entry => `
+      <div class="list-item">
+        <div class="list-item-content">
+          <div class="list-item-meta">
+            ${formatDate(entry.ts || entry.startedAt)} &middot;
+            <span style="color:${entry.ok !== false ? '#4caf50' : '#f44336'};">${entry.ok !== false ? 'Success' : 'Failed'}</span>
+            ${entry.error ? ` &middot; ${escapeHtml(truncate(entry.error, 80))}` : ''}
+            ${entry.durationMs ? ` &middot; ${entry.durationMs}ms` : ''}
+          </div>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    content.innerHTML = `<div style="color:#f44336;">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+window.closeCronRunsModal = function() {
+  document.getElementById('cron-runs-modal').classList.remove('active');
+}
+
+// Cron add modal
+window.showCronAddModal = function() {
+  document.getElementById('cron-label').value = '';
+  document.getElementById('cron-schedule').value = '';
+  document.getElementById('cron-message').value = '';
+  document.getElementById('cron-timezone').value = '';
+  document.getElementById('cron-modal').classList.add('active');
+}
+
+window.closeCronModal = function() {
+  document.getElementById('cron-modal').classList.remove('active');
+}
+
+window.saveCronJob = async function() {
+  const label = document.getElementById('cron-label').value.trim();
+  const schedule = document.getElementById('cron-schedule').value.trim();
+  const message = document.getElementById('cron-message').value.trim();
+  const timezone = document.getElementById('cron-timezone').value.trim();
+
+  if (!schedule || !message) {
+    showNotification('Schedule and message are required', 'error');
+    return;
+  }
+
+  try {
+    await window.gatewayClient.addCronJob({
+      schedule,
+      message,
+      label: label || undefined,
+      timezone: timezone || undefined,
+      enabled: true,
+    });
+    showNotification('Cron job added');
+    closeCronModal();
+    void loadCronJobs();
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+  }
+}
+
+// ==================== ORCHESTRATION ====================
+
+async function loadOrchestration() {
+  try {
+    const result = await window.gatewayClient.listOrchestrations({ limit: 50 });
+    const orchestrations = result?.orchestrations || [];
+    const listDiv = document.getElementById('orchestration-list');
+
+    if (orchestrations.length === 0) {
+      listDiv.innerHTML = '<div style="color:#888;padding:16px;">No orchestration tasks</div>';
+      return;
+    }
+
+    const statusColors = {
+      completed: '#4caf50', running: '#2196f3', failed: '#f44336',
+      pending: '#ff9800', cancelled: '#888', planning: '#9c27b0',
+      dispatching: '#00bcd4', fixing: '#ff5722', acceptance: '#8bc34a',
+    };
+
+    listDiv.innerHTML = orchestrations.map(orch => {
+      const color = statusColors[orch.status] || '#888';
+      const dotClass = orch.status === 'completed' ? 'green' : orch.status === 'running' || orch.status === 'dispatching' ? 'yellow' : orch.status === 'failed' ? 'red' : 'gray';
+      return `
+        <div class="list-item">
+          <span class="status-dot ${dotClass}"></span>
+          <div class="list-item-content">
+            <div class="list-item-title">${escapeHtml(truncate(orch.userPrompt || 'Orchestration', 120))}</div>
+            <div class="list-item-meta">
+              <span style="color:${color};font-weight:600;">${escapeHtml(orch.status || 'unknown')}</span> &middot;
+              Subtasks: ${orch.subtaskCount || 0} &middot;
+              ${formatDate(orch.createdAtMs)}
+            </div>
+          </div>
+          <div class="list-item-actions">
+            <button class="btn btn-small btn-secondary" onclick="viewOrchestration('${escapeHtml(orch.id)}')">View</button>
+            ${orch.status === 'running' || orch.status === 'pending' ? `<button class="btn btn-small btn-danger" onclick="abortOrchestration('${escapeHtml(orch.id)}')">Abort</button>` : ''}
+            ${orch.status === 'failed' ? `<button class="btn btn-small btn-secondary" onclick="retryOrchestration('${escapeHtml(orch.id)}')">Retry</button>` : ''}
+            <button class="btn btn-small btn-secondary" onclick="deleteOrchestration('${escapeHtml(orch.id)}')">Delete</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Failed to load orchestration:', err);
+    document.getElementById('orchestration-list').innerHTML = '<div style="color:#f44336;padding:16px;">Failed to load orchestration</div>';
+  }
+}
+
+window.viewOrchestration = async function(orchId) {
+  const modal = document.getElementById('orch-modal');
+  const content = document.getElementById('orch-detail-content');
+  content.innerHTML = 'Loading...';
+  modal.classList.add('active');
+
+  try {
+    const result = await window.gatewayClient.getOrchestration({ id: orchId });
+    const orch = result?.orchestration;
+    if (!orch) {
+      content.innerHTML = '<div style="color:#888;">Orchestration not found</div>';
+      return;
+    }
+
+    const subtasks = orch.plan?.subtasks || orch.subtasks || [];
+    const statusColors = {
+      completed: '#4caf50', running: '#2196f3', failed: '#f44336',
+      pending: '#ff9800', cancelled: '#888', queued: '#9c27b0',
+    };
+
+    content.innerHTML = `
+      <div style="margin-bottom:16px;">
+        <div style="font-weight:600;margin-bottom:8px;">${escapeHtml(orch.userPrompt || 'No prompt')}</div>
+        <div style="color:#888;font-size:12px;">
+          Status: <span style="color:${statusColors[orch.status] || '#888'};font-weight:600;">${escapeHtml(orch.status)}</span> &middot;
+          Created: ${formatDate(orch.createdAtMs)}
+          ${orch.completedAtMs ? ` &middot; Completed: ${formatDate(orch.completedAtMs)}` : ''}
+        </div>
+      </div>
+      <h3 style="margin-bottom:8px;">Subtasks (${subtasks.length})</h3>
+      ${subtasks.length === 0 ? '<div style="color:#888;font-size:13px;">No subtasks</div>' :
+        subtasks.map((task, i) => `
+          <div class="orch-subtask">
+            <span class="status-dot ${task.status === 'completed' ? 'green' : task.status === 'running' ? 'yellow' : task.status === 'failed' ? 'red' : 'gray'}"></span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;">${i + 1}. ${escapeHtml(task.description || task.title || 'No description')}</div>
+              <div style="font-size:11px;color:#888;">${escapeHtml(task.status || 'pending')}${task.specialization ? ` &middot; ${escapeHtml(task.specialization)}` : ''}</div>
+              ${task.error ? `<div style="font-size:11px;color:#f44336;margin-top:2px;">${escapeHtml(truncate(task.error, 100))}</div>` : ''}
+              ${task.result ? `<div style="font-size:11px;color:#aaa;margin-top:2px;">${escapeHtml(truncate(typeof task.result === 'string' ? task.result : JSON.stringify(task.result), 150))}</div>` : ''}
+            </div>
+          </div>
+        `).join('')}
+    `;
+  } catch (err) {
+    content.innerHTML = `<div style="color:#f44336;">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+window.closeOrchModal = function() {
+  document.getElementById('orch-modal').classList.remove('active');
+}
+
+window.abortOrchestration = async function(orchId) {
+  if (!confirm('Abort this orchestration?')) return;
+  try {
+    await window.gatewayClient.abortOrchestration({ id: orchId });
+    showNotification('Orchestration aborted');
+    void loadOrchestration();
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+  }
+}
+
+window.retryOrchestration = async function(orchId) {
+  try {
+    await window.gatewayClient.retryOrchestration({ id: orchId });
+    showNotification('Retry initiated');
+    void loadOrchestration();
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+  }
+}
+
+window.deleteOrchestration = async function(orchId) {
+  if (!confirm('Delete this orchestration?')) return;
+  try {
+    await window.gatewayClient.deleteOrchestration({ id: orchId });
+    showNotification('Deleted');
+    void loadOrchestration();
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+  }
+}
+
+// ==================== INSTANCES (Nodes, Devices, Presence) ====================
+
+async function loadInstances() {
+  // Nodes
+  try {
+    const result = await window.gatewayClient.listNodes();
+    const nodes = result?.nodes || [];
+    const nodesDiv = document.getElementById('nodes-list');
+
+    if (nodes.length === 0) {
+      nodesDiv.innerHTML = '<div class="instance-empty">No nodes connected</div>';
+    } else {
+      nodesDiv.innerHTML = nodes.map(node => `
+        <div class="instance-card">
+          <div class="instance-card-header">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="status-dot ${node.connected ? 'green' : 'gray'}"></span>
+              <span class="instance-card-title">${escapeHtml(node.displayName || node.nodeId)}</span>
+            </div>
+            <span class="ch-badge ${node.connected ? 'ch-badge-ok' : 'ch-badge-off'}">${node.connected ? 'Online' : 'Offline'}</span>
+          </div>
+          <div class="instance-card-details">
+            ${node.platform ? `<span>Platform: ${escapeHtml(node.platform)}</span>` : ''}
+            ${node.version ? `<span>Version: ${escapeHtml(node.version)}</span>` : ''}
+            ${node.ip ? `<span>IP: ${escapeHtml(node.ip)}</span>` : ''}
+            ${node.roles?.length ? `<span>Roles: ${escapeHtml(node.roles.join(', '))}</span>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+  } catch { document.getElementById('nodes-list').innerHTML = '<div class="instance-empty">Could not load nodes</div>'; }
+
+  // Device pairings
+  try {
+    const result = await window.gatewayClient.listDevicePairings();
+    const requests = result?.requests || [];
+    const devicesDiv = document.getElementById('devices-list');
+
+    if (requests.length === 0) {
+      devicesDiv.innerHTML = '<div class="instance-empty">No device pairings</div>';
+    } else {
+      devicesDiv.innerHTML = requests.map(req => {
+        const isPending = req.status === 'pending';
+        return `
+          <div class="instance-card">
+            <div class="instance-card-header">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="status-dot ${isPending ? 'yellow' : (req.status === 'approved' ? 'green' : 'gray')}"></span>
+                <span class="instance-card-title">${escapeHtml(req.displayName || req.deviceId || 'Unknown device')}</span>
+              </div>
+              <span class="ch-badge ${isPending ? 'ch-badge-warn' : 'ch-badge-ok'}">${escapeHtml(req.status || 'pending')}</span>
+            </div>
+            <div class="instance-card-details">
+              ${req.platform ? `<span>Platform: ${escapeHtml(req.platform)}</span>` : ''}
+              ${req.deviceId ? `<span>Device: ${escapeHtml(req.deviceId)}</span>` : ''}
+            </div>
+            ${isPending ? `
+              <div style="display:flex;gap:8px;margin-top:8px;">
+                <button class="btn btn-small" onclick="approveDevice('${escapeHtml(req.requestId)}')">Approve</button>
+                <button class="btn btn-small btn-secondary" onclick="rejectDevice('${escapeHtml(req.requestId)}')">Reject</button>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+  } catch { document.getElementById('devices-list').innerHTML = '<div class="instance-empty">Could not load devices</div>'; }
+
+  // Presence
+  try {
+    const result = await window.gatewayClient.getPresence();
+    // system-presence returns an array directly
+    const presence = Array.isArray(result) ? result : (result?.entries || result?.presence || []);
+    const presenceDiv = document.getElementById('presence-list');
+
+    if (!Array.isArray(presence) || presence.length === 0) {
+      presenceDiv.innerHTML = '<div class="instance-empty">No connected clients</div>';
+    } else {
+      presenceDiv.innerHTML = presence.map(p => {
+        const name = p.host || p.deviceId || p.instanceId || 'Unknown';
+        const lastInput = p.lastInputSeconds != null
+          ? (p.lastInputSeconds < 60 ? `${p.lastInputSeconds}s ago` : `${Math.floor(p.lastInputSeconds / 60)}m ago`)
+          : null;
+        const age = p.ts ? formatRelativeTime(p.ts) : null;
+        return `
+          <div class="instance-card">
+            <div class="instance-card-header">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="status-dot green"></span>
+                <span class="instance-card-title">${escapeHtml(name)}</span>
+              </div>
+              ${p.mode ? `<span class="ch-badge ch-badge-ok">${escapeHtml(p.mode)}</span>` : ''}
+            </div>
+            ${p.text ? `<div style="font-size:12px;color:#aaa;margin:4px 0;">${escapeHtml(truncate(p.text, 80))}</div>` : ''}
+            <div class="instance-card-details">
+              ${p.platform ? `<span>${escapeHtml(p.platform)}</span>` : ''}
+              ${p.deviceFamily ? `<span>${escapeHtml(p.deviceFamily)}</span>` : ''}
+              ${p.modelIdentifier ? `<span>${escapeHtml(p.modelIdentifier)}</span>` : ''}
+              ${p.version ? `<span>v${escapeHtml(p.version)}</span>` : ''}
+              ${p.ip ? `<span>${escapeHtml(p.ip)}</span>` : ''}
+              ${p.roles?.length ? `<span>Roles: ${escapeHtml(p.roles.join(', '))}</span>` : ''}
+              ${lastInput ? `<span>Last input: ${lastInput}</span>` : ''}
+              ${age ? `<span>Seen: ${age}</span>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  } catch { document.getElementById('presence-list').innerHTML = '<div class="instance-empty">Could not load presence</div>'; }
+}
+
+window.approveDevice = async function(requestId) {
+  try {
+    await window.gatewayClient.approveDevicePairing({ requestId });
+    showNotification('Device approved');
+    void loadInstances();
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+  }
+}
+
+window.rejectDevice = async function(requestId) {
+  try {
+    await window.gatewayClient.rejectDevicePairing({ requestId });
+    showNotification('Device rejected');
+    void loadInstances();
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+  }
+}
+
+// ==================== USAGE ====================
+
+async function loadUsage() {
+  const totalsDiv = document.getElementById('usage-totals');
+  const sessionsDiv = document.getElementById('usage-sessions');
+
+  try {
+    const result = await window.gatewayClient.getSessionsUsage({ limit: 50 });
+    const totals = result?.totals || {};
+    const agg = result?.aggregates || {};
+    const sessions = result?.sessions || [];
+
+    // Backend fields: input, output, cacheRead, cacheWrite, totalTokens, totalCost
+    const inputTokens = totals.input || 0;
+    const outputTokens = totals.output || 0;
+    const cacheRead = totals.cacheRead || 0;
+    const totalTokens = totals.totalTokens || (inputTokens + outputTokens);
+    const totalCost = totals.totalCost || 0;
+    const msgCounts = agg.messages || {};
+    const toolUsage = agg.tools || {};
+
+    totalsDiv.innerHTML = `
+      <div class="usage-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Cost</div>
+          <div class="stat-value">${formatCost(totalCost)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Tokens</div>
+          <div class="stat-value">${formatNumber(totalTokens)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Input</div>
+          <div class="stat-value">${formatNumber(inputTokens)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Output</div>
+          <div class="stat-value">${formatNumber(outputTokens)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Cache Read</div>
+          <div class="stat-value">${formatNumber(cacheRead)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sessions</div>
+          <div class="stat-value">${sessions.length}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Messages</div>
+          <div class="stat-value">${formatNumber(msgCounts.total || 0)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Tool Calls</div>
+          <div class="stat-value">${formatNumber(toolUsage.totalCalls || msgCounts.toolCalls || 0)}</div>
+        </div>
+      </div>
+      ${agg.byModel && agg.byModel.length > 0 ? `
+        <div class="usage-breakdown">
+          <h4 style="margin:16px 0 8px;font-size:13px;color:#aaa;">By Model</h4>
+          ${agg.byModel.map(m => `
+            <div class="usage-breakdown-row">
+              <span class="usage-breakdown-label">${escapeHtml((m.provider || '') + '/' + (m.model || 'unknown'))}</span>
+              <span class="usage-breakdown-value">${formatNumber(m.totals?.totalTokens || 0)} tokens &middot; ${formatCost(m.totals?.totalCost || 0)}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+      ${result?.startDate ? `<div style="margin-top:12px;font-size:11px;color:#666;">Period: ${escapeHtml(result.startDate)} — ${escapeHtml(result.endDate)}</div>` : ''}
+    `;
+
+    if (sessions.length === 0) {
+      sessionsDiv.innerHTML = '<div style="color:#888;font-size:13px;">No usage data</div>';
+    } else {
+      sessionsDiv.innerHTML = `<h4 style="margin:0 0 10px;font-size:13px;color:#aaa;">Recent Sessions</h4>` +
+        sessions.slice(0, 30).map(s => {
+          const u = s.usage || {};
+          const sTokens = u.totalTokens || ((u.input || 0) + (u.output || 0));
+          const sCost = u.totalCost || 0;
+          const sMsgs = u.messageCounts?.total || 0;
+          const label = s.label || s.key || s.sessionKey || 'Unknown';
+          const timeStr = s.updatedAt ? formatRelativeTime(s.updatedAt) : '';
+          const channel = s.channel ? `${escapeHtml(s.channel)}` : '';
+          return `
+            <div class="usage-session-item">
+              <div class="usage-session-header">
+                <span class="usage-session-label">${escapeHtml(truncate(label, 60))}</span>
+                ${timeStr ? `<span class="usage-session-time">${timeStr}</span>` : ''}
+              </div>
+              <div class="usage-session-meta">
+                <span>${formatNumber(sTokens)} tokens</span>
+                <span>${formatCost(sCost)}</span>
+                ${sMsgs ? `<span>${sMsgs} msgs</span>` : ''}
+                ${channel ? `<span>${channel}</span>` : ''}
+                ${s.model ? `<span>${escapeHtml(s.model)}</span>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+    }
+  } catch (err) {
+    console.error('Failed to load usage:', err);
+    totalsDiv.innerHTML = '<div style="color:#f44336;">Failed to load usage data</div>';
+    sessionsDiv.innerHTML = '';
+  }
+}
+
+// ==================== SETTINGS - Raw Config ====================
+
+async function loadRawConfig() {
+  try {
+    const result = await window.gatewayClient.getGatewayConfig();
+    const config = result?.config || {};
+    document.getElementById('config-editor').value = JSON.stringify(config, null, 2);
+    document.getElementById('config-status').textContent = result?.hash ? `Hash: ${result.hash.slice(0, 12)}...` : '';
+    window._configHash = result?.hash;
+  } catch (err) {
+    document.getElementById('config-editor').value = '// Failed to load config: ' + err.message;
+  }
+}
+
+window.saveRawConfig = async function() {
+  const raw = document.getElementById('config-editor').value;
+  try {
+    JSON.parse(raw); // Validate JSON
+  } catch {
+    showNotification('Invalid JSON', 'error');
+    return;
+  }
+
+  try {
+    await window.gatewayClient.setGatewayConfig({
+      raw,
+      baseHash: window._configHash || '',
+    });
+    showNotification('Config saved. Gateway will restart.');
+    setTimeout(() => loadRawConfig(), 2000);
+  } catch (err) {
+    showNotification('Failed: ' + err.message, 'error');
+  }
+}
+
+// ==================== EXPORTS FOR APP.JS ====================
+
+window.loadOverview = loadOverview;
+window.loadSessions = loadSessions;
+window.loadChannels = loadChannels;
+window.loadCronJobs = loadCronJobs;
+window.loadOrchestration = loadOrchestration;
+window.loadInstances = loadInstances;
+window.loadUsage = loadUsage;
+window.loadChatSessions = loadChatSessions;
+window.loadChatHistory = loadChatHistory;
+window.loadRawConfig = loadRawConfig;
+window.abortChat = abortChat;

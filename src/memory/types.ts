@@ -97,5 +97,7 @@ export interface MemorySearchManager {
   probeEmbeddingAvailability(): Promise<MemoryEmbeddingProbeResult>;
   probeVectorAvailability(): Promise<boolean>;
   embedBatch?(texts: string[]): Promise<number[][]>;
+  /** Index arbitrary text content directly into SQL (no file needed). */
+  indexContent?(params: { path: string; content: string; source?: MemorySource }): Promise<void>;
   close?(): Promise<void>;
 }

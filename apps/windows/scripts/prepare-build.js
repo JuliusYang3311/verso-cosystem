@@ -9,43 +9,16 @@
 const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const https = require("https");
-
 const SCRIPT_DIR = __dirname;
 const WINDOWS_DIR = path.resolve(SCRIPT_DIR, "..");
 const VERSO_ROOT = path.resolve(WINDOWS_DIR, "../..");
 
-const NODE_VERSION = "22.14.0";
 const ARCH = process.argv[2] || "x64";
 
 console.log("=== Verso Desktop Build Preparation (Windows) ===");
 console.log("Verso root:", VERSO_ROOT);
 console.log("Windows dir:", WINDOWS_DIR);
-console.log("Node version:", NODE_VERSION);
 console.log("Arch:", ARCH);
-
-// --- Helpers ---
-
-function download(url, dest) {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
-    const get = (u) => {
-      https.get(u, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          get(res.headers.location);
-          return;
-        }
-        if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode} for ${u}`));
-          return;
-        }
-        res.pipe(file);
-        file.on("finish", () => { file.close(); resolve(); });
-      }).on("error", reject);
-    };
-    get(url);
-  });
-}
 
 async function main() {
   // 1. Build verso if dist doesn't exist
@@ -62,28 +35,8 @@ async function main() {
     }
   }
 
-  // 2. Download Node.js binary for Windows
-  const buildResources = path.join(WINDOWS_DIR, "build-resources");
-  const nodeBin = path.join(buildResources, `node-${ARCH}.exe`);
-
-  if (!fs.existsSync(nodeBin)) {
-    console.log(`\n=== Downloading Node.js ${NODE_VERSION} for win-${ARCH} ===`);
-    fs.mkdirSync(buildResources, { recursive: true });
-
-    const nodeUrl = `https://nodejs.org/dist/v${NODE_VERSION}/win-${ARCH}/node.exe`;
-    console.log("Downloading:", nodeUrl);
-    await download(nodeUrl, nodeBin);
-    console.log("Node.js binary saved to:", nodeBin);
-  } else {
-    console.log("Node.js binary already exists:", nodeBin);
-  }
-
-  // 3. Copy Node.js binary to verso root as node.exe
-  const gatewayNode = path.join(VERSO_ROOT, "node.exe");
-  fs.copyFileSync(nodeBin, gatewayNode);
-  console.log("Copied Node.js binary to:", gatewayNode);
-
-  // 4. Create lean production node_modules
+  // 2. Create lean production node_modules
+  // (No standalone node.exe needed — Electron's own Node.js is used via ELECTRON_RUN_AS_NODE=1)
   // Use pure Node.js copying — robocopy doesn't support glob excludes,
   // and rsync isn't available on Windows.
   console.log("\n=== Creating lean production node_modules ===");
@@ -157,29 +110,7 @@ async function main() {
 
   console.log("Lean node_modules created at:", staging);
 
-  // 5. Copy shared electron files (main.js, preload.js, renderer/, auth/, gateway/)
-  console.log("\n=== Copying shared Electron files ===");
-  const electronDir = path.join(VERSO_ROOT, "apps", "electron");
-
-  for (const f of ["main.js", "preload.js"]) {
-    const src = path.join(electronDir, f);
-    const dest = path.join(WINDOWS_DIR, f);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, dest);
-      console.log(`  Copied ${f}`);
-    }
-  }
-
-  for (const d of ["renderer", "auth", "gateway"]) {
-    const src = path.join(electronDir, d);
-    const dest = path.join(WINDOWS_DIR, d);
-    if (fs.existsSync(src)) {
-      copyDirSync(src, dest);
-      console.log(`  Copied ${d}/`);
-    }
-  }
-
-  // 6. Clean packaging-incompatible symlinks in extensions
+  // 5. Clean packaging-incompatible symlinks in extensions
   console.log("\n=== Cleaning packaging-incompatible symlinks ===");
   const extDir = path.join(VERSO_ROOT, "extensions");
   if (fs.existsSync(extDir)) {

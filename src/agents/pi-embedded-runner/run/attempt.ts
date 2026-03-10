@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import { streamSimple } from "@mariozechner/pi-ai";
-import { createAgentSession, SessionManager, SettingsManager } from "@mariozechner/pi-coding-agent";
+import { SessionManager, SettingsManager } from "@mariozechner/pi-coding-agent";
 import fs from "node:fs/promises";
 import os from "node:os";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
@@ -28,7 +28,6 @@ import {
   resolveChannelMessageToolHints,
 } from "../../channel-tools.js";
 import { resolveVersoDocsPath } from "../../docs-path.js";
-import { buildDynamicContext, loadContextParams } from "../../dynamic-context.js";
 import { isTimeoutError } from "../../failover-error.js";
 import { resolveModelAuthMode } from "../../model-auth.js";
 import { resolveDefaultModelForAgent } from "../../model-selection.js";
@@ -39,15 +38,12 @@ import {
   validateGeminiTurns,
 } from "../../pi-embedded-helpers.js";
 import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
-import {
-  ensurePiCompactionReserveTokens,
-  resolveCompactionReserveTokensFloor,
-} from "../../pi-settings.js";
 import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { createVersoCodingTools } from "../../pi-tools.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { releaseSessionBrowserBridge } from "../../sandbox/browser-bridges.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
+import { createVersoSession } from "../../session-factory.js";
 import { repairSessionFileIfNeeded } from "../../session-file-repair.js";
 import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
 import { ensureSessionVenv } from "../../session-venv.js";
@@ -66,14 +62,12 @@ import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { isAbortError } from "../abort.js";
 import { appendCacheTtlTimestamp, isCacheTtlEligibleProvider } from "../cache-ttl.js";
-import { buildEmbeddedExtensionPaths } from "../extensions.js";
 import { applyExtraParamsToAgent } from "../extra-params.js";
 import {
   logToolSchemasForGoogle,
   sanitizeSessionHistory,
   sanitizeToolsForGoogle,
 } from "../google.js";
-import { getDmHistoryLimitFromSessionKey, limitHistoryTurns } from "../history.js";
 import { log } from "../logger.js";
 import { buildModelAliasLines } from "../model.js";
 import {
@@ -216,8 +210,10 @@ export async function runEmbeddedAttempt(
 
     const agentDir = params.agentDir ?? resolveVersoAgentDir();
 
-    // Check if the model supports native image input
-    const modelHasVision = params.model.input?.includes("image") ?? false;
+    // Resolve multimodal strategy: which modalities go native vs MediaUnderstanding
+    const { resolveMultimodalStrategy } = await import("./multimodal.js");
+    const multimodalStrategy = resolveMultimodalStrategy(params.model);
+    const modelHasVision = multimodalStrategy.image === "native";
     const toolsRaw = params.disableTools
       ? []
       : createVersoCodingTools({
@@ -416,7 +412,7 @@ export async function runEmbeddedAttempt(
     });
 
     let sessionManager: ReturnType<typeof guardSessionManager> | undefined;
-    let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
+    let session: Awaited<ReturnType<typeof createVersoSession>>["session"] | undefined;
     try {
       await repairSessionFileIfNeeded({
         sessionFile: params.sessionFile,
@@ -449,21 +445,6 @@ export async function runEmbeddedAttempt(
         cwd: effectiveWorkspace,
       });
 
-      const settingsManager = SettingsManager.create(effectiveWorkspace, agentDir);
-      ensurePiCompactionReserveTokens({
-        settingsManager,
-        minReserveTokens: resolveCompactionReserveTokensFloor(params.config),
-      });
-
-      // Call for side effects (sets compaction/pruning runtime state)
-      buildEmbeddedExtensionPaths({
-        cfg: params.config,
-        sessionManager,
-        provider: params.provider,
-        modelId: params.modelId,
-        model: params.model,
-      });
-
       const { builtInTools, customTools } = splitSdkTools({
         tools,
         sandboxEnabled: !!sandbox?.enabled,
@@ -491,7 +472,28 @@ export async function runEmbeddedAttempt(
 
       const allCustomTools = [...customTools, ...clientToolDefs];
 
-      ({ session } = await createAgentSession({
+      // Resolve memory manager for dynamic context (Layer 1)
+      let memoryManagerForContext: import("../../../memory/types.js").MemorySearchManager | null =
+        null;
+      if (params.config?.agents?.defaults?.dynamicContext !== false) {
+        if (params.memoryManager) {
+          memoryManagerForContext = params.memoryManager;
+        } else {
+          try {
+            const { manager } = await getMemorySearchManager({
+              cfg: params.config ?? {},
+              agentId: sessionAgentId,
+            });
+            memoryManagerForContext = manager ?? null;
+          } catch {
+            // non-fatal — dynamic context proceeds without memory
+          }
+        }
+      }
+
+      const settingsManager = SettingsManager.create(effectiveWorkspace, agentDir);
+
+      ({ session } = await createVersoSession({
         cwd: resolvedWorkspace,
         agentDir,
         authStorage: params.authStorage,
@@ -502,6 +504,11 @@ export async function runEmbeddedAttempt(
         customTools: allCustomTools,
         sessionManager,
         settingsManager,
+        config: params.config,
+        provider: params.provider,
+        modelId: params.modelId,
+        memoryManager: memoryManagerForContext,
+        contextLimit: params.model.contextWindow,
       }));
       applySystemPromptOverrideToSession(session, systemPromptText);
       if (!session) {
@@ -572,130 +579,12 @@ export async function runEmbeddedAttempt(
         const validated = transcriptPolicy.validateAnthropicTurns
           ? validateAnthropicTurns(validatedGemini)
           : validatedGemini;
-        const limited = limitHistoryTurns(
-          validated,
-          getDmHistoryLimitFromSessionKey(params.sessionKey, params.config),
-        );
-        cacheTrace?.recordStage("session:limited", { messages: limited });
+        // Dynamic context (memory search + budget allocation) is now handled by the
+        // SDK extension registered via createVersoSession → Layer 1 (dynamic-context).
+        // It fires automatically on each `context` event before the LLM call.
 
-        // Apply dynamic context if enabled (opt-in via config)
-        const dynamicContextEnabled = params.config?.agents?.defaults?.dynamicContext !== false;
-        let finalMessages = limited;
-
-        if (dynamicContextEnabled && limited.length > 0) {
-          try {
-            // Estimate system prompt tokens
-            const systemPromptTokens = Math.ceil(systemPromptText.length / 4);
-
-            // Get context limit from model (default to 128k if not specified)
-            const contextLimit = params.model.contextWindow ?? 128_000;
-
-            // Reserve tokens for reply (default 4k)
-            const reserveForReply = 4_000;
-
-            // Extract search query from the last user message
-            const lastUserMsg = limited
-              .toReversed()
-              .find((m) => m.role === "user" && "content" in m && typeof m.content === "string");
-            const searchQuery =
-              lastUserMsg && "content" in lastUserMsg && typeof lastUserMsg.content === "string"
-                ? lastUserMsg.content.slice(0, 500)
-                : "";
-
-            // Retrieve chunks from memory manager (graceful fallback to empty on error)
-            let retrievedChunks: Parameters<typeof buildDynamicContext>[0]["retrievedChunks"] = [];
-            if (searchQuery) {
-              try {
-                const { manager, error: managerError } = await getMemorySearchManager({
-                  cfg: params.config ?? {},
-                  agentId: sessionAgentId,
-                });
-                if (!manager) {
-                  log.warn(
-                    `memory manager unavailable: runId=${params.runId} agentId=${sessionAgentId} ` +
-                      `error=${managerError ?? "resolved config returned null (disabled or no provider)"}`,
-                  );
-                } else {
-                  const searchResults = await manager.search(searchQuery, {
-                    sessionKey: params.sessionKey,
-                  });
-                  retrievedChunks = searchResults.map((r) => ({
-                    id: r.id,
-                    snippet: r.snippet,
-                    score: r.score,
-                    path: r.path,
-                    source: r.source,
-                    startLine: r.startLine,
-                    endLine: r.endLine,
-                    timestamp: r.timestamp,
-                    l0Tags: r.l0Tags,
-                    l1Sentences: r.l1Sentences,
-                  }));
-                }
-              } catch (retrievalErr) {
-                log.warn(`memory retrieval failed (non-fatal): ${String(retrievalErr)}`);
-              }
-            }
-
-            // Load tunable context params (evolver-managed via context_params.json)
-            const contextParams = await loadContextParams();
-
-            // Apply dynamic context
-            const dynamicResult = buildDynamicContext({
-              allMessages: limited,
-              retrievedChunks,
-              contextLimit,
-              systemPromptTokens,
-              reserveForReply,
-              compactionSummary: null,
-              params: contextParams,
-            });
-
-            // Use the dynamically selected recent messages
-            finalMessages = dynamicResult.recentMessages;
-
-            // Inject retrieved memory chunks as a synthetic context message
-            if (dynamicResult.retrievedChunks.length > 0) {
-              const memorySnippets = dynamicResult.retrievedChunks
-                .map(
-                  (c) =>
-                    `[${c.path}:${c.startLine}-${c.endLine}] (score=${c.score.toFixed(2)})\n${c.snippet}`,
-                )
-                .join("\n---\n");
-              const memoryMessage: AgentMessage = {
-                role: "user",
-                content: `<memory-context>\nThe following are relevant memory snippets retrieved for this conversation:\n\n${memorySnippets}\n</memory-context>`,
-                timestamp: Date.now(),
-              };
-              finalMessages = [memoryMessage, ...finalMessages];
-            }
-
-            log.debug(
-              `dynamic context applied: runId=${params.runId} sessionId=${params.sessionId} ` +
-                `recentRatio=${dynamicResult.recentRatioUsed.toFixed(2)} ` +
-                `recentTokens=${dynamicResult.recentTokens} ` +
-                `retrievalTokens=${dynamicResult.retrievalTokens} ` +
-                `retrievedChunks=${dynamicResult.retrievedChunks.length} ` +
-                `totalTokens=${dynamicResult.totalTokens} ` +
-                `originalMessages=${limited.length} selectedMessages=${finalMessages.length}`,
-            );
-
-            cacheTrace?.recordStage("session:dynamic-context", {
-              messages: finalMessages,
-              note: `ratio=${dynamicResult.recentRatioUsed.toFixed(2)} tokens=${dynamicResult.totalTokens}`,
-            });
-          } catch (dynamicErr) {
-            // Fall back to full history on error
-            log.warn(
-              `dynamic context failed, using full history: runId=${params.runId} ` +
-                `error=${String(dynamicErr)}`,
-            );
-            finalMessages = limited;
-          }
-        }
-
-        if (finalMessages.length > 0) {
-          activeSession.agent.replaceMessages(finalMessages);
+        if (validated.length > 0) {
+          activeSession.agent.replaceMessages(validated);
         }
       } catch (err) {
         sessionManager.flushPendingToolResults?.();

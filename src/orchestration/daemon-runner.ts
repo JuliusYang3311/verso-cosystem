@@ -5,11 +5,7 @@
 
 import type { VersoConfig } from "../config/types.js";
 import { broadcastOrchestrationEvent } from "./events.js";
-import {
-  initOrchestrationMemory,
-  cleanupOrchestrationMemory,
-  getOrchestrationMemoryEnv,
-} from "./orchestrator-memory.js";
+import { initOrchestrationMemory, cleanupOrchestrationMemory } from "./orchestrator-memory.js";
 import { buildOrchestratorSystemPrompt } from "./orchestrator-prompt.js";
 import { createOrchestrateTool } from "./orchestrator-tools.js";
 import {
@@ -111,14 +107,13 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     sourceWorkspaceDir: opts.workspaceDir,
     agentId: opts.agentId,
   });
-  const memoryEnv = getOrchestrationMemoryEnv(memoryContext.memoryDir);
-
-  // Set memory env vars for orchestrator agent
-  process.env.MEMORY_DIR = memoryEnv.MEMORY_DIR;
-  process.env.VERSO_MEMORY_DIR = memoryEnv.VERSO_MEMORY_DIR;
+  const memoryManager = memoryContext.memoryManager;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let session: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let acceptanceSession: any = null;
+  let pool: import("./worker-pool.js").WorkerPool | null = null;
 
   try {
     // Resolve model and auth
@@ -127,32 +122,17 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     const { resolveOpenClawAgentDir } = await import("../agents/agent-paths.js");
     const agentDir = resolveOpenClawAgentDir();
 
-    // Create orchestrate tool (pass sandboxDir instead of missionDir)
-    logger.info("Creating orchestrate tool", { orchId });
-
     // Load config for gateway communication
     const { loadConfig } = await import("../config/config.js");
     const config = loadConfig();
 
-    const orchestrateTool = createOrchestrateTool({
-      agentSessionKey: opts.agentSessionKey,
-      agentId: opts.agentId,
-      workspaceDir: sandboxDir, // Use shared sandbox
-      maxWorkers: opts.maxWorkers ?? ORCHESTRATION_DEFAULTS.maxWorkers,
-      maxFixCycles: opts.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
-      maxOrchestrations: 1, // Single task per daemon
-      verifyCmd: opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
-      config: opts.config,
-    });
+    // --- Build shared tools (used by ALL agents: orchestrator, workers, acceptance) ---
 
-    // Create web search and web fetch tools for orchestrator
     const { createWebSearchTool } = await import("../agents/tools/web-search.js");
     const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
     const webSearchTool = createWebSearchTool({ config, sandboxed: false });
     const webFetchTool = createWebFetchTool({ config, sandboxed: false });
 
-    // Create Google Workspace tools for orchestrator (if enabled)
-    // Only provide sheets, drive, docs, slides (minimal set for data analysis)
     const gworkspaceTools = [];
     if (config.google?.enabled) {
       const {
@@ -180,17 +160,77 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       }
     }
 
-    // Create in-memory orchestrator agent session
-    logger.info("Creating orchestrator agent session", { orchId });
-    const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
+    const memoryTools = [];
+    if (memoryManager) {
+      const { createMemorySearchTool, createMemoryGetTool } =
+        await import("../agents/tools/memory-tool.js");
+      const searchTool = createMemorySearchTool({ config, memoryManager });
+      const getTool = createMemoryGetTool({ config, memoryManager });
+      if (searchTool) memoryTools.push(searchTool);
+      if (getTool) memoryTools.push(getTool);
+    }
 
-    // Use customTools parameter to add orchestrate + web_search + web_fetch + gworkspace tools
-    const customToolsList = [
-      orchestrateTool,
+    const sharedTools = [
       ...(webSearchTool ? [webSearchTool] : []),
       ...(webFetchTool ? [webFetchTool] : []),
       ...gworkspaceTools,
+      ...memoryTools,
     ];
+
+    // --- Create all persistent sessions ---
+
+    const { createVersoSession } = await import("../agents/session-factory.js");
+    const { WorkerPool } = await import("./worker-pool.js");
+
+    // 1. Worker pool — fixed specialization distribution, all get shared tools
+    logger.info("Creating persistent worker pool", { orchId });
+    pool = await WorkerPool.create({
+      // Uses DEFAULT_WORKER_DISTRIBUTION: explorer×2, architect×2, implementer×4, reviewer×2, researcher×2, generic×2
+      cwd: sandboxDir,
+      agentDir,
+      model,
+      authStorage,
+      modelRegistry,
+      config: opts.config,
+      memoryManager: memoryManager ?? null,
+      customTools: sharedTools,
+    });
+    logger.info("Worker pool created", { orchId, poolSize: pool.size });
+
+    // 2. Acceptance session (persistent across fix cycles)
+    logger.info("Creating persistent acceptance session", { orchId });
+    const acceptanceCreated = await createVersoSession({
+      cwd: sandboxDir,
+      agentDir,
+      model,
+      authStorage,
+      modelRegistry,
+      customTools: sharedTools,
+      config: opts.config,
+      provider: model.provider,
+      modelId: model.id,
+      memoryManager: memoryManager ?? null,
+    });
+    acceptanceSession = acceptanceCreated.session;
+    logger.info("Acceptance session created", { orchId });
+
+    // 3. Orchestrate tool (holds references to pool + acceptance session)
+    const orchestrateTool = createOrchestrateTool({
+      agentSessionKey: opts.agentSessionKey,
+      agentId: opts.agentId,
+      workspaceDir: sandboxDir,
+      pool,
+      acceptanceSession,
+      maxFixCycles: opts.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
+      maxOrchestrations: 1,
+      verifyCmd: opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
+      config: opts.config,
+      memoryManager: memoryManager ?? undefined,
+    });
+
+    // 4. Orchestrator session (gets orchestrate tool + shared tools)
+    //    orchestrate is the ONLY tool exclusive to the orchestrator
+    const customToolsList = [orchestrateTool, ...sharedTools];
 
     // Debug: Log all parameters before creating session
     logger.info("Creating agent session with parameters", {
@@ -206,17 +246,20 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       customToolsCount: customToolsList.length,
     });
 
-    // Use in-memory session to avoid state pollution from previous runs
+    // Create orchestrator session via unified factory (3-layer context pipeline)
     let created;
     try {
-      created = await createAgentSession({
-        cwd: sandboxDir, // Work in shared sandbox
+      created = await createVersoSession({
+        cwd: sandboxDir,
         agentDir,
+        model,
         authStorage,
         modelRegistry,
-        model,
         customTools: customToolsList,
-        sessionManager: SessionManager.create(sandboxDir),
+        config: opts.config,
+        provider: model.provider,
+        modelId: model.id,
+        memoryManager: memoryManager ?? null,
       });
     } catch (err) {
       logger.error("Failed to create agent session", {
@@ -244,48 +287,15 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       logger.warn("Some tools not registered", { orchId, missingTools });
     }
 
-    // Build orchestrator prompt
-    const workspaceMode = orch.baseProjectDir
-      ? `\n\nWORKSPACE MODE: ENHANCE EXISTING PROJECT
-The workspace contains an existing project copied from: ${orch.baseProjectDir}
-IMPORTANT: Before creating your plan, you MUST explore the existing codebase to understand its structure, patterns, and architecture. Use file reading tools to review key files. Then plan enhancements that build upon the existing code.
-
-CRITICAL - OUTPUT DIRECTORY: When calling "complete", do NOT specify outputDir. The enhanced project will automatically replace the original project at: ${orch.baseProjectDir}`
-      : `\n\nWORKSPACE MODE: BUILD FROM SCRATCH
-The workspace is empty. You will build the project from scratch.
-
-OUTPUT DIRECTORY: When calling "complete", you MUST specify outputDir (e.g., "./my-app" or "../projects/tool"). This determines where the completed project will be copied.`;
-
+    // Build orchestrator prompt: system identity + task message
+    const { buildOrchestratorTaskMessage } = await import("./orchestrator-prompt.js");
     const orchestratorMessage = `${buildOrchestratorSystemPrompt()}
 
-ORCHESTRATION ID: ${orchId}
-${workspaceMode}
-
-TASK:
-${orch.userPrompt}
-
-CRITICAL INSTRUCTIONS:
-You MUST use the orchestrate tool to complete this task. Do NOT provide a text response without calling the tool.
-
-Your FIRST action must be to call the orchestrate tool with action "create-plan" to decompose the task into subtasks.
-IMPORTANT: When calling create-plan, you MUST include the orchestrationId parameter: "${orchId}"
-
-After creating the plan, follow this AUTOMATED workflow (do NOT wait for user input):
-1. Call orchestrate with action "create-plan" and orchestrationId "${orchId}" (REQUIRED FIRST STEP)
-2. Call orchestrate with action "dispatch" and orchestrationId "${orchId}" to run workers (BLOCKS until all workers complete)
-3. After dispatch completes, check if there are still pending tasks. If yes, call "dispatch" again. Repeat until no pending tasks remain.
-4. ONLY after all tasks are completed (no pending tasks), call orchestrate with action "run-acceptance" and orchestrationId "${orchId}" to verify results
-5. If tests pass AND all tasks are completed, call orchestrate with action "complete" and orchestrationId "${orchId}"
-6. If tests fail, call orchestrate with action "create-fix-tasks" and orchestrationId "${orchId}", then IMMEDIATELY call "dispatch" again (step 2), then repeat steps 3-6 until tests pass or max cycles reached
-
-IMPORTANT:
-- After calling "create-fix-tasks", you MUST immediately call "dispatch" again to run the fix workers. Do NOT stop after creating fix tasks.
-- Do NOT call "run-acceptance" if there are still pending tasks. Call "dispatch" first to complete all pending tasks.
-- Before calling "complete", ensure ALL tasks are done (no pending, no running).
-- The "complete" action will reject if there are pending/running tasks remaining.
-- If the orchestration is aborted (you receive a response with "aborted": true), acknowledge the abort and STOP immediately. Do not call any more tools.
-
-Start now by calling orchestrate with action "create-plan" and orchestrationId "${orchId}".`;
+${buildOrchestratorTaskMessage({
+  orchestrationId: orchId,
+  userPrompt: orch.userPrompt,
+  baseProjectDir: orch.baseProjectDir,
+})}`;
 
     // Run orchestrator agent with abort monitoring and timeout
     logger.info("Running orchestrator agent", { orchId });
@@ -417,7 +427,7 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
               session.dispose();
             }
             if (orch) {
-              await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
+              await cleanupOrchestrationMemory(memoryContext);
             }
           } catch (cleanupErr) {
             logger.warn("Error during abort cleanup", {
@@ -443,6 +453,21 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
       // Debug: Check if agent actually did anything
       const messages = session.messages;
       const toolCalls = messages.filter((msg: any) => msg.role === "assistant" && msg.toolUse);
+
+      // Index orchestrator's summary into shared memory
+      if (memoryManager) {
+        const lastText = session.getLastAssistantText?.() ?? "";
+        if (lastText) {
+          const { indexAgentResult } = await import("./orchestrator-memory.js");
+          await indexAgentResult({
+            memoryManager,
+            agentType: "orchestrator",
+            agentId: orchId,
+            title: "Orchestrator Summary",
+            content: lastText,
+          });
+        }
+      }
       logger.info("Orchestrator agent completed successfully", {
         orchId,
         messagesCount: messages.length,
@@ -511,6 +536,24 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
       }
     }
 
+    // Dispose acceptance session (best-effort)
+    if (acceptanceSession) {
+      try {
+        acceptanceSession.dispose();
+      } catch {
+        // ignore
+      }
+    }
+
+    // Destroy worker pool (best-effort)
+    if (pool) {
+      try {
+        await pool.destroy();
+      } catch {
+        // ignore
+      }
+    }
+
     // Wait a moment for any in-flight writes to complete
     await new Promise((resolve) => setTimeout(resolve, 200));
 
@@ -521,7 +564,7 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
         orch = await loadOrchestration(orchId);
       }
       if (orch) {
-        await cleanupOrchestrationMemory(memoryContext, orch.sourceWorkspaceDir, orchId);
+        await cleanupOrchestrationMemory(memoryContext);
       }
     } catch (err) {
       logger.warn("Failed to close shared memory", { orchId, error: String(err) });
@@ -536,10 +579,6 @@ Start now by calling orchestrate with action "create-plan" and orchestrationId "
         logger.warn("Failed to cleanup mission workspace", { orchId, error: String(err) });
       }
     }
-
-    // Restore memory env vars
-    delete process.env.MEMORY_DIR;
-    delete process.env.VERSO_MEMORY_DIR;
   }
 }
 

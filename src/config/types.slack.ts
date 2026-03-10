@@ -110,8 +110,6 @@ export type SlackAccountConfig = {
   groupPolicy?: GroupPolicy;
   /** Max channel messages to keep as history context (0 disables). */
   historyLimit?: number;
-  /** Max DM turns to keep as history context. */
-  dmHistoryLimit?: number;
   /** Per-DM config overrides keyed by user ID. */
   dms?: Record<string, DmConfig>;
   textChunkLimit?: number;

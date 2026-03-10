@@ -1,14 +1,17 @@
-// src/orchestration/worker-runner.ts — In-memory worker pool with task claiming (evolver pattern)
+// src/orchestration/worker-runner.ts — Persistent worker pool with task claiming
+//
+// Workers are pre-created sessions from WorkerPool. Each dispatch cycle claims
+// workers, sends first-task or subsequent-task prompts, then releases back.
+// Sessions persist across dispatch cycles (initial + fix cycles).
 
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Orchestration, Subtask } from "./types.js";
+import type { PoolWorker, WorkerPool } from "./worker-pool.js";
 import { broadcastOrchestrationEvent } from "./events.js";
-import { resolveAgentModel } from "./model-resolver.js";
 import { saveOrchestration } from "./store.js";
-import { isSubtaskReady } from "./types.js";
-import { buildWorkerSystemPrompt } from "./worker-prompt.js";
+import { TaskDispatcher } from "./task-dispatcher.js";
 
 const logger = {
   info: (...args: unknown[]) => console.log("[orchestration-worker]", ...args),
@@ -17,9 +20,6 @@ const logger = {
 };
 
 const DEFAULT_WORKER_TIMEOUT_MS = 600_000; // 10 minutes of inactivity per task
-
-// --- Concurrency tracking removed (multi-daemon architecture) ---
-// Each daemon runs one orchestration, so no cross-orchestration tracking needed
 
 // --- Types ---
 
@@ -31,9 +31,7 @@ export type WorkerResult = {
   error?: string;
 };
 
-// --- Sandbox creation (simplified for orchestration - no pnpm install) ---
-
-// --- Sandbox helpers (adapted from evolver) ---
+// --- Sandbox helpers ---
 
 function getChangedFilesAfter(sandboxDir: string): string[] {
   try {
@@ -46,8 +44,6 @@ function getChangedFilesAfter(sandboxDir: string): string[] {
       .map((l) => l.trim())
       .filter(Boolean)
       .filter((file) => {
-        // Exclude node_modules and other large directories
-        // These should be installed in mission workspace and shared
         return (
           !file.startsWith("node_modules/") &&
           !file.startsWith(".git/") &&
@@ -75,11 +71,7 @@ function initGitTracking(sandboxDir: string): void {
   }
 }
 
-/**
- * Install dependencies if package.json exists and is newer than node_modules.
- * Handles incremental updates as workers add dependencies during orchestration.
- */
-function ensureDependenciesInstalled(missionWorkspaceDir: string): void {
+export function ensureDependenciesInstalled(missionWorkspaceDir: string): void {
   try {
     const packageJsonPath = path.join(missionWorkspaceDir, "package.json");
     const nodeModulesPath = path.join(missionWorkspaceDir, "node_modules");
@@ -98,7 +90,6 @@ function ensureDependenciesInstalled(missionWorkspaceDir: string): void {
 
     logger.info("Installing dependencies", { missionWorkspaceDir });
 
-    // Detect package manager
     const lockFiles = {
       "pnpm-lock.yaml": "pnpm install",
       "yarn.lock": "yarn install",
@@ -127,269 +118,150 @@ function ensureDependenciesInstalled(missionWorkspaceDir: string): void {
   }
 }
 
-// --- Single worker task ---
+// --- Execute a single task on a persistent worker session ---
 
-async function runWorkerTask(params: {
+async function executeTaskOnWorker(params: {
+  worker: PoolWorker;
   subtask: Subtask;
   orchestrationId: string;
-  missionWorkspaceDir: string; // This is now the shared sandbox directory
-  memoryDir?: string;
-  timeoutMs?: number;
+  missionWorkspaceDir: string;
   hasExistingProject?: boolean;
-  // Shared resources to avoid repeated resolution
-  sharedResources?: {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    model: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authStorage: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    modelRegistry: any;
-    agentDir: string;
-  };
+  memoryManager?: import("../memory/types.js").MemorySearchManager;
+  timeoutMs?: number;
 }): Promise<WorkerResult> {
   const {
+    worker,
     subtask,
     orchestrationId,
-    missionWorkspaceDir, // Shared sandbox directory
-    memoryDir,
-    timeoutMs = DEFAULT_WORKER_TIMEOUT_MS,
-    sharedResources,
+    missionWorkspaceDir,
     hasExistingProject,
+    memoryManager,
+    timeoutMs = DEFAULT_WORKER_TIMEOUT_MS,
   } = params;
   const t0 = Date.now();
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let session: any = null;
-
-  // Save original env to restore later
-  const originalMemoryDir = process.env.MEMORY_DIR;
-  const originalVersoMemoryDir = process.env.VERSO_MEMORY_DIR;
+  const session = worker.session;
 
   try {
-    // Set shared memory env vars if provided
-    if (memoryDir) {
-      process.env.MEMORY_DIR = memoryDir;
-      process.env.VERSO_MEMORY_DIR = memoryDir;
-    }
-
-    // 0. Dependencies already installed by pool (skip redundant check)
-
-    // 1. Work directly in shared sandbox (no tmpdir needed)
-    // All agents (orchestrator, workers, acceptance) share the same sandbox
-    // Init git tracking for change detection (if not already initialized)
     initGitTracking(missionWorkspaceDir);
 
-    // 2. Use shared resources if provided, otherwise resolve
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let model: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let authStorage: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let modelRegistry: any;
-    let agentDir: string;
+    // Build prompt based on whether this is the worker's first task
+    const isFirstTask = worker.taskCount === 0;
+    let prompt: string;
 
-    if (sharedResources) {
-      ({ model, authStorage, modelRegistry, agentDir } = sharedResources);
+    if (isFirstTask) {
+      const { buildWorkerFirstTaskPrompt } = await import("./worker-prompt.js");
+      prompt = buildWorkerFirstTaskPrompt({
+        subtask,
+        orchestrationId,
+        missionWorkspaceDir,
+        hasExistingProject,
+      });
     } else {
-      const resolved = await resolveAgentModel();
-      model = resolved.model;
-      authStorage = resolved.authStorage;
-      modelRegistry = resolved.modelRegistry;
-      agentDir = (await import("../agents/agent-paths.js")).resolveOpenClawAgentDir();
+      const { buildWorkerSubsequentTaskPrompt } = await import("./worker-prompt.js");
+      prompt = buildWorkerSubsequentTaskPrompt({
+        subtask,
+        orchestrationId,
+        workerSpecialization: worker.specialization,
+      });
     }
 
-    // 3. Create in-memory agent session
-    const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
-
-    // Create persistent session file in orchestration directory
-    const { getOrchestrationSessionFile } = await import("./orchestrator-memory.js");
-    const { resolveSourceWorkspaceDir } = await import("./store.js");
-    const sourceWorkspaceDir = resolveSourceWorkspaceDir(missionWorkspaceDir);
-    const sessionFile = getOrchestrationSessionFile(
-      sourceWorkspaceDir,
-      orchestrationId,
-      "worker",
-      subtask.id,
-    );
-
-    // Create web search and web fetch tools for workers (same as orchestrator)
-    const { createWebSearchTool } = await import("../agents/tools/web-search.js");
-    const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
-    const { loadConfig } = await import("../config/config.js");
-    const config = loadConfig();
-    const webSearchTool = createWebSearchTool({ config, sandboxed: false });
-    const webFetchTool = createWebFetchTool({ config, sandboxed: false });
-
-    // Create Google Workspace tools for workers (if enabled, same as orchestrator)
-    const gworkspaceTools = [];
-    if (config.google?.enabled) {
-      const {
-        sheetsCreateSpreadsheet,
-        sheetsAppendValues,
-        docsCreateDocument,
-        driveListFiles,
-        driveUploadFile,
-        driveDownloadFile,
-        slidesCreatePresentation,
-      } = await import("../agents/tools/gworkspace-tools.js");
-
-      const services = config.google.services || ["sheets", "docs", "drive", "slides"];
-      if (services.includes("sheets")) {
-        gworkspaceTools.push(sheetsCreateSpreadsheet, sheetsAppendValues);
-      }
-      if (services.includes("docs")) {
-        gworkspaceTools.push(docsCreateDocument);
-      }
-      if (services.includes("drive")) {
-        gworkspaceTools.push(driveListFiles, driveUploadFile, driveDownloadFile);
-      }
-      if (services.includes("slides")) {
-        gworkspaceTools.push(slidesCreatePresentation);
-      }
-    }
-
-    const workerTools = [
-      ...(webSearchTool ? [webSearchTool] : []),
-      ...(webFetchTool ? [webFetchTool] : []),
-      ...gworkspaceTools,
-    ];
-
-    const created = await createAgentSession({
-      cwd: missionWorkspaceDir,
-      agentDir,
-      authStorage,
-      modelRegistry,
-      model,
-      customTools: workerTools, // Use customTools to add tools alongside coding tools
-      sessionManager: SessionManager.open(sessionFile),
-    });
-    session = created.session;
-
-    // 4. Build prompt and run
-    const workerPrompt = buildWorkerSystemPrompt({
-      subtask,
-      orchestrationId,
-      missionWorkspaceDir,
-      hasExistingProject,
-    });
-
-    const prompt = [
-      workerPrompt,
-      "",
-      `Execute subtask: ${subtask.title}`,
-      "",
-      subtask.description,
-      "",
-      "Acceptance criteria:",
-      ...subtask.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`),
-      "",
-      "When done, output: TASK_COMPLETE",
-      "If you cannot complete the task, output: TASK_FAILED",
-    ].join("\n");
-
-    // Activity-based timeout: reset timer on each tool use
+    // Activity-based timeout + loop detection
     let lastActivityMs = Date.now();
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-
-    // Tool call loop detection: track recent tool calls to detect infinite loops
     const toolCallHistory: Array<{ name: string; timestamp: number }> = [];
-    const LOOP_DETECTION_WINDOW = 10; // Check last 10 tool calls
-    const LOOP_DETECTION_THRESHOLD = 8; // If 8 out of 10 are the same tool, it's a loop
+    const LOOP_WINDOW = 10;
+    const LOOP_THRESHOLD = 8;
 
     const checkTimeout = () => {
       const idleMs = Date.now() - lastActivityMs;
       if (idleMs >= timeoutMs) {
-        return true; // Timed out
+        return true;
       }
-      // Schedule next check
       timeoutHandle = setTimeout(checkTimeout, Math.min(30_000, timeoutMs - idleMs));
       return false;
     };
-
-    // Start timeout checker
     timeoutHandle = setTimeout(checkTimeout, timeoutMs);
 
-    // Monitor session activity
-    const originalOnToolUse = session.onToolUse;
+    // Hook into tool use for activity tracking (re-attach each task)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sessionAny = session as any;
+    const originalOnToolUse = sessionAny.onToolUse;
     if (originalOnToolUse) {
-      session.onToolUse = (...args: unknown[]) => {
-        lastActivityMs = Date.now(); // Reset activity timer
-
-        // Track tool call for loop detection
+      sessionAny.onToolUse = (...args: unknown[]) => {
+        lastActivityMs = Date.now();
         const toolName = typeof args[0] === "string" ? args[0] : "unknown";
         toolCallHistory.push({ name: toolName, timestamp: Date.now() });
+        if (toolCallHistory.length > LOOP_WINDOW) toolCallHistory.shift();
 
-        // Keep only recent history
-        if (toolCallHistory.length > LOOP_DETECTION_WINDOW) {
-          toolCallHistory.shift();
-        }
-
-        // Check for loop: if most recent calls are the same tool
-        if (toolCallHistory.length >= LOOP_DETECTION_WINDOW) {
-          const recentTools = toolCallHistory.slice(-LOOP_DETECTION_WINDOW);
-          const toolCounts = new Map<string, number>();
-          for (const call of recentTools) {
-            toolCounts.set(call.name, (toolCounts.get(call.name) || 0) + 1);
-          }
-
-          // Find most frequent tool
-          let maxCount = 0;
-          let maxTool = "";
-          for (const [tool, count] of toolCounts) {
-            if (count > maxCount) {
-              maxCount = count;
-              maxTool = tool;
+        if (toolCallHistory.length >= LOOP_WINDOW) {
+          const counts = new Map<string, number>();
+          for (const c of toolCallHistory) counts.set(c.name, (counts.get(c.name) || 0) + 1);
+          let maxCount = 0,
+            maxTool = "";
+          for (const [t, n] of counts) {
+            if (n > maxCount) {
+              maxCount = n;
+              maxTool = t;
             }
           }
-
-          // If one tool dominates recent calls, likely a loop
-          if (maxCount >= LOOP_DETECTION_THRESHOLD) {
-            logger.warn("Detected potential tool call loop", {
+          if (maxCount >= LOOP_THRESHOLD) {
+            logger.warn("Potential tool loop", {
               subtaskId: subtask.id,
               tool: maxTool,
               count: maxCount,
-              window: LOOP_DETECTION_WINDOW,
             });
-            // Don't abort immediately - just log warning
-            // The timeout will eventually catch it if it's truly stuck
           }
         }
 
-        return originalOnToolUse.apply(session, args);
+        return originalOnToolUse.apply(sessionAny, args);
       };
     }
 
     try {
       await session.prompt(prompt);
-
-      // Prompt completed successfully - clear timeout immediately
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
         timeoutHandle = null;
       }
-
-      // No need to check timeout after successful completion
     } catch (err) {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       throw err;
+    } finally {
+      // Restore original onToolUse to avoid stacking wrappers
+      if (originalOnToolUse) sessionAny.onToolUse = originalOnToolUse;
     }
 
-    // 5. Extract result
+    // Extract result
     const lastText = session.getLastAssistantText?.() ?? "";
     const ok =
       lastText.includes("TASK_COMPLETE") ||
       (!lastText.includes("TASK_FAILED") && lastText.length > 0);
 
-    // 6. Detect changed files (for logging and dependency detection)
     const filesChanged = getChangedFilesAfter(missionWorkspaceDir);
 
+    // Index result into shared memory
+    if (memoryManager) {
+      const { indexAgentResult } = await import("./orchestrator-memory.js");
+      await indexAgentResult({
+        memoryManager,
+        agentType: "worker",
+        agentId: subtask.id,
+        title: `Worker: ${subtask.title}`,
+        content: [
+          `Status: ${ok ? "completed" : "failed"}`,
+          `Files changed: ${filesChanged.join(", ") || "none"}`,
+          "",
+          lastText,
+        ].join("\n"),
+      });
+    }
+
     const elapsed = Date.now() - t0;
-    logger.info(`worker: subtask ${subtask.id} completed`, {
+    logger.info(`worker ${worker.id}: subtask ${subtask.id} ${ok ? "completed" : "failed"}`, {
       ok,
       filesChanged: filesChanged.length,
       elapsed_ms: elapsed,
+      workerTaskCount: worker.taskCount + 1,
     });
 
     return {
@@ -402,7 +274,10 @@ async function runWorkerTask(params: {
   } catch (err) {
     const elapsed = Date.now() - t0;
     const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`worker: subtask ${subtask.id} failed`, { error: msg, elapsed_ms: elapsed });
+    logger.warn(`worker ${worker.id}: subtask ${subtask.id} error`, {
+      error: msg,
+      elapsed_ms: elapsed,
+    });
     return {
       subtaskId: subtask.id,
       ok: false,
@@ -410,229 +285,140 @@ async function runWorkerTask(params: {
       filesChanged: [],
       error: msg,
     };
-  } finally {
-    // 7. Guaranteed cleanup
-    if (session) {
-      try {
-        session.dispose();
-      } catch {
-        // ignore
-      }
-    }
-    // No tmpdir sandbox to cleanup - workers work directly in shared sandbox
-
-    // Restore original memory env vars
-    if (originalMemoryDir !== undefined) {
-      process.env.MEMORY_DIR = originalMemoryDir;
-    } else {
-      delete process.env.MEMORY_DIR;
-    }
-    if (originalVersoMemoryDir !== undefined) {
-      process.env.VERSO_MEMORY_DIR = originalVersoMemoryDir;
-    } else {
-      delete process.env.VERSO_MEMORY_DIR;
-    }
   }
+  // NOTE: No session.dispose() — worker session persists in the pool
 }
 
-// --- Worker pool with task claiming ---
+// --- Event helpers (reduce noise in the main loop) ---
+
+async function broadcastTaskStatus(
+  orch: Orchestration,
+  task: Subtask,
+  config?: import("../config/types.js").VersoConfig,
+): Promise<void> {
+  await Promise.all([
+    saveOrchestration(orch),
+    broadcastOrchestrationEvent(
+      {
+        type: "orchestration.subtask",
+        payload: {
+          orchestrationId: orch.id,
+          subtaskId: task.id,
+          status: task.status,
+          title: task.title,
+          error: task.error,
+        },
+      },
+      config,
+    ),
+  ]);
+}
+
+async function triggerHook(
+  event: import("./hooks.js").OrchestrationHook,
+  orch: Orchestration,
+  task: Subtask,
+  extra?: Record<string, unknown>,
+): Promise<void> {
+  const { triggerOrchestrationHook } = await import("./hooks.js");
+  await triggerOrchestrationHook(event, {
+    orchestrationId: orch.id,
+    orchestration: orch,
+    subtask: task,
+    ...extra,
+  });
+}
+
+// --- Dispatch tasks through the persistent worker pool ---
+
+export type DispatchResult = {
+  results: WorkerResult[];
+  /** FixTask records from auto-fix (to persist in orch.fixTasks). */
+  autoFixTasks: import("./types.js").FixTask[];
+  /** Tasks that exhausted auto-retry — Orchestrator must re-plan. */
+  exhaustedTasks: Array<{ id: string; title: string; retryCount: number }>;
+};
 
 export async function runWorkerPool(params: {
   orchestration: Orchestration;
-  maxWorkers: number;
-  memoryDir?: string; // Shared memory directory
+  pool: WorkerPool;
+  memoryManager?: import("../memory/types.js").MemorySearchManager;
   timeoutMs?: number;
   config?: import("../config/types.js").VersoConfig;
-}): Promise<WorkerResult[]> {
-  const { orchestration: orch, maxWorkers, memoryDir, timeoutMs, config } = params;
+}): Promise<DispatchResult> {
+  const { orchestration: orch, pool, memoryManager, timeoutMs, config } = params;
 
   if (!orch.plan) {
     throw new Error("No plan found");
   }
 
   const subtasks = orch.plan.subtasks;
-  const subtaskById = new Map(subtasks.map((s) => [s.id, s]));
-
-  // Optimize: Install dependencies once before starting workers (in sandbox directory)
   const sandboxDir = path.join(orch.workspaceDir, "sandbox");
   ensureDependenciesInstalled(sandboxDir);
 
-  // Optimize: Resolve model/auth once and share across workers
-  const { model, authStorage, modelRegistry } = await resolveAgentModel();
-  const agentDir = (await import("../agents/agent-paths.js")).resolveOpenClawAgentDir();
-
-  // Build initial pending queue: only ready (pending + deps met) subtasks
-  const pending: string[] = subtasks.filter((s) => isSubtaskReady(s, subtasks)).map((s) => s.id);
-  const claimed = new Set<string>(); // Track claimed tasks to avoid duplicates
-
+  const dispatcher = new TaskDispatcher(subtasks);
   const results: WorkerResult[] = [];
-
-  const claimNext = (): Subtask | null => {
-    // First try to claim from existing pending queue
-    while (pending.length > 0) {
-      const id = pending.shift();
-      if (id && !claimed.has(id)) {
-        const task = subtaskById.get(id);
-        if (task && task.status === "pending") {
-          claimed.add(id);
-          // Immediately mark as running to prevent other workers from claiming
-          task.status = "running";
-          task.startedAtMs = Date.now();
-          return task;
-        }
-      }
-    }
-
-    // If pending queue is empty, check if any new tasks became ready
-    const newlyReady = subtasks.filter((s) => isSubtaskReady(s, subtasks) && !claimed.has(s.id));
-    if (newlyReady.length > 0) {
-      pending.push(...newlyReady.map((s) => s.id));
-      const nextId = pending.shift();
-      if (nextId && !claimed.has(nextId)) {
-        const task = subtaskById.get(nextId);
-        if (task) {
-          claimed.add(nextId);
-          // Immediately mark as running to prevent other workers from claiming
-          task.status = "running";
-          task.startedAtMs = Date.now();
-          return task;
-        }
-      }
-    }
-
-    return null;
-  };
 
   const workerLoop = async (): Promise<void> => {
     while (true) {
-      const task = claimNext();
-      if (!task) {
-        break;
-      }
+      // 1. Wait for a ready task (blocks until dependencies resolve or all done)
+      const task = await dispatcher.next();
+      if (!task) return;
 
-      // Task status and startedAtMs already set in claimNext()
-      Promise.all([
-        saveOrchestration(orch),
-        broadcastOrchestrationEvent(
-          {
-            type: "orchestration.subtask",
-            payload: {
-              orchestrationId: orch.id,
-              subtaskId: task.id,
-              status: task.status,
-              title: task.title,
-            },
-          },
-          config,
-        ),
-      ]).catch((err) => logger.warn("Failed to save/broadcast task start", { error: String(err) }));
+      // 2. Notify: task starting
+      broadcastTaskStatus(orch, task, config).catch((err) =>
+        logger.warn("Failed to broadcast task start", { error: String(err) }),
+      );
+      await triggerHook("worker:started", orch, task);
 
-      // Trigger worker:started hook
-      const { triggerOrchestrationHook } = await import("./hooks.js");
-      await triggerOrchestrationHook("worker:started", {
-        orchestrationId: orch.id,
-        orchestration: orch,
-        subtask: task,
+      // 3. Claim a worker from the pool (affinity → exact → generic → wait)
+      const worker = await pool.claim(task.specialization, {
+        dependsOn: task.dependsOn,
       });
 
+      // 4. Execute and handle result
       try {
-        const result = await runWorkerTask({
+        const result = await executeTaskOnWorker({
+          worker,
           subtask: task,
           orchestrationId: orch.id,
-          missionWorkspaceDir: path.join(orch.workspaceDir, "sandbox"), // Use sandbox directory
-          memoryDir,
-          timeoutMs,
+          missionWorkspaceDir: sandboxDir,
           hasExistingProject: !!orch.baseProjectDir,
-          sharedResources: { model, authStorage, modelRegistry, agentDir },
+          memoryManager,
+          timeoutMs,
         });
+
+        pool.release(worker, task.id);
 
         task.status = result.ok ? "completed" : "failed";
         task.completedAtMs = Date.now();
         task.resultSummary = result.resultSummary;
         task.error = result.error;
 
-        // Check if worker modified package.json and install dependencies if needed
-        // This ensures next workers can use newly added dependencies
         if (result.filesChanged.some((f) => f === "package.json" || f.endsWith("/package.json"))) {
           logger.info("Worker modified package.json, installing dependencies", {
             subtaskId: task.id,
-            orchestrationId: orch.id,
           });
           try {
             ensureDependenciesInstalled(sandboxDir);
-          } catch (err) {
-            logger.warn("Failed to install dependencies after worker completion", {
-              subtaskId: task.id,
-              error: String(err),
-            });
+          } catch {
+            /* non-fatal */
           }
         }
 
-        // Optimize: Save and broadcast in parallel
-        await Promise.all([
-          saveOrchestration(orch),
-          broadcastOrchestrationEvent(
-            {
-              type: "orchestration.subtask",
-              payload: {
-                orchestrationId: orch.id,
-                subtaskId: task.id,
-                status: task.status,
-                title: task.title,
-                error: task.error,
-              },
-            },
-            config,
-          ),
-        ]);
-
-        // Trigger worker:completed or worker:failed hook
-        if (result.ok) {
-          await triggerOrchestrationHook("worker:completed", {
-            orchestrationId: orch.id,
-            orchestration: orch,
-            subtask: task,
-            result,
-          });
-        } else {
-          await triggerOrchestrationHook("worker:failed", {
-            orchestrationId: orch.id,
-            orchestration: orch,
-            subtask: task,
-            result,
-          });
-        }
+        await broadcastTaskStatus(orch, task, config);
+        await triggerHook(result.ok ? "worker:completed" : "worker:failed", orch, task, { result });
 
         results.push(result);
       } catch (err) {
-        // Ensure task is marked as failed even if there's an unhandled exception
+        pool.release(worker);
+
         task.status = "failed";
         task.completedAtMs = Date.now();
         task.error = err instanceof Error ? err.message : String(err);
 
-        await Promise.all([
-          saveOrchestration(orch),
-          broadcastOrchestrationEvent(
-            {
-              type: "orchestration.subtask",
-              payload: {
-                orchestrationId: orch.id,
-                subtaskId: task.id,
-                status: task.status,
-                title: task.title,
-                error: task.error,
-              },
-            },
-            config,
-          ),
-        ]);
-
-        // Trigger worker:failed hook for unhandled exceptions
-        await triggerOrchestrationHook("worker:failed", {
-          orchestrationId: orch.id,
-          orchestration: orch,
-          subtask: task,
-        });
+        await broadcastTaskStatus(orch, task, config);
+        await triggerHook("worker:failed", orch, task);
 
         results.push({
           subtaskId: task.id,
@@ -642,13 +428,18 @@ export async function runWorkerPool(params: {
           error: task.error,
         });
       }
+
+      // 5. Signal dispatcher: unblock dependents, wake waiting loops
+      dispatcher.onTaskDone();
     }
   };
 
-  // Start workers based on maxWorkers, not just initial pending length
-  // This ensures we have enough workers to handle tasks that become ready later
-  const workerCount = Math.min(maxWorkers, subtasks.length);
-  await Promise.all(Array.from({ length: workerCount }, () => workerLoop()));
+  // Launch pool.size concurrent loops — they block-wait when no tasks are ready
+  await Promise.all(Array.from({ length: pool.size }, () => workerLoop()));
 
-  return results;
+  return {
+    results,
+    autoFixTasks: dispatcher.autoFixTasks,
+    exhaustedTasks: [...dispatcher.exhaustedTasks],
+  };
 }

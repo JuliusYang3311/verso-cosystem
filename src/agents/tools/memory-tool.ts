@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { VersoConfig } from "../../config/config.js";
 import type { MemoryCitationsMode } from "../../config/types.memory.js";
-import type { MemorySearchResult } from "../../memory/types.js";
+import type { MemorySearchManager, MemorySearchResult } from "../../memory/types.js";
 import type { AnyAgentTool } from "./common.js";
 import { getMemorySearchManager } from "../../memory/index.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
@@ -25,18 +25,24 @@ const MemoryGetSchema = Type.Object({
 export function createMemorySearchTool(options: {
   config?: VersoConfig;
   agentSessionKey?: string;
+  /** Pre-resolved manager — bypasses config resolution. Used by orchestrator workers. */
+  memoryManager?: MemorySearchManager;
 }): AnyAgentTool | null {
   const cfg = options.config;
-  if (!cfg) {
+  if (!cfg && !options.memoryManager) {
     return null;
   }
-  const agentId = resolveSessionAgentId({
-    sessionKey: options.agentSessionKey,
-    config: cfg,
-  });
-  if (!resolveMemorySearchConfig(cfg, agentId)) {
+  const agentId = cfg
+    ? resolveSessionAgentId({ sessionKey: options.agentSessionKey, config: cfg })
+    : "";
+  if (!options.memoryManager && cfg && !resolveMemorySearchConfig(cfg, agentId)) {
     return null;
   }
+  const resolveManager = async () => {
+    if (options.memoryManager)
+      return { manager: options.memoryManager as MemorySearchManager | null, error: undefined };
+    return getMemorySearchManager({ cfg: cfg!, agentId });
+  };
   return {
     label: "Memory Search",
     name: "memory_search",
@@ -46,15 +52,14 @@ export function createMemorySearchTool(options: {
     execute: async (_toolCallId, params) => {
       const query = readStringParam(params, "query", { required: true });
       const minScore = readNumberParam(params, "minScore");
-      const { manager, error } = await getMemorySearchManager({
-        cfg,
-        agentId,
-      });
+      const { manager, error } = await resolveManager();
       if (!manager) {
         return jsonResult({ results: [], disabled: true, error });
       }
       try {
-        const citationsMode = resolveMemoryCitationsMode(cfg);
+        const citationsMode = cfg
+          ? resolveMemoryCitationsMode(cfg)
+          : ("off" as MemoryCitationsMode);
         const includeCitations = shouldIncludeCitations({
           mode: citationsMode,
           sessionKey: options.agentSessionKey,
@@ -82,18 +87,24 @@ export function createMemorySearchTool(options: {
 export function createMemoryGetTool(options: {
   config?: VersoConfig;
   agentSessionKey?: string;
+  /** Pre-resolved manager — bypasses config resolution. Used by orchestrator workers. */
+  memoryManager?: MemorySearchManager;
 }): AnyAgentTool | null {
   const cfg = options.config;
-  if (!cfg) {
+  if (!cfg && !options.memoryManager) {
     return null;
   }
-  const agentId = resolveSessionAgentId({
-    sessionKey: options.agentSessionKey,
-    config: cfg,
-  });
-  if (!resolveMemorySearchConfig(cfg, agentId)) {
+  const agentId = cfg
+    ? resolveSessionAgentId({ sessionKey: options.agentSessionKey, config: cfg })
+    : "";
+  if (!options.memoryManager && cfg && !resolveMemorySearchConfig(cfg, agentId)) {
     return null;
   }
+  const resolveManager = async () => {
+    if (options.memoryManager)
+      return { manager: options.memoryManager as MemorySearchManager | null, error: undefined };
+    return getMemorySearchManager({ cfg: cfg!, agentId });
+  };
   return {
     label: "Memory Get",
     name: "memory_get",
@@ -105,10 +116,7 @@ export function createMemoryGetTool(options: {
       const relPath = readStringParam(params, "path");
       const from = readNumberParam(params, "from", { integer: true });
       const lines = readNumberParam(params, "lines", { integer: true });
-      const { manager, error } = await getMemorySearchManager({
-        cfg,
-        agentId,
-      });
+      const { manager, error } = await resolveManager();
       if (!manager) {
         return jsonResult({ text: "", disabled: true, error });
       }

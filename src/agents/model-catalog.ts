@@ -8,7 +8,7 @@ export type ModelCatalogEntry = {
   provider: string;
   contextWindow?: number;
   reasoning?: boolean;
-  input?: Array<"text" | "image" | "audio" | "video">;
+  input?: Array<"text" | "image" | "video">;
   api?: string;
 };
 
@@ -18,7 +18,7 @@ type DiscoveredModel = {
   provider: string;
   contextWindow?: number;
   reasoning?: boolean;
-  input?: Array<"text" | "image" | "audio" | "video">;
+  input?: Array<"text" | "image" | "video">;
   api?: string;
 };
 

@@ -231,6 +231,24 @@ describe("buildDynamicContext", () => {
     expect(result.totalTokens).toBeGreaterThan(0);
   });
 
+  it("applies 0.8 scaling factor to contextLimit for budget calculation", () => {
+    // contextLimit=10000, systemPrompt=100, reserve=100
+    // totalBudget = 10000 * 0.8 - 100 - 100 = 7800
+    // Without 0.8: would be 9800 — recentTokens + retrievalTokens would be higher
+    const result = buildDynamicContext({
+      allMessages: Array.from({ length: 50 }, (_, i) => makeMsg("message " + i)),
+      retrievedChunks: [],
+      contextLimit: 10000,
+      systemPromptTokens: 100,
+      reserveForReply: 100,
+    });
+    // Total tokens (excluding system+summary) must stay within 0.8 * contextLimit
+    const usableBudget = result.recentTokens + result.retrievalTokens;
+    expect(usableBudget).toBeLessThanOrEqual(10000 * 0.8 - 100 - 100);
+    // And specifically NOT up to the full 9800 (without 0.8 factor)
+    expect(usableBudget).toBeLessThanOrEqual(7800);
+  });
+
   it("splits budget between recent messages and retrieval", () => {
     const result = buildDynamicContext({
       allMessages: [makeMsg("hello"), makeMsg("world")],

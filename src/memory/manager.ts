@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import chokidar, { type FSWatcher } from "chokidar";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -274,6 +274,15 @@ export class MemoryIndexManager implements MemorySearchManager {
       store: {
         ...settings.store,
         path: path.join(workspaceDir, "memory.sqlite"),
+      },
+      // Disable filesystem sync for isolated instances — they use indexContent()
+      // (virtual content, no files on disk). Sync would scan the workspace,
+      // find no files, and DELETE all virtually-indexed chunks.
+      sync: {
+        ...settings.sync,
+        onSearch: false,
+        onSessionStart: false,
+        watchInterval: 0,
       },
     };
     const providerResult =
@@ -739,9 +748,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     return this.syncing;
   }
 
-  async readChunk(
-    chunkId: string,
-  ): Promise<{
+  async readChunk(chunkId: string): Promise<{
     id: string;
     text: string;
     path: string;
@@ -948,6 +955,29 @@ export class MemoryIndexManager implements MemorySearchManager {
       const message = err instanceof Error ? err.message : String(err);
       return { ok: false, error: message };
     }
+  }
+
+  /**
+   * Index arbitrary text content directly into SQL — no file on disk needed.
+   * Constructs a virtual file entry and delegates to the internal indexFile pipeline
+   * (chunking → embedding → L0 tags → L1 sentences → SQL insert).
+   */
+  async indexContent(params: {
+    path: string;
+    content: string;
+    source?: MemorySource;
+  }): Promise<void> {
+    const { content, source = "memory" } = params;
+    if (!content.trim()) return;
+    const hash = createHash("sha256").update(content).digest("hex").slice(0, 16);
+    const entry: MemoryFileEntry = {
+      path: params.path,
+      absPath: params.path, // virtual — content provided directly
+      mtimeMs: Date.now(),
+      size: Buffer.byteLength(content, "utf-8"),
+      hash,
+    };
+    await this.indexFile(entry, { source, content });
   }
 
   async close(): Promise<void> {

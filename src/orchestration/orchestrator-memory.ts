@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { MemoryIndexManager } from "../memory/manager.js";
+import type { MemorySearchManager } from "../memory/types.js";
 
 const logger = {
   info: (...args: unknown[]) => console.log("[orchestrator-memory]", ...args),
@@ -31,35 +32,6 @@ export function createOrchestrationMemoryDir(sourceWorkspaceDir: string, orchId:
   const memoryDir = path.join(sourceWorkspaceDir, ".verso-missions", orchId, "memory");
   fs.mkdirSync(memoryDir, { recursive: true });
   return memoryDir;
-}
-
-/**
- * Create a temporary sessions directory for an orchestration.
- * Layout: <sourceWorkspace>/.verso-missions/<orchId>/sessions/
- */
-export function createOrchestrationSessionsDir(sourceWorkspaceDir: string, orchId: string): string {
-  const sessionsDir = path.join(sourceWorkspaceDir, ".verso-missions", orchId, "sessions");
-  fs.mkdirSync(sessionsDir, { recursive: true });
-  return sessionsDir;
-}
-
-/**
- * Get session file path for orchestrator or worker.
- */
-export function getOrchestrationSessionFile(
-  sourceWorkspaceDir: string,
-  orchId: string,
-  sessionType: "orchestrator" | "worker" | "acceptance",
-  workerId?: string,
-): string {
-  const sessionsDir = createOrchestrationSessionsDir(sourceWorkspaceDir, orchId);
-  if (sessionType === "orchestrator") {
-    return path.join(sessionsDir, `orchestrator-${orchId}.jsonl`);
-  } else if (sessionType === "acceptance") {
-    return path.join(sessionsDir, `acceptance-${orchId}.jsonl`);
-  } else {
-    return path.join(sessionsDir, `worker-${workerId}.jsonl`);
-  }
 }
 
 /**
@@ -93,14 +65,12 @@ export async function initOrchestrationMemory(params: {
     // Create isolated instance — not cached, independent lifecycle
     // Uses real agentId to resolve config (embedding, latent factors, MMR, etc.)
     // but workspaceDir points to the orchestration's mission workspace
-    // Enable sessions source to automatically index worker sessions
-    const sessionsDir = createOrchestrationSessionsDir(sourceWorkspaceDir, orchId);
+    // All orchestrator agents use in-memory sessions, so only "memory" source needed
     const memoryManager = await MemoryIndexManager.createIsolated({
       cfg,
       agentId,
       workspaceDir: memoryDir,
-      sources: ["memory", "sessions"],
-      customSessionsDir: sessionsDir,
+      sources: ["memory"],
     });
 
     if (!memoryManager) {
@@ -128,14 +98,38 @@ export async function initOrchestrationMemory(params: {
 }
 
 /**
- * Cleanup orchestration memory and sessions.
- * Closes the isolated memory manager and removes the memory and sessions directories.
+ * Index an agent's work result directly into the isolated SQL memory.
+ * No file I/O — calls indexContent which runs the full pipeline
+ * (chunking → embedding → L0 tags → L1 sentences → SQL insert).
+ * Subsequent agents can immediately search these results via memory_search.
+ */
+export async function indexAgentResult(params: {
+  memoryManager: MemorySearchManager | null;
+  agentType: "orchestrator" | "worker" | "acceptance";
+  agentId: string;
+  title: string;
+  content: string;
+}): Promise<void> {
+  const { memoryManager, agentType, agentId, title, content } = params;
+  if (!content.trim() || !memoryManager?.indexContent) return;
+
+  try {
+    await memoryManager.indexContent({
+      path: `${agentType}/${agentId}`,
+      content: `# ${title}\n\n${content}`,
+    });
+  } catch (err) {
+    logger.warn(`Failed to index ${agentType} result (non-fatal)`, { error: String(err) });
+  }
+}
+
+/**
+ * Cleanup orchestration memory.
+ * Closes the isolated memory manager and removes the memory directory.
  * Safe to call — the manager is not in the global cache.
  */
 export async function cleanupOrchestrationMemory(
   memoryContext: OrchestrationMemoryContext,
-  sourceWorkspaceDir?: string,
-  orchId?: string,
 ): Promise<void> {
   const errors: string[] = [];
 
@@ -165,37 +159,7 @@ export async function cleanupOrchestrationMemory(
     }
   }
 
-  // Remove sessions directory
-  if (sourceWorkspaceDir && orchId) {
-    const sessionsDir = path.join(sourceWorkspaceDir, ".verso-missions", orchId, "sessions");
-    if (fs.existsSync(sessionsDir)) {
-      try {
-        // Use force: true to ignore errors if files are still being written
-        fs.rmSync(sessionsDir, { recursive: true, force: true });
-        logger.info("Removed orchestration sessions directory", { sessionsDir });
-      } catch (err) {
-        // Don't treat this as fatal - session may still be writing
-        logger.warn("Failed to remove sessions directory (non-fatal)", {
-          error: String(err),
-          sessionsDir,
-        });
-        // Don't add to errors array - this is expected if session is still active
-      }
-    }
-  }
-
   if (errors.length > 0) {
     throw new Error(`Cleanup errors: ${errors.join("; ")}`);
   }
-}
-
-/**
- * Get the memory directory path for environment variables.
- * Workers will use this to access the shared memory.
- */
-export function getOrchestrationMemoryEnv(memoryDir: string): Record<string, string> {
-  return {
-    MEMORY_DIR: memoryDir,
-    VERSO_MEMORY_DIR: memoryDir,
-  };
 }
