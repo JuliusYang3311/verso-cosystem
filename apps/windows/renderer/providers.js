@@ -320,7 +320,8 @@ function showModelSelectionModal(providerName) {
 
       const info = document.createElement('span');
       info.className = 'model-checkbox-info';
-      info.textContent = `${model.ctx}${model.reasoning ? ' • Reasoning' : ''}`;
+      const inputLabel = (model.input || ['text']).join('+');
+      info.textContent = `${model.ctx} • ${inputLabel}${model.reasoning ? ' • Reasoning' : ''}`;
 
       item.appendChild(checkbox);
       item.appendChild(label);
@@ -363,13 +364,24 @@ async function confirmModelSelection() {
     provider.models = [];
   }
 
-  // Add selected models
+  // Look up catalog for metadata
+  const providerType = provider._providerType || currentProviderForModels;
+  let catalogKey = providerType;
+  if (providerType === 'custom-anthropic') catalogKey = 'anthropic';
+  else if (providerType === 'custom-openai') catalogKey = 'openai';
+  const catalog = window.MODEL_CATALOG[catalogKey] || [];
+
+  // Add selected models with full metadata from catalog
   selectedModels.forEach(modelId => {
     if (!provider.models.some(m => (typeof m === 'string' ? m : m.id) === modelId)) {
-      provider.models.push({
-        id: modelId,
-        name: modelId
-      });
+      const entry = catalog.find(c => c.id === modelId);
+      const model = { id: modelId, name: entry ? entry.name : modelId };
+      if (entry) {
+        if (entry.reasoning) model.reasoning = true;
+        if (entry.ctx) model.contextWindow = window.parseCtx(entry.ctx);
+        if (entry.input) model.input = entry.input;
+      }
+      provider.models.push(model);
     }
   });
 
@@ -526,8 +538,7 @@ function createProviderCard(name, provider) {
         ${modelsHtml}
       </div>
       <button class="btn" onclick="showModelSelectionModal('${name}')" style="margin-top: 8px;">Add Models from Catalog</button>
-      <input type="text" id="newModel-${name}" placeholder="Or enter custom model ID" style="margin-top: 8px;">
-      <button class="btn btn-secondary" onclick="addCustomModel('${name}')" style="margin-top: 8px;">Add Custom Model</button>
+      <button class="btn btn-secondary" onclick="showCustomModelModal('${name}')" style="margin-top: 8px;">Add Custom Model</button>
     </div>
   `;
 
@@ -588,8 +599,17 @@ function showCustomModelModal(providerName) {
       </div>
       <div class="form-group">
         <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #e0e0e0;">
-          <input type="checkbox" id="custom-model-reasoning"> Supports Reasoning / Thinking
+          <input type="checkbox" id="custom-model-reasoning" onchange="document.getElementById('thinking-level-group').style.display = this.checked ? 'block' : 'none'"> Supports Reasoning / Thinking
         </label>
+        <div id="thinking-level-group" style="display: none; margin-top: 8px; margin-left: 24px;">
+          <label style="color: #999; font-size: 12px;">Default Thinking Level</label>
+          <select id="custom-model-thinking-level" style="width: 100%; padding: 8px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; margin-top: 4px;">
+            <option value="low">Low (default)</option>
+            <option value="minimal">Minimal</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
       </div>
       <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px;">
         <button class="btn btn-secondary" onclick="closeModelModal()">Cancel</button>
@@ -638,7 +658,11 @@ async function confirmCustomModel(providerName) {
   const model = { id: modelId, name: modelId };
   if (ctxVal > 0) model.contextWindow = ctxVal;
   if (maxVal > 0) model.maxTokens = maxVal;
-  if (reasoning) model.reasoning = true;
+  if (reasoning) {
+    model.reasoning = true;
+    const thinkingLevel = document.getElementById('custom-model-thinking-level')?.value || 'low';
+    if (thinkingLevel !== 'low') model.thinkingLevel = thinkingLevel;
+  }
   model.input = inputTypes;
 
   providers[providerName].models.push(model);
@@ -648,9 +672,6 @@ async function confirmCustomModel(providerName) {
   closeModelModal();
 }
 
-async function addCustomModel(providerName) {
-  showCustomModelModal(providerName);
-}
 
 async function removeModel(providerName, modelId) {
   if (!confirm(`Remove model ${modelId}?`)) {

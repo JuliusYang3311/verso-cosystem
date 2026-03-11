@@ -1,0 +1,73 @@
+diff --git a/dist/providers/anthropic.js b/dist/providers/anthropic.js
+index 1954cc92887793559c3b73c15bb84db4b5af0d93..b56fd5f7a1b8eb58fb1d02b76c24636cad3296ff 100644
+--- a/dist/providers/anthropic.js
++++ b/dist/providers/anthropic.js
+@@ -315,14 +315,8 @@ export const streamAnthropic = (model, context, options) => {
+     return stream;
+ };
+ /**
+- * Check if a model supports adaptive thinking (Opus 4.6+)
+- */
+-function supportsAdaptiveThinking(modelId) {
+-    // Opus 4.6 model IDs (with or without date suffix)
+-    return modelId.includes("opus-4-6") || modelId.includes("opus-4.6");
+-}
+-/**
+- * Map ThinkingLevel to Anthropic effort levels for adaptive thinking
++ * Map ThinkingLevel to Anthropic effort levels for adaptive thinking.
++ * All reasoning-enabled Anthropic models use adaptive thinking.
+  */
+ function mapThinkingLevelToEffort(level) {
+     switch (level) {
+@@ -349,22 +343,12 @@ export const streamSimpleAnthropic = (model, context, options) => {
+     if (!options?.reasoning) {
+         return streamAnthropic(model, context, { ...base, thinkingEnabled: false });
+     }
+-    // For Opus 4.6+: use adaptive thinking with effort level
+-    // For older models: use budget-based thinking
+-    if (supportsAdaptiveThinking(model.id)) {
+-        const effort = mapThinkingLevelToEffort(options.reasoning);
+-        return streamAnthropic(model, context, {
+-            ...base,
+-            thinkingEnabled: true,
+-            effort,
+-        });
+-    }
+-    const adjusted = adjustMaxTokensForThinking(base.maxTokens || 0, model.maxTokens, options.reasoning, options.thinkingBudgets);
++    // Always use adaptive thinking with effort level
++    const effort = mapThinkingLevelToEffort(options.reasoning);
+     return streamAnthropic(model, context, {
+         ...base,
+-        maxTokens: adjusted.maxTokens,
+         thinkingEnabled: true,
+-        thinkingBudgetTokens: adjusted.thinkingBudget,
++        effort,
+     });
+ };
+ function isOAuthToken(apiKey) {
+@@ -448,21 +432,11 @@ function buildParams(model, context, isOAuthToken, options) {
+     if (context.tools) {
+         params.tools = convertTools(context.tools, isOAuthToken);
+     }
+-    // Configure thinking mode: adaptive (Opus 4.6+) or budget-based (older models)
++    // Configure adaptive thinking for all reasoning-enabled Anthropic models
+     if (options?.thinkingEnabled && model.reasoning) {
+-        if (supportsAdaptiveThinking(model.id)) {
+-            // Adaptive thinking: Claude decides when and how much to think
+-            params.thinking = { type: "adaptive" };
+-            if (options.effort) {
+-                params.output_config = { effort: options.effort };
+-            }
+-        }
+-        else {
+-            // Budget-based thinking for older models
+-            params.thinking = {
+-                type: "enabled",
+-                budget_tokens: options.thinkingBudgetTokens || 1024,
+-            };
++        params.thinking = { type: "adaptive" };
++        if (options.effort) {
++            params.output_config = { effort: options.effort };
+         }
+     }
+     if (options?.toolChoice) {

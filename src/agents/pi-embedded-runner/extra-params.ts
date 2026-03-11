@@ -26,10 +26,8 @@ export function resolveExtraParams(params: {
 }
 
 type CacheRetention = "none" | "short" | "long";
-type ThinkingConfig = { type: "adaptive" } | { type: "enabled"; budget_tokens: number };
-type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
+type ExtendedStreamOptions = Partial<SimpleStreamOptions> & {
   cacheRetention?: CacheRetention;
-  thinking?: ThinkingConfig;
 };
 
 /**
@@ -66,109 +64,30 @@ function resolveCacheRetention(
   return undefined;
 }
 
-/**
- * Resolve thinking config from extraParams for Anthropic models.
- * Supports adaptive thinking and manual extended thinking.
- *
- * Examples:
- * - { thinking: { type: "adaptive" } }
- * - { thinking: { type: "enabled", budget_tokens: 10000 } }
- * - { thinking: "adaptive" } (shorthand)
- */
-function resolveThinking(
-  extraParams: Record<string, unknown> | undefined,
-  provider: string,
-): ThinkingConfig | undefined {
-  // Only for Anthropic API (not for other providers even if they use Claude models)
-  if (provider !== "anthropic") {
-    return undefined;
-  }
-
-  const thinkingVal = extraParams?.thinking;
-  if (!thinkingVal) {
-    return undefined;
-  }
-
-  // Shorthand: "adaptive"
-  if (thinkingVal === "adaptive") {
-    return { type: "adaptive" };
-  }
-
-  // Full object format
-  if (typeof thinkingVal === "object" && thinkingVal !== null) {
-    const obj = thinkingVal as { type?: unknown; budget_tokens?: unknown };
-    if (obj.type === "adaptive") {
-      return { type: "adaptive" };
-    }
-    if (obj.type === "enabled" && typeof obj.budget_tokens === "number") {
-      return { type: "enabled", budget_tokens: obj.budget_tokens };
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Check if a model is Claude 4.6 series and should use adaptive thinking.
- * Works across different providers (anthropic, newapi, openrouter, etc.)
- */
-function isClaude46Model(modelId: string): boolean {
-  const normalized = modelId.toLowerCase().trim();
-  return (
-    normalized.includes("claude-opus-4-6") ||
-    normalized.includes("claude-sonnet-4-6") ||
-    normalized.includes("claude-haiku-4-6") ||
-    normalized.includes("claude-4-6") ||
-    normalized.includes("claude-4.6") ||
-    normalized.includes("opus-4-6") ||
-    normalized.includes("opus-4.6") ||
-    normalized.includes("sonnet-4-6") ||
-    normalized.includes("sonnet-4.6")
-  );
-}
-
 function createStreamFnWithExtraParams(
   baseStreamFn: StreamFn | undefined,
   extraParams: Record<string, unknown> | undefined,
   provider: string,
-  modelId: string,
+  _modelId: string,
 ): StreamFn | undefined {
-  // Auto-enable adaptive thinking for Claude 4.6 models if not explicitly configured
-  // Only for Anthropic provider (not for proxies like newapi, openrouter, etc.)
-  let effectiveParams = extraParams;
-  if (
-    provider === "anthropic" &&
-    isClaude46Model(modelId) &&
-    (!extraParams || extraParams.thinking === undefined)
-  ) {
-    // Opus 4.6: use adaptive thinking (recommended)
-    // Sonnet 4.6: use adaptive thinking (recommended, also supports manual mode)
-    effectiveParams = {
-      ...extraParams,
-      thinking: { type: "adaptive" },
-    };
-    log.debug(`auto-enabling adaptive thinking for Claude 4.6 model: ${modelId}`);
-  }
-
-  if (!effectiveParams || Object.keys(effectiveParams).length === 0) {
+  if (!extraParams || Object.keys(extraParams).length === 0) {
     return undefined;
   }
 
-  const streamParams: CacheRetentionStreamOptions = {};
-  if (typeof effectiveParams.temperature === "number") {
-    streamParams.temperature = effectiveParams.temperature;
+  const streamParams: ExtendedStreamOptions = {};
+  if (typeof extraParams.temperature === "number") {
+    streamParams.temperature = extraParams.temperature;
   }
-  if (typeof effectiveParams.maxTokens === "number") {
-    streamParams.maxTokens = effectiveParams.maxTokens;
+  if (typeof extraParams.maxTokens === "number") {
+    streamParams.maxTokens = extraParams.maxTokens;
   }
-  const cacheRetention = resolveCacheRetention(effectiveParams, provider);
+  const cacheRetention = resolveCacheRetention(extraParams, provider);
   if (cacheRetention) {
     streamParams.cacheRetention = cacheRetention;
   }
-  const thinking = resolveThinking(effectiveParams, provider);
-  if (thinking) {
-    streamParams.thinking = thinking;
-  }
+  // Thinking/reasoning is handled entirely by the thinkingLevel pipeline:
+  // resolveThinkingDefault() → pi-agent-core → pi-ai streamSimple(reasoning).
+  // No extra-params intervention needed.
 
   if (Object.keys(streamParams).length === 0) {
     return undefined;

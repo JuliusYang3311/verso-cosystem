@@ -35,6 +35,7 @@ export function convertModel(m) {
   if (m.cost) model.cost = m.cost;
   if (m.contextWindow) model.contextWindow = m.contextWindow;
   if (m.maxTokens) model.maxTokens = m.maxTokens;
+  if (m.thinkingLevel) model.thinkingLevel = m.thinkingLevel;
   if (m.headers) model.headers = m.headers;
   if (m.compat) model.compat = m.compat;
   return model;

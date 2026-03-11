@@ -291,6 +291,142 @@ describe('inferProviderType from gateway config', () => {
   });
 });
 
+// ── Catalog model selection with metadata ────────────────────────────
+
+describe('catalog model selection carries metadata', () => {
+  // Simulate confirmModelSelection() logic
+  function addCatalogModels(provider, selectedIds, catalog) {
+    if (!provider.models) provider.models = [];
+    selectedIds.forEach(modelId => {
+      if (!provider.models.some(m => (typeof m === 'string' ? m : m.id) === modelId)) {
+        const entry = catalog.find(c => c.id === modelId);
+        const model = { id: modelId, name: entry ? entry.name : modelId };
+        if (entry) {
+          if (entry.reasoning) model.reasoning = true;
+          if (entry.ctx) {
+            const m = entry.ctx.match(/^(\d+(?:\.\d+)?)\s*([KMkm])?$/);
+            if (m) {
+              const n = parseFloat(m[1]);
+              const unit = (m[2] || '').toUpperCase();
+              model.contextWindow = unit === 'M' ? n * 1000000 : unit === 'K' ? n * 1000 : n;
+            }
+          }
+          if (entry.input) model.input = entry.input;
+        }
+        provider.models.push(model);
+      }
+    });
+  }
+
+  it('anthropic catalog model gets input, reasoning, contextWindow', () => {
+    const catalog = [
+      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', reasoning: false, ctx: '1M', input: ['text', 'image'] },
+      { id: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)', reasoning: true, ctx: '1M', input: ['text', 'image'] },
+    ];
+    const provider = { models: [] };
+    addCatalogModels(provider, ['claude-opus-4-6', 'claude-opus-4-6-thinking'], catalog);
+
+    expect(provider.models).toHaveLength(2);
+
+    const opus = provider.models[0];
+    expect(opus.name).toBe('Claude Opus 4.6');
+    expect(opus.input).toEqual(['text', 'image']);
+    expect(opus.contextWindow).toBe(1000000);
+    expect(opus.reasoning).toBeUndefined();
+
+    const thinking = provider.models[1];
+    expect(thinking.reasoning).toBe(true);
+    expect(thinking.input).toEqual(['text', 'image']);
+  });
+
+  it('google catalog model carries video input type', () => {
+    const catalog = [
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', reasoning: false, ctx: '2M', input: ['text', 'image', 'audio', 'video'] },
+    ];
+    const provider = { models: [] };
+    addCatalogModels(provider, ['gemini-2.5-pro'], catalog);
+
+    const model = provider.models[0];
+    expect(model.input).toEqual(['text', 'image', 'audio', 'video']);
+    expect(model.contextWindow).toBe(2000000);
+  });
+
+  it('catalog model survives gateway round-trip', () => {
+    const catalog = [
+      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', reasoning: false, ctx: '1M', input: ['text', 'image'] },
+    ];
+    const provider = { baseUrl: 'http://x', apiType: 'anthropic', models: [] };
+    addCatalogModels(provider, ['claude-opus-4-6'], catalog);
+
+    const gateway = toGatewayProvider(provider);
+    expect(gateway.models[0].input).toEqual(['text', 'image']);
+    expect(gateway.models[0].contextWindow).toBe(1000000);
+    expect(gateway.models[0].name).toBe('Claude Opus 4.6');
+  });
+
+  it('does not duplicate models already in provider', () => {
+    const catalog = [
+      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', reasoning: false, ctx: '1M', input: ['text', 'image'] },
+    ];
+    const provider = { models: [{ id: 'claude-opus-4-6', name: 'Claude Opus 4.6' }] };
+    addCatalogModels(provider, ['claude-opus-4-6'], catalog);
+    expect(provider.models).toHaveLength(1);
+  });
+});
+
+// ── thinkingLevel pipeline ────────────────────────────────────────────
+
+describe('thinkingLevel through provider pipeline', () => {
+  it('convertModel preserves thinkingLevel', () => {
+    const { convertModel } = require('../../shared/js/lib/provider-utils.js');
+    const model = convertModel({ id: 'x', name: 'X', reasoning: true, thinkingLevel: 'high' });
+    expect(model.thinkingLevel).toBe('high');
+    expect(model.reasoning).toBe(true);
+  });
+
+  it('convertModel omits thinkingLevel when not set', () => {
+    const { convertModel } = require('../../shared/js/lib/provider-utils.js');
+    const model = convertModel({ id: 'x', name: 'X', reasoning: true });
+    expect(model.thinkingLevel).toBeUndefined();
+  });
+
+  it('thinkingLevel survives gateway round-trip', () => {
+    const gateway = toGatewayProvider({
+      baseUrl: 'http://x',
+      apiType: 'anthropic',
+      models: [{ id: 'c', name: 'C', reasoning: true, thinkingLevel: 'medium' }],
+    });
+    expect(gateway.models[0].thinkingLevel).toBe('medium');
+    expect(gateway.models[0].reasoning).toBe(true);
+  });
+
+  it('custom model with default thinkingLevel (low) omits field', () => {
+    // Simulates confirmCustomModel: thinkingLevel=low → not saved
+    const model = { id: 'custom', name: 'custom', reasoning: true };
+    const thinkingLevel = 'low';
+    if (thinkingLevel !== 'low') model.thinkingLevel = thinkingLevel;
+
+    const gateway = toGatewayProvider({
+      baseUrl: 'http://x',
+      models: [model],
+    });
+    expect(gateway.models[0].reasoning).toBe(true);
+    expect(gateway.models[0].thinkingLevel).toBeUndefined();
+  });
+
+  it('custom model with non-default thinkingLevel saves it', () => {
+    const model = { id: 'custom', name: 'custom', reasoning: true };
+    const thinkingLevel = 'high';
+    if (thinkingLevel !== 'low') model.thinkingLevel = thinkingLevel;
+
+    const gateway = toGatewayProvider({
+      baseUrl: 'http://x',
+      models: [model],
+    });
+    expect(gateway.models[0].thinkingLevel).toBe('high');
+  });
+});
+
 // ── Primary model selection ──────────────────────────────────────────
 
 describe('primary model selection', () => {
