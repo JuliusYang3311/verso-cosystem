@@ -20,6 +20,7 @@ const logger = {
 };
 
 const DEFAULT_WORKER_TIMEOUT_MS = 600_000; // 10 minutes of inactivity per task
+const MAX_SESSION_RETRIES = 2; // retries on "already processing" before giving up
 
 // --- Types ---
 
@@ -371,65 +372,93 @@ export async function runWorkerPool(params: {
       );
       await triggerHook("worker:started", orch, task);
 
-      // 3. Claim a worker from the pool (affinity → exact → generic → wait)
-      const worker = await pool.claim(task.specialization, {
-        dependsOn: task.dependsOn,
-      });
+      // 3. Claim a worker and execute — with retry on session contention.
+      //    If the session is still streaming (race between settle and claim),
+      //    release that worker, exclude it, and claim a different one.
+      const excludeWorkers: string[] = [];
+      let attempts = 0;
+      let taskDone = false;
 
-      // 4. Execute and handle result
-      try {
-        const result = await executeTaskOnWorker({
-          worker,
-          subtask: task,
-          orchestrationId: orch.id,
-          missionWorkspaceDir: sandboxDir,
-          hasExistingProject: !!orch.baseProjectDir,
-          memoryManager,
-          timeoutMs,
+      while (!taskDone && attempts <= MAX_SESSION_RETRIES) {
+        const worker = await pool.claim(task.specialization, {
+          dependsOn: task.dependsOn,
+          exclude: excludeWorkers.length > 0 ? excludeWorkers : undefined,
         });
 
-        pool.release(worker, task.id);
-
-        task.status = result.ok ? "completed" : "failed";
-        task.completedAtMs = Date.now();
-        task.resultSummary = result.resultSummary;
-        task.error = result.error;
-
-        if (result.filesChanged.some((f) => f === "package.json" || f.endsWith("/package.json"))) {
-          logger.info("Worker modified package.json, installing dependencies", {
-            subtaskId: task.id,
+        try {
+          const result = await executeTaskOnWorker({
+            worker,
+            subtask: task,
+            orchestrationId: orch.id,
+            missionWorkspaceDir: sandboxDir,
+            hasExistingProject: !!orch.baseProjectDir,
+            memoryManager,
+            timeoutMs,
           });
-          try {
-            ensureDependenciesInstalled(sandboxDir);
-          } catch {
-            /* non-fatal */
+
+          pool.release(worker, task.id);
+          taskDone = true;
+
+          task.status = result.ok ? "completed" : "failed";
+          task.completedAtMs = Date.now();
+          task.resultSummary = result.resultSummary;
+          task.error = result.error;
+
+          if (
+            result.filesChanged.some((f) => f === "package.json" || f.endsWith("/package.json"))
+          ) {
+            logger.info("Worker modified package.json, installing dependencies", {
+              subtaskId: task.id,
+            });
+            try {
+              ensureDependenciesInstalled(sandboxDir);
+            } catch {
+              /* non-fatal */
+            }
           }
+
+          await broadcastTaskStatus(orch, task, config);
+          await triggerHook(result.ok ? "worker:completed" : "worker:failed", orch, task, {
+            result,
+          });
+
+          results.push(result);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const isSessionBusy = msg.includes("already processing");
+
+          pool.release(worker);
+
+          if (isSessionBusy && attempts < MAX_SESSION_RETRIES) {
+            // Session contention — exclude this worker and try another
+            excludeWorkers.push(worker.id);
+            attempts++;
+            logger.warn(`worker ${worker.id}: session busy, retrying on different worker`, {
+              subtaskId: task.id,
+              attempt: attempts,
+            });
+            continue;
+          }
+
+          taskDone = true;
+          task.status = "failed";
+          task.completedAtMs = Date.now();
+          task.error = msg;
+
+          await broadcastTaskStatus(orch, task, config);
+          await triggerHook("worker:failed", orch, task);
+
+          results.push({
+            subtaskId: task.id,
+            ok: false,
+            resultSummary: "",
+            filesChanged: [],
+            error: task.error,
+          });
         }
-
-        await broadcastTaskStatus(orch, task, config);
-        await triggerHook(result.ok ? "worker:completed" : "worker:failed", orch, task, { result });
-
-        results.push(result);
-      } catch (err) {
-        pool.release(worker);
-
-        task.status = "failed";
-        task.completedAtMs = Date.now();
-        task.error = err instanceof Error ? err.message : String(err);
-
-        await broadcastTaskStatus(orch, task, config);
-        await triggerHook("worker:failed", orch, task);
-
-        results.push({
-          subtaskId: task.id,
-          ok: false,
-          resultSummary: "",
-          filesChanged: [],
-          error: task.error,
-        });
       }
 
-      // 5. Signal dispatcher: unblock dependents, wake waiting loops
+      // 4. Signal dispatcher: unblock dependents, wake waiting loops
       dispatcher.onTaskDone();
     }
   };
