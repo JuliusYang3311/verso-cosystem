@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import type { VersoConfig } from "../config/config.js";
+import type { ModelCatalogEntry } from "./model-catalog.js";
 import {
   parseModelRef,
   resolveModelRefFromString,
   resolveConfiguredModelRef,
+  resolveThinkingDefault,
   buildModelAliasIndex,
   normalizeProviderId,
   modelKey,
@@ -146,6 +148,74 @@ describe("model-selection", () => {
         defaultModel: "gpt-4",
       });
       expect(result).toEqual({ provider: "openai", model: "gpt-4" });
+    });
+  });
+
+  describe("resolveThinkingDefault", () => {
+    const emptyCfg = {} as VersoConfig;
+
+    it("returns 'off' when model has no reasoning", () => {
+      const catalog: ModelCatalogEntry[] = [{ id: "gpt-4o", name: "GPT-4o", provider: "openai" }];
+      expect(
+        resolveThinkingDefault({ cfg: emptyCfg, provider: "openai", model: "gpt-4o", catalog }),
+      ).toBe("off");
+    });
+
+    it("returns 'low' when model has reasoning=true but no thinkingLevel", () => {
+      const catalog: ModelCatalogEntry[] = [
+        { id: "claude-sonnet-4-6", name: "Sonnet", provider: "newapi", reasoning: true },
+      ];
+      expect(
+        resolveThinkingDefault({
+          cfg: emptyCfg,
+          provider: "newapi",
+          model: "claude-sonnet-4-6",
+          catalog,
+        }),
+      ).toBe("low");
+    });
+
+    it("returns per-model thinkingLevel when set", () => {
+      const catalog: ModelCatalogEntry[] = [
+        {
+          id: "claude-opus-4-6-thinking",
+          name: "Opus Thinking",
+          provider: "newapi",
+          reasoning: true,
+          thinkingLevel: "high",
+        },
+      ];
+      expect(
+        resolveThinkingDefault({
+          cfg: emptyCfg,
+          provider: "newapi",
+          model: "claude-opus-4-6-thinking",
+          catalog,
+        }),
+      ).toBe("high");
+    });
+
+    it("per-model thinkingLevel overrides generic reasoning=true default", () => {
+      const catalog: ModelCatalogEntry[] = [
+        { id: "m", name: "M", provider: "p", reasoning: true, thinkingLevel: "medium" },
+      ];
+      expect(resolveThinkingDefault({ cfg: emptyCfg, provider: "p", model: "m", catalog })).toBe(
+        "medium",
+      );
+    });
+
+    it("global thinkingDefault overrides per-model thinkingLevel", () => {
+      const cfg = { agents: { defaults: { thinkingDefault: "minimal" } } } as VersoConfig;
+      const catalog: ModelCatalogEntry[] = [
+        { id: "m", name: "M", provider: "p", reasoning: true, thinkingLevel: "high" },
+      ];
+      expect(resolveThinkingDefault({ cfg, provider: "p", model: "m", catalog })).toBe("minimal");
+    });
+
+    it("returns 'off' when model not found in catalog", () => {
+      expect(
+        resolveThinkingDefault({ cfg: emptyCfg, provider: "p", model: "unknown", catalog: [] }),
+      ).toBe("off");
     });
   });
 });

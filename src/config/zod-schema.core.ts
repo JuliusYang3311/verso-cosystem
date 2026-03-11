@@ -30,6 +30,7 @@ export const ModelDefinitionSchema = z
     name: z.string().min(1),
     api: ModelApiSchema.optional(),
     reasoning: z.boolean().optional(),
+    thinkingLevel: z.string().optional(),
     input: z.array(z.union([z.literal("text"), z.literal("image"), z.literal("video")])).optional(),
     cost: z
       .object({

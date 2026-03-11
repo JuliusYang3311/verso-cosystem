@@ -414,6 +414,10 @@ export function resolveThinkingDefault(params: {
   const candidate = params.catalog?.find(
     (entry) => entry.provider === params.provider && entry.id === params.model,
   );
+  // Per-model thinkingLevel takes priority over generic reasoning flag
+  if (candidate?.thinkingLevel) {
+    return candidate.thinkingLevel as ThinkLevel;
+  }
   if (candidate?.reasoning) {
     return "low";
   }

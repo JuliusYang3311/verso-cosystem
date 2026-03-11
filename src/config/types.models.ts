@@ -21,6 +21,8 @@ export type ModelDefinitionConfig = {
   name: string;
   api?: ModelApi;
   reasoning: boolean;
+  /** Per-model default thinking level (overrides global thinkingDefault). */
+  thinkingLevel?: string;
   input: Array<"text" | "image" | "video">;
   cost: {
     input: number;

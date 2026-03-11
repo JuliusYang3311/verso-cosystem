@@ -8,6 +8,7 @@ export type ModelCatalogEntry = {
   provider: string;
   contextWindow?: number;
   reasoning?: boolean;
+  thinkingLevel?: string;
   input?: Array<"text" | "image" | "video">;
   api?: string;
 };
@@ -121,19 +122,19 @@ export async function loadModelCatalog(params?: {
           );
 
           if (!existing) {
+            const mc = modelConf as Record<string, unknown>;
             models.push({
               id,
-              name: id, // Custom models usually don't have separate display names unless we add that field
+              name: typeof mc.name === "string" ? mc.name : id,
               provider: normalizedProvider,
-              // FIX: Must provide an API type, otherwise pi-ai crashes with "Unhandled API".
-              // Use configured API or default to "openai-responses" (generic LLM).
-              // Since we are forcing custom-openai, this is the correct default.
-              // We cast as any because DiscoveredModel usually doesn't expose api in the public type,
-              // but it passes through to Model<Api> in the runner.
               api: conf.api ?? "openai-responses",
-              contextWindow: undefined, // Could assume default or unknown
-              reasoning: undefined,
-              input: undefined,
+              contextWindow:
+                typeof mc.contextWindow === "number" && mc.contextWindow > 0
+                  ? mc.contextWindow
+                  : undefined,
+              reasoning: typeof mc.reasoning === "boolean" ? mc.reasoning : undefined,
+              thinkingLevel: typeof mc.thinkingLevel === "string" ? mc.thinkingLevel : undefined,
+              input: Array.isArray(mc.input) ? mc.input : undefined,
             });
           }
         }
