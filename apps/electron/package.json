@@ -39,7 +39,8 @@
       "renderer/**/*",
       "assets/**/*",
       "auth/**/*",
-      "gateway/**/*"
+      "gateway/**/*",
+      "lib/**/*"
     ],
     "extraResources": [
       {

@@ -245,6 +245,20 @@ find "$VERSO_ROOT/extensions" -type l \( -name "openclaw" -o -name "verso" \) -d
 find "$VERSO_ROOT/extensions" -type l ! -exec test -e {} \; -delete 2>/dev/null || true
 echo "Done"
 
+# 7. Copy shared JS libs into app's lib/ directory
+#    main.js requires ./lib/deep-merge.cjs and ./lib/gateway-config.cjs
+#    renderer HTML loads ../lib/provider-utils.iife.js
+echo ""
+echo "=== Copying shared JS libs ==="
+SHARED_LIB="$ELECTRON_DIR/../shared/js/lib"
+APP_LIB="$ELECTRON_DIR/lib"
+rm -rf "$APP_LIB"
+mkdir -p "$APP_LIB"
+cp "$SHARED_LIB/deep-merge.cjs" "$APP_LIB/"
+cp "$SHARED_LIB/gateway-config.cjs" "$APP_LIB/"
+cp "$SHARED_LIB/provider-utils.iife.js" "$APP_LIB/"
+echo "Copied shared libs to: $APP_LIB"
+
 echo ""
 echo "=== Build preparation complete ==="
 echo "You can now run: cd $ELECTRON_DIR && npm run build:mac"

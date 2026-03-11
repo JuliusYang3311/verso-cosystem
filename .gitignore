@@ -68,6 +68,7 @@ ui/test-results/
 apps/electron/dist/
 apps/electron/build-resources/
 apps/electron/node_modules/
+apps/electron/lib/
 
 # Vendor build artifacts
 vendor/
@@ -146,6 +147,8 @@ apps/macos/.build/
 apps/macos/.swiftpm/
 apps/windows/build-resources/
 apps/windows/node_modules/
+apps/windows/lib/
+apps/windows/dist/
 apps/windows/package-lock.json
 apps/ios/build/
 apps/android/.gradle/

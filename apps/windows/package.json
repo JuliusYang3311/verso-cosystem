@@ -5,9 +5,9 @@
   "author": "Julius Yang <yangzhenyu528@gmail.com>",
   "main": "main.js",
   "scripts": {
-    "prepare:build": "powershell -ExecutionPolicy Bypass -File scripts/prepare-build.ps1",
-    "build:win": "node scripts/prepare-build.js && npx electron-builder --win --x64",
-    "build:win:dir": "node scripts/prepare-build.js && npx electron-builder --win --dir"
+    "prepare:build": "bash scripts/prepare-build.sh",
+    "build:win": "bash scripts/prepare-build.sh && npx electron-builder --win --x64",
+    "build:win:dir": "bash scripts/prepare-build.sh && npx electron-builder --win --dir"
   },
   "build": {
     "appId": "com.verso.desktop",
@@ -38,7 +38,8 @@
       "renderer/**/*",
       "assets/**/*",
       "auth/**/*",
-      "gateway/**/*"
+      "gateway/**/*",
+      "lib/**/*"
     ],
     "extraResources": [
       {

@@ -8,8 +8,8 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 const { handleAuth } = require('./auth/auth-dispatcher.js');
-const { deepMerge } = require('../shared/js/lib/deep-merge.cjs');
-const { resolveGatewayToken: resolveToken, ensureGatewayFields, loadLicenseText: findLicense } = require('../shared/js/lib/gateway-config.cjs');
+const { deepMerge } = require('./lib/deep-merge.cjs');
+const { resolveGatewayToken: resolveToken, ensureGatewayFields, loadLicenseText: findLicense } = require('./lib/gateway-config.cjs');
 
 // Prevent EPIPE crashes from killing the app (gateway pipe teardown)
 process.on('uncaughtException', (err) => {
