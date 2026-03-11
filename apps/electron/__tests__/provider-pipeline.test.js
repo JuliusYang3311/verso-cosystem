@@ -223,6 +223,93 @@ describe('provider save/load round-trip', () => {
     const raw2 = configStore.models.providers['my-provider'];
     expect(raw2.api).toBe('anthropic-messages');
   });
+
+  // ── E2E: custom model → save → set primary → save → load ──────────
+
+  it('custom model with reasoning+input survives add → save → setPrimary → save → load', async () => {
+    const verso = createMockVerso();
+
+    // Step 1: Simulate confirmCustomModel — build model exactly like providers.js does
+    let providers = {
+      'newapi': {
+        baseUrl: 'https://code.z-daha.cc/',
+        apiType: 'anthropic',
+        apiKey: 'sk-xxx',
+        models: [],
+        _providerType: 'custom',
+        _authMethod: 'api-key',
+      },
+    };
+
+    // This mirrors confirmCustomModel() logic exactly
+    const modelId = 'claude-sonnet-4-6';
+    const ctxVal = 200000;
+    const maxVal = 8192;
+    const reasoning = true;  // checkbox checked
+    const inputTypes = ['text', 'image'];  // image checkbox checked
+    const thinkingLevel = 'high';  // select = high
+
+    const model = { id: modelId, name: modelId };
+    if (ctxVal > 0) model.contextWindow = ctxVal;
+    if (maxVal > 0) model.maxTokens = maxVal;
+    if (reasoning) {
+      model.reasoning = true;
+      if (thinkingLevel !== 'low') model.thinkingLevel = thinkingLevel;
+    }
+    model.input = inputTypes;
+
+    providers['newapi'].models.push(model);
+
+    // Step 2: Save (first time — after adding model)
+    await saveProviders(providers, verso);
+
+    // Step 3: Load back
+    providers = await loadProviders(verso);
+
+    // Verify model fields survived save → load
+    const loaded1 = providers['newapi'].models[0];
+    expect(loaded1.id).toBe('claude-sonnet-4-6');
+    expect(loaded1.reasoning).toBe(true);
+    expect(loaded1.input).toEqual(['text', 'image']);
+    expect(loaded1.contextWindow).toBe(200000);
+    expect(loaded1.maxTokens).toBe(8192);
+    expect(loaded1.thinkingLevel).toBe('high');
+
+    // Step 4: Simulate setPrimaryModel — exactly as providers.js does
+    for (const [, prov] of Object.entries(providers)) {
+      if (!prov.models) continue;
+      prov.models = prov.models.map(m => {
+        if (typeof m === 'string') m = { id: m, name: m };
+        const { _primary, ...rest } = m;
+        return rest;
+      });
+    }
+    providers['newapi'].models = providers['newapi'].models.map(m => {
+      if (typeof m === 'string') m = { id: m, name: m };
+      const { _primary, ...rest } = m;
+      return rest.id === modelId ? { ...rest, _primary: true } : rest;
+    });
+
+    // Step 5: Save (second time — after setPrimary)
+    await saveProviders(providers, verso);
+
+    // Step 6: Load back and verify ALL fields survived
+    const final = await loadProviders(verso);
+    const finalModel = final['newapi'].models[0];
+
+    expect(finalModel.id).toBe('claude-sonnet-4-6');
+    expect(finalModel.reasoning).toBe(true);
+    expect(finalModel.input).toEqual(['text', 'image']);
+    expect(finalModel.contextWindow).toBe(200000);
+    expect(finalModel.maxTokens).toBe(8192);
+    expect(finalModel.thinkingLevel).toBe('high');
+
+    // Also verify the raw config store (what the gateway sees)
+    const rawModel = configStore.models.providers['newapi'].models[0];
+    expect(rawModel.reasoning).toBe(true);
+    expect(rawModel.input).toEqual(['text', 'image']);
+    expect(rawModel.thinkingLevel).toBe('high');
+  });
 });
 
 // ── Config merge (deepMerge with replaceKeys) ────────────────────────
@@ -451,5 +538,60 @@ describe('primary model selection', () => {
       }
     }
     expect(fallbacks).toEqual(['p1/b', 'p2/c']);
+  });
+
+  // Simulate setPrimaryModel's model mapping (must preserve metadata)
+  function setPrimaryModelMap(models, targetId) {
+    return models.map(m => {
+      if (typeof m === 'string') m = { id: m, name: m };
+      const { _primary, ...rest } = m;
+      return rest.id === targetId ? { ...rest, _primary: true } : rest;
+    });
+  }
+
+  it('setPrimaryModel preserves reasoning, input, contextWindow, thinkingLevel', () => {
+    const models = [
+      { id: 'model-a', name: 'Model A', reasoning: true, input: ['text', 'image'], contextWindow: 200000, maxTokens: 8192, thinkingLevel: 'high' },
+      { id: 'model-b', name: 'Model B', reasoning: false, input: ['text'] },
+    ];
+
+    const result = setPrimaryModelMap(models, 'model-a');
+
+    expect(result[0]._primary).toBe(true);
+    expect(result[0].reasoning).toBe(true);
+    expect(result[0].input).toEqual(['text', 'image']);
+    expect(result[0].contextWindow).toBe(200000);
+    expect(result[0].maxTokens).toBe(8192);
+    expect(result[0].thinkingLevel).toBe('high');
+
+    // Non-primary model also preserves metadata
+    expect(result[1]._primary).toBeUndefined();
+    expect(result[1].reasoning).toBe(false);
+    expect(result[1].input).toEqual(['text']);
+  });
+
+  it('setPrimaryModel handles string models', () => {
+    const models = ['simple-model', { id: 'rich', name: 'Rich', reasoning: true }];
+    const result = setPrimaryModelMap(models, 'simple-model');
+
+    expect(result[0]).toEqual({ id: 'simple-model', name: 'simple-model', _primary: true });
+    expect(result[1].reasoning).toBe(true);
+    expect(result[1]._primary).toBeUndefined();
+  });
+
+  it('setPrimaryModel clears previous _primary without losing metadata', () => {
+    const models = [
+      { id: 'a', name: 'A', _primary: true, reasoning: true, input: ['text', 'image'] },
+      { id: 'b', name: 'B', reasoning: true, contextWindow: 100000 },
+    ];
+    const result = setPrimaryModelMap(models, 'b');
+
+    expect(result[0]._primary).toBeUndefined();
+    expect(result[0].reasoning).toBe(true);
+    expect(result[0].input).toEqual(['text', 'image']);
+
+    expect(result[1]._primary).toBe(true);
+    expect(result[1].reasoning).toBe(true);
+    expect(result[1].contextWindow).toBe(100000);
   });
 });

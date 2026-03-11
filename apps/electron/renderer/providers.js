@@ -736,11 +736,11 @@ async function setPrimaryModel(providerName, modelId) {
     });
   }
 
-  // Set the new primary
+  // Set the new primary (preserve all model metadata)
   providers[providerName].models = providers[providerName].models.map(m => {
-    const id = typeof m === 'string' ? m : m.id;
-    const name = (typeof m === 'object' ? m.name : null) || id;
-    return id === modelId ? { id, name, _primary: true } : { id, name };
+    if (typeof m === 'string') m = { id: m, name: m };
+    const { _primary, ...rest } = m;
+    return rest.id === modelId ? { ...rest, _primary: true } : rest;
   });
 
   // Build primary + fallbacks from all providers
