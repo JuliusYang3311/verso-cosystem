@@ -4,7 +4,7 @@
  * Tests the full chain: UI config → toGatewayProvider → saveProviders → loadProviders → round-trip.
  * Uses shared lib functions (same code loaded via <script> in the renderer).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { toGatewayProvider, inferProviderType } from '../../shared/js/lib/provider-utils.js';
 import { deepMerge } from '../../shared/js/lib/deep-merge.js';
 
