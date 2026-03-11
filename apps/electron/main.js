@@ -8,29 +8,14 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 const { handleAuth } = require('./auth/auth-dispatcher.js');
+const { deepMerge } = require('../shared/js/lib/deep-merge.cjs');
+const { resolveGatewayToken: resolveToken, ensureGatewayFields, loadLicenseText: findLicense } = require('../shared/js/lib/gateway-config.cjs');
 
 // Prevent EPIPE crashes from killing the app (gateway pipe teardown)
 process.on('uncaughtException', (err) => {
   if (err.code === 'EPIPE' || err.code === 'ERR_IPC_CHANNEL_CLOSED') return;
   console.error('[Main] Uncaught exception:', err);
 });
-
-function deepMerge(target, source, replaceKeys = [], _prefix = '') {
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    const path = _prefix ? `${_prefix}.${key}` : key;
-    if (replaceKeys.includes(path)) {
-      // Atomic replace — no merge, used for collections like providers
-      result[key] = source[key];
-    } else if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])
-        && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
-      result[key] = deepMerge(target[key], source[key], replaceKeys, path);
-    } else {
-      result[key] = source[key];
-    }
-  }
-  return result;
-}
 
 let mainWindow;
 let tray;
@@ -109,48 +94,7 @@ function createTray() {
   });
 }
 
-function resolveGatewayToken(config) {
-  // Match the gateway's own resolution order (auth.ts line 206):
-  //   authConfig.token ?? env.VERSO_GATEWAY_TOKEN
-  // Config token takes priority, then env, then launchd plist, then generate new.
-
-  // 1. Check config (highest priority — matches gateway behavior)
-  const configToken = config?.gateway?.auth?.token;
-  if (configToken && configToken !== 'undefined' && configToken.length >= 16) {
-    console.log('[Main] Using gateway token from config');
-    return configToken;
-  }
-
-  // 2. Check process env
-  const envToken = process.env.VERSO_GATEWAY_TOKEN;
-  if (envToken && envToken !== 'undefined' && envToken.length >= 16) {
-    console.log('[Main] Using gateway token from environment');
-    return envToken;
-  }
-
-  // 3. Check the launchd plist for VERSO_GATEWAY_TOKEN
-  const fs = require('fs');
-  const os = require('os');
-  try {
-    const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', 'bot.molt.gateway.plist');
-    if (fs.existsSync(plistPath)) {
-      const plistContent = fs.readFileSync(plistPath, 'utf8');
-      const match = plistContent.match(/<key>VERSO_GATEWAY_TOKEN<\/key>\s*<string>([^<]+)<\/string>/);
-      if (match && match[1]) {
-        console.log('[Main] Using gateway token from launchd plist');
-        return match[1];
-      }
-    }
-  } catch {}
-
-  // 4. Generate new
-  console.log('[Main] Generated new gateway token');
-  return crypto.randomBytes(32).toString('hex');
-}
-
 function ensureGatewayConfig() {
-  // Ensure config allows the embedded Electron app to connect via ws://
-  const fs = require('fs');
   const os = require('os');
   const configPath = path.join(os.homedir(), '.verso', 'verso.json');
   const configDir = path.dirname(configPath);
@@ -164,23 +108,18 @@ function ensureGatewayConfig() {
     config = {};
   }
 
-  if (!config.gateway) config.gateway = {};
-  if (!config.gateway.controlUi) config.gateway.controlUi = {};
-  if (!config.gateway.auth) config.gateway.auth = {};
+  // Resolve token via shared logic (config → env → launchd → generate)
+  const { token, source } = resolveToken({
+    configToken: config?.gateway?.auth?.token,
+    envToken: process.env.VERSO_GATEWAY_TOKEN,
+    checkLaunchd: process.platform === 'darwin',
+    fs, os, path, crypto,
+  });
+  console.log(`[Main] Using gateway token from ${source}`);
+  gatewayToken = token;
 
-  // Ensure gateway mode is set (required for gateway to start)
-  if (!config.gateway.mode) {
-    config.gateway.mode = 'local';
-  }
-
-  // Allow token-only auth over ws:// for the embedded control UI
-  config.gateway.controlUi.allowInsecureAuth = true;
-
-  // Resolve the gateway auth token (matches gateway's own resolution order)
-  gatewayToken = resolveGatewayToken(config);
-
-  // Always persist the resolved token to config so gateway and Electron agree
-  config.gateway.auth.token = gatewayToken;
+  // Ensure gateway structure + persist resolved token
+  ensureGatewayFields(config, gatewayToken);
 
   if (!fs.existsSync(configDir)) {
     fs.mkdirSync(configDir, { recursive: true });
@@ -381,15 +320,11 @@ function showSettings() {
 }
 
 function loadLicenseText() {
-  const candidates = [
+  return findLicense(fs, [
     path.join(process.resourcesPath, 'LICENSE.txt'),
     path.join(__dirname, '..', '..', 'LICENSE.txt'),
     path.join(__dirname, 'LICENSE.txt'),
-  ];
-  for (const p of candidates) {
-    try { if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8'); } catch {}
-  }
-  return null;
+  ]);
 }
 
 function showEula() {

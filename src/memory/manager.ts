@@ -257,6 +257,8 @@ export class MemoryIndexManager implements MemorySearchManager {
     cfg: VersoConfig;
     agentId: string;
     workspaceDir: string;
+    /** Custom DB file path. Overrides the default `workspaceDir/memory.sqlite`. */
+    dbPath?: string;
     providerResult?: EmbeddingProviderResult;
     sources?: Array<"memory" | "sessions">;
     customSessionsDir?: string;
@@ -273,7 +275,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       sources: params.sources ?? settings.sources,
       store: {
         ...settings.store,
-        path: path.join(workspaceDir, "memory.sqlite"),
+        path: params.dbPath ?? path.join(workspaceDir, "memory.sqlite"),
       },
       // Disable filesystem sync for isolated instances — they use indexContent()
       // (virtual content, no files on disk). Sync would scan the workspace,

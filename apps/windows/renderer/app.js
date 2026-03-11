@@ -285,7 +285,9 @@ window.saveAllSettings = async function() {
     await window.verso.saveConfig(config);
 
     // --- Apply to gateway once (with timeout) ---
-    await applyConfigToGateway(config);
+    // Re-read config from disk to include providers saved by saveProviders()
+    const latestConfig = await window.verso.getConfig();
+    await applyConfigToGateway(latestConfig);
 
     showNotification('All settings saved');
   } catch (err) {

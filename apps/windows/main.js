@@ -8,28 +8,14 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 const { handleAuth } = require('./auth/auth-dispatcher.js');
+const { deepMerge } = require('../shared/js/lib/deep-merge.cjs');
+const { resolveGatewayToken: resolveToken, ensureGatewayFields, loadLicenseText: findLicense } = require('../shared/js/lib/gateway-config.cjs');
 
 // Prevent EPIPE crashes from killing the app (gateway pipe teardown)
 process.on('uncaughtException', (err) => {
   if (err.code === 'EPIPE' || err.code === 'ERR_IPC_CHANNEL_CLOSED') return;
   console.error('[Main] Uncaught exception:', err);
 });
-
-function deepMerge(target, source, replaceKeys = [], _prefix = '') {
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    const p = _prefix ? `${_prefix}.${key}` : key;
-    if (replaceKeys.includes(p)) {
-      result[key] = source[key];
-    } else if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])
-        && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
-      result[key] = deepMerge(target[key], source[key], replaceKeys, p);
-    } else {
-      result[key] = source[key];
-    }
-  }
-  return result;
-}
 
 let mainWindow;
 let tray;
@@ -108,25 +94,7 @@ function createTray() {
   });
 }
 
-function resolveGatewayToken(config) {
-  // 1. Check config (highest priority)
-  const configToken = config?.gateway?.auth?.token;
-  if (configToken && configToken !== 'undefined' && configToken.length >= 16) {
-    console.log('[Main] Using gateway token from config');
-    return configToken;
-  }
-
-  // 2. Check process env
-  const envToken = process.env.VERSO_GATEWAY_TOKEN;
-  if (envToken && envToken !== 'undefined' && envToken.length >= 16) {
-    console.log('[Main] Using gateway token from environment');
-    return envToken;
-  }
-
-  // 3. Generate new (Windows has no launchd plist)
-  console.log('[Main] Generated new gateway token');
-  return crypto.randomBytes(32).toString('hex');
-}
+// resolveGatewayToken — delegates to shared lib
 
 function ensureGatewayConfig() {
   const os = require('os');
@@ -142,18 +110,8 @@ function ensureGatewayConfig() {
     config = {};
   }
 
-  if (!config.gateway) config.gateway = {};
-  if (!config.gateway.controlUi) config.gateway.controlUi = {};
-  if (!config.gateway.auth) config.gateway.auth = {};
-
-  if (!config.gateway.mode) {
-    config.gateway.mode = 'local';
-  }
-
-  config.gateway.controlUi.allowInsecureAuth = true;
-
-  gatewayToken = resolveGatewayToken(config);
-  config.gateway.auth.token = gatewayToken;
+  gatewayToken = resolveToken({ config, env: process.env, fs, crypto });
+  ensureGatewayFields(config, gatewayToken);
 
   if (!fs.existsSync(configDir)) {
     fs.mkdirSync(configDir, { recursive: true });
@@ -348,10 +306,7 @@ function loadLicenseText() {
     path.join(__dirname, '..', '..', 'LICENSE.txt'),
     path.join(__dirname, 'LICENSE.txt'),
   ];
-  for (const p of candidates) {
-    try { if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8'); } catch {}
-  }
-  return null;
+  return findLicense(fs, candidates);
 }
 
 function showEula() {

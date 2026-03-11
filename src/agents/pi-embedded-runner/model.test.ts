@@ -25,6 +25,43 @@ beforeEach(() => {
   } as unknown as ReturnType<typeof discoverModels>);
 });
 
+describe("buildInlineProviderModels — resolveDefaultApi", () => {
+  it("uses anthropic-messages for 'anthropic' provider", () => {
+    const result = buildInlineProviderModels({
+      anthropic: { models: [makeModel("claude")] },
+    } as unknown as Record<string, unknown>);
+    expect(result[0].api).toBe("anthropic-messages");
+  });
+
+  it("uses google-generative-ai for 'google' provider", () => {
+    const result = buildInlineProviderModels({
+      google: { models: [makeModel("gemini")] },
+    } as unknown as Record<string, unknown>);
+    expect(result[0].api).toBe("google-generative-ai");
+  });
+
+  it("uses bedrock-converse-stream for 'bedrock' provider", () => {
+    const result = buildInlineProviderModels({
+      bedrock: { models: [makeModel("titan")] },
+    } as unknown as Record<string, unknown>);
+    expect(result[0].api).toBe("bedrock-converse-stream");
+  });
+
+  it("uses github-copilot for 'copilot' provider", () => {
+    const result = buildInlineProviderModels({
+      copilot: { models: [makeModel("gpt-4")] },
+    } as unknown as Record<string, unknown>);
+    expect(result[0].api).toBe("github-copilot");
+  });
+
+  it("defaults to openai-responses for unknown provider names", () => {
+    const result = buildInlineProviderModels({
+      newapi: { models: [makeModel("some-model")] },
+    } as unknown as Record<string, unknown>);
+    expect(result[0].api).toBe("openai-responses");
+  });
+});
+
 describe("buildInlineProviderModels", () => {
   it("attaches provider ids to inline models", () => {
     const providers = {
@@ -211,6 +248,65 @@ describe("resolveModel", () => {
     const result = resolveModel("openai-codex", "gpt-4.1-mini", "/tmp/agent");
     expect(result.model).toBeUndefined();
     expect(result.error).toBe("Unknown model: openai-codex/gpt-4.1-mini");
+  });
+
+  it("resolves custom provider with anthropic api correctly", () => {
+    const cfg = {
+      models: {
+        providers: {
+          newapi: {
+            baseUrl: "http://47.253.7.24:3000/",
+            api: "anthropic-messages",
+            models: [makeModel("my-claude")],
+          },
+        },
+      },
+    } as VersoConfig;
+
+    const result = resolveModel("newapi", "my-claude", "/tmp/agent", cfg);
+
+    expect(result.model).toBeDefined();
+    expect(result.model?.api).toBe("anthropic-messages");
+    expect(result.model?.baseUrl).toBe("http://47.253.7.24:3000/");
+    expect(result.model?.provider).toBe("newapi");
+  });
+
+  it("custom provider fallback uses provider-level api, not openai default", () => {
+    const cfg = {
+      models: {
+        providers: {
+          newapi: {
+            baseUrl: "http://47.253.7.24:3000/",
+            api: "anthropic-messages",
+            models: [],
+          },
+        },
+      },
+    } as VersoConfig;
+
+    // Model not in models list → falls through to fallback path
+    const result = resolveModel("newapi", "unknown-model", "/tmp/agent", cfg);
+
+    expect(result.model).toBeDefined();
+    expect(result.model?.api).toBe("anthropic-messages");
+    expect(result.model?.id).toBe("unknown-model");
+  });
+
+  it("custom provider without api field falls back to openai-responses", () => {
+    const cfg = {
+      models: {
+        providers: {
+          newapi: {
+            baseUrl: "http://example.com",
+            models: [makeModel("test-model")],
+          },
+        },
+      },
+    } as VersoConfig;
+
+    const result = resolveModel("newapi", "test-model", "/tmp/agent", cfg);
+
+    expect(result.model?.api).toBe("openai-responses");
   });
 
   it("uses codex fallback even when openai-codex provider is configured", () => {

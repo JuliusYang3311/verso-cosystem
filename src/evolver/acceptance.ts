@@ -1,13 +1,14 @@
 /**
  * acceptance.ts — LLM-based acceptance testing for evolver cycles.
  *
- * Modeled after src/orchestration/acceptance.ts.
+ * Uses a persistent session (created by runner.ts, reused across cycles).
  * Three-phase acceptance (single LLM session):
  *   1. LLM examines workspace → proposes verifyCmd (must include lint)
  *   2. System runs verifyCmd → feeds output back to LLM
  *   3. LLM gives final acceptance verdict
  */
 
+import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -65,7 +66,6 @@ function runMechanicalVerify(
 function gatherWorkspaceContext(workspaceDir: string): string {
   const parts: string[] = [];
 
-  // package.json scripts
   const pkgPath = path.join(workspaceDir, "package.json");
   try {
     if (fs.existsSync(pkgPath)) {
@@ -79,7 +79,6 @@ function gatherWorkspaceContext(workspaceDir: string): string {
     // ignore
   }
 
-  // Lock file detection
   if (fs.existsSync(path.join(workspaceDir, "pnpm-lock.yaml"))) {
     parts.push("Package manager: pnpm");
   } else if (fs.existsSync(path.join(workspaceDir, "yarn.lock"))) {
@@ -88,12 +87,10 @@ function gatherWorkspaceContext(workspaceDir: string): string {
     parts.push("Package manager: npm");
   }
 
-  // tsconfig presence
   if (fs.existsSync(path.join(workspaceDir, "tsconfig.json"))) {
     parts.push("TypeScript project (tsconfig.json present)");
   }
 
-  // Top-level directory listing
   try {
     const entries = fs
       .readdirSync(workspaceDir)
@@ -114,6 +111,7 @@ function parseAcceptanceJson(text: string): {
   confidence?: number;
   reasoning?: string;
   verifyCmd?: string;
+  suggestedVerifyCmd?: string;
   issues?: Array<{
     severity?: string;
     confidence?: number;
@@ -133,21 +131,19 @@ function parseAcceptanceJson(text: string): {
 // ---------- Public API ----------
 
 /**
- * Run full acceptance testing for an evolver cycle:
- * 1. LLM examines workspace and proposes a verifyCmd (must include lint)
- * 2. System runs the proposed verifyCmd
- * 3. LLM evaluates verify output + changes → final verdict
+ * Run full acceptance testing for an evolver cycle using a persistent session.
+ *
+ * The session is NOT created or disposed here — it's owned by runner.ts.
  */
 export async function runEvolverAcceptance(params: {
   workspaceDir: string;
   filesChanged: string[];
+  session: AgentSession;
   gepPrompt?: string;
 }): Promise<EvolverAcceptanceResult> {
-  const { workspaceDir, filesChanged, gepPrompt } = params;
+  const { workspaceDir, filesChanged, session, gepPrompt } = params;
 
-  // Gather context
   const wsContext = gatherWorkspaceContext(workspaceDir);
-
   const diffSummary = `${filesChanged.length} file(s) changed: ${filesChanged.slice(0, 10).join(", ")}`;
 
   const fileSnippets: string[] = [];
@@ -164,40 +160,14 @@ export async function runEvolverAcceptance(params: {
     }
   }
 
+  const TIMEOUT_MS = 300_000; // 5 minutes total
+
   try {
-    const { createAgentSession, SessionManager } = await import("@mariozechner/pi-coding-agent");
-    const { resolveAgentModel } = await import("./acceptance-model.js");
-
-    const { model, authStorage, modelRegistry, agentDir } = await resolveAgentModel();
-
-    // Create web search and web fetch tools (same pattern as sandbox-agent.ts)
-    const { createWebSearchTool } = await import("../agents/tools/web-search.js");
-    const { createWebFetchTool } = await import("../agents/tools/web-fetch.js");
-    const { loadConfig } = await import("../config/config.js");
-    const config = loadConfig();
-    const webSearchTool = createWebSearchTool({ config, sandboxed: false });
-    const webFetchTool = createWebFetchTool({ config, sandboxed: false });
-
-    const acceptanceTools = [
-      ...(webSearchTool ? [webSearchTool] : []),
-      ...(webFetchTool ? [webFetchTool] : []),
-    ];
-
-    const { session } = await createAgentSession({
-      cwd: workspaceDir,
-      agentDir,
-      authStorage,
-      modelRegistry,
-      model,
-      customTools: acceptanceTools,
-      sessionManager: SessionManager.inMemory(workspaceDir),
-    });
-
-    const TIMEOUT_MS = 300_000; // 5 minutes total
-
     // --- Phase 1: Ask LLM to propose verifyCmd ---
 
     const phase1Prompt = `You are an acceptance evaluator for code evolution cycles.
+
+WORKSPACE DIRECTORY: ${workspaceDir}
 
 WORKSPACE CONTEXT:
 ${wsContext}
@@ -231,7 +201,6 @@ Respond with ONLY a JSON object (no markdown fences):
       } catch {
         /* ignore */
       }
-      session.dispose();
       return { passed: false, confidence: 50, reasoning: "LLM timed out proposing verifyCmd" };
     }
 
@@ -240,7 +209,6 @@ Respond with ONLY a JSON object (no markdown fences):
     const verifyCmd = phase1Parsed?.verifyCmd?.trim() ?? "";
 
     if (!verifyCmd) {
-      session.dispose();
       return { passed: false, confidence: 60, reasoning: "LLM failed to propose a verifyCmd" };
     }
 
@@ -302,7 +270,6 @@ Respond with ONLY a JSON object (no markdown fences):
       } catch {
         /* ignore */
       }
-      session.dispose();
       return {
         passed: false,
         confidence: 50,
@@ -313,7 +280,6 @@ Respond with ONLY a JSON object (no markdown fences):
     }
 
     const phase3Text = session.getLastAssistantText?.() ?? "";
-    session.dispose();
 
     if (!phase3Text) {
       return {
@@ -327,7 +293,6 @@ Respond with ONLY a JSON object (no markdown fences):
 
     const parsed = parseAcceptanceJson(phase3Text);
     if (!parsed) {
-      // Fallback heuristic
       const lower = phase3Text.toLowerCase();
       const passed = lower.includes('"passed"') && lower.includes("true");
       return {
@@ -356,7 +321,7 @@ Respond with ONLY a JSON object (no markdown fences):
     };
 
     // If verify failed but LLM suggests a corrected command, re-run it
-    const suggestedCmd = (parsed as { suggestedVerifyCmd?: string }).suggestedVerifyCmd?.trim();
+    const suggestedCmd = parsed.suggestedVerifyCmd?.trim();
     if (!verify.ok && suggestedCmd) {
       logger.info("LLM suggested corrected verifyCmd, re-running", { suggestedCmd });
       const retryVerify = runMechanicalVerify(workspaceDir, suggestedCmd);

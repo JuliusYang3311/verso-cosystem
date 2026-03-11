@@ -228,12 +228,21 @@ export function extractSignals({
   if (/\b(i want|i need|we need|please add|can you add|could you add|let'?s add)\b/i.test(lower)) {
     signals.push("user_feature_request");
   }
+  // Chinese: 增加/添加/实现/开发/希望有/需要 + object
+  if (
+    /(增加|添加|实现|开发|新增|加上|做一个|写一个|希望有|需要.{0,10}功能|希望能|能不能加)/.test(
+      corpus,
+    )
+  ) {
+    signals.push("user_feature_request");
+  }
 
   // user_improvement_suggestion: user suggests making something better
   if (
     /\b(should be|could be better|improve|enhance|upgrade|refactor|clean up|simplify|streamline)\b/i.test(
       lower,
-    )
+    ) ||
+    /(优化|改进|提升|改善|简化|重构|可以更好|应该更|做得更好|整理一下|清理)/.test(corpus)
   ) {
     // Only fire if there is no active error (to distinguish from repair requests)
     if (!errorHit) {
@@ -245,7 +254,8 @@ export function extractSignals({
   if (
     /\b(slow|timeout|timed?\s*out|latency|bottleneck|took too long|performance issue|high cpu|high memory|oom|out of memory)\b/i.test(
       lower,
-    )
+    ) ||
+    /(太慢|超时|卡顿|延迟高|性能问题|响应慢|加载慢|内存不足|内存溢出|CPU.{0,4}高)/.test(corpus)
   ) {
     signals.push("perf_bottleneck");
   }
@@ -254,7 +264,8 @@ export function extractSignals({
   if (
     /\b(not supported|cannot|doesn'?t support|no way to|missing feature|unsupported|not available|not implemented|no support for)\b/i.test(
       lower,
-    )
+    ) ||
+    /(不支持|无法|缺少|没有这个功能|缺失|未实现|不能用|做不到|还不能)/.test(corpus)
   ) {
     // Only fire if it is not just a missing file/config signal
     if (

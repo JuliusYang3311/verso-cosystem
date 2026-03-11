@@ -48,21 +48,8 @@ async function loadProviders() {
   window.providers = providers;
 }
 
-function inferProviderType(name, provider) {
-  const api = provider.api || '';
-  const url = (provider.baseUrl || '').toLowerCase();
-  const n = name.toLowerCase();
-
-  if (api.startsWith('anthropic') || url.includes('anthropic.com')) return 'anthropic';
-  if (url.includes('minimax')) return 'minimax';
-  if (api.startsWith('google') || url.includes('googleapis.com') || url.includes('generativelanguage')) return 'google';
-  if (url.includes('openai.com')) return 'openai';
-  if (n.includes('anthropic')) return 'anthropic';
-  if (n.includes('openai')) return 'openai';
-  if (n.includes('google') || n.includes('gemini')) return 'google';
-  if (n.includes('minimax')) return 'minimax';
-  return 'custom';
-}
+// inferProviderType provided by shared lib (provider-utils.iife.js → window.ProviderUtils)
+const inferProviderType = window.ProviderUtils.inferProviderType;
 
 
 // Provider Selection Modal
@@ -342,6 +329,15 @@ function showModelSelectionModal(providerName) {
       optionsContainer.appendChild(item);
     });
   }
+
+  // Add action buttons
+  const actions = document.createElement('div');
+  actions.className = 'modal-actions';
+  actions.innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModelModal()">Cancel</button>
+    <button class="btn" onclick="confirmModelSelection()">Add Selected Models</button>
+  `;
+  optionsContainer.appendChild(actions);
 
   modal.classList.add('active');
 }
@@ -755,49 +751,9 @@ async function setPrimaryModel(providerName, modelId) {
   if (window.loadModelSection) window.loadModelSection();
 }
 
-// Convert UI provider format to gateway-compatible format
-// Gateway uses strict schemas — only recognized fields are allowed.
-// Provider: baseUrl (required), apiKey, auth, api, headers, authHeader, models (required)
-// Model: id (required), name (required), api, reasoning, input, cost, contextWindow, maxTokens, headers, compat
+// toGatewayProvider provided by shared lib (provider-utils.iife.js → window.ProviderUtils)
+const toGatewayProvider = window.ProviderUtils.toGatewayProvider;
 window.toGatewayProvider = toGatewayProvider;
-function toGatewayProvider(provider) {
-  const out = {};
-
-  // baseUrl is required by ModelProviderSchema
-  out.baseUrl = provider.baseUrl || '';
-  if (provider.apiKey) out.apiKey = provider.apiKey;
-  if (provider.auth) out.auth = provider.auth;
-  if (provider.headers) out.headers = provider.headers;
-  if (provider.authHeader !== undefined) out.authHeader = provider.authHeader;
-
-  // Map UI apiType to gateway's 'api' field
-  const apiTypeMap = {
-    'openai': 'openai-completions',
-    'anthropic': 'anthropic-messages',
-    'google': 'google-generative-ai',
-  };
-  const apiType = provider.apiType || provider.api || 'openai';
-  // If already a valid gateway api value, use as-is; otherwise map from UI type
-  const validApis = ['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai', 'github-copilot', 'bedrock-converse-stream', 'completions', 'openai-legacy-completions'];
-  out.api = validApis.includes(apiType) ? apiType : (apiTypeMap[apiType] || 'openai-completions');
-
-  // Convert models: only include fields recognized by ModelDefinitionSchema (strict)
-  out.models = (provider.models || []).map(m => {
-    if (typeof m === 'string') return { id: m, name: m };
-    const model = { id: m.id, name: m.name || m.id };
-    if (m.api) model.api = m.api;
-    if (m.reasoning !== undefined) model.reasoning = m.reasoning;
-    if (m.input) model.input = m.input;
-    if (m.cost) model.cost = m.cost;
-    if (m.contextWindow) model.contextWindow = m.contextWindow;
-    if (m.maxTokens) model.maxTokens = m.maxTokens;
-    if (m.headers) model.headers = m.headers;
-    if (m.compat) model.compat = m.compat;
-    return model;
-  });
-
-  return out;
-}
 
 async function saveProviders() {
   const config = await window.verso.getConfig();
