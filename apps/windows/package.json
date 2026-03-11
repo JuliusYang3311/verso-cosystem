@@ -47,6 +47,10 @@
         "to": "LICENSE.txt"
       },
       {
+        "from": "../../node.exe",
+        "to": "gateway/node.exe"
+      },
+      {
         "from": "../../dist",
         "to": "gateway/dist"
       },

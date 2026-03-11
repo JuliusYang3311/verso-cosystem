@@ -179,14 +179,15 @@ function launchGateway(port) {
 
   console.log('[Main] Gateway root:', resolvedGatewayRoot);
 
-  // Use Electron's own Node.js runtime — it's already signed and trusted by Windows,
-  // avoiding security blocks (SmartScreen, Defender) that hit standalone node.exe.
-  const nodeBin = app.isPackaged ? process.execPath : 'node';
+  // Use bundled Node.js binary (same approach as macOS) for reliable ESM support.
+  // Electron's ELECTRON_RUN_AS_NODE has ESM module resolution issues on Windows.
+  const nodeBin = app.isPackaged
+    ? path.join(resolvedGatewayRoot, 'node.exe')
+    : 'node';
 
   console.log('[Main] Starting embedded gateway:', nodeBin, gatewayPath);
 
   const env = { ...process.env };
-  env.ELECTRON_RUN_AS_NODE = '1';
   env.VERSO_GATEWAY_PORT = port;
   env.VERSO_GATEWAY_TOKEN = gatewayToken;
   env.VERSO_EMBEDDED = 'true';

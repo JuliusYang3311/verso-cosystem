@@ -8,9 +8,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WINDOWS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VERSO_ROOT="$(cd "$WINDOWS_DIR/../.." && pwd)"
 
+NODE_VERSION="22.14.0"
+PLATFORM="win"
+ARCH="x64"
+
 echo "=== Verso Desktop (Windows) Build Preparation ==="
 echo "Verso root: $VERSO_ROOT"
 echo "Windows dir: $WINDOWS_DIR"
+echo "Node version: $NODE_VERSION"
 
 # 1. Build verso if dist doesn't exist
 if [ ! -f "$VERSO_ROOT/dist/index.js" ]; then
@@ -20,7 +25,28 @@ if [ ! -f "$VERSO_ROOT/dist/index.js" ]; then
   npm run build 2>/dev/null || pnpm run build 2>/dev/null || echo "Warning: Could not build verso. Make sure dist/ exists."
 fi
 
-# 2. Create lean production node_modules (same as electron build)
+# 2. Download Node.js binary for Windows x64
+NODE_DIR="$WINDOWS_DIR/build-resources"
+NODE_BIN="$NODE_DIR/node.exe"
+
+if [ ! -f "$NODE_BIN" ]; then
+  echo ""
+  echo "=== Downloading Node.js $NODE_VERSION for win-$ARCH ==="
+  mkdir -p "$NODE_DIR"
+
+  NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/win-${ARCH}/node.exe"
+  curl -L -o "$NODE_BIN" "$NODE_URL"
+  echo "Node.js binary saved to: $NODE_BIN"
+else
+  echo "Node.js binary already exists: $NODE_BIN"
+fi
+
+# Copy node.exe to verso root so extraResources picks it up as gateway/node.exe
+GATEWAY_NODE="$VERSO_ROOT/node.exe"
+cp "$NODE_BIN" "$GATEWAY_NODE"
+echo "Copied Node.js binary to: $GATEWAY_NODE"
+
+# 3. Create lean production node_modules (same as electron build)
 STAGING="$VERSO_ROOT/build-node-modules"
 if [ ! -d "$STAGING/.pnpm" ]; then
   echo ""
