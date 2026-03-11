@@ -71,3 +71,211 @@ index 1954cc92887793559c3b73c15bb84db4b5af0d93..b56fd5f7a1b8eb58fb1d02b76c24636c
          }
      }
      if (options?.toolChoice) {
+diff --git a/dist/providers/google-vertex.js b/dist/providers/google-vertex.js
+index 8bb617b3518779ee91957dfb178f782fc86fe8c3..fad46792d89e41c719bee06c6daff60026eb289b 100644
+--- a/dist/providers/google-vertex.js
++++ b/dist/providers/google-vertex.js
+@@ -222,22 +222,14 @@ export const streamSimpleGoogleVertex = (model, context, options) => {
+             thinking: { enabled: false },
+         });
+     }
++    // Always use thinkingLevel for all Google models
+     const effort = clampReasoning(options.reasoning);
+-    const geminiModel = model;
+-    if (isGemini3ProModel(geminiModel) || isGemini3FlashModel(geminiModel)) {
+-        return streamGoogleVertex(model, context, {
+-            ...base,
+-            thinking: {
+-                enabled: true,
+-                level: getGemini3ThinkingLevel(effort, geminiModel),
+-            },
+-        });
+-    }
++    const level = mapThinkingLevel(effort);
+     return streamGoogleVertex(model, context, {
+         ...base,
+         thinking: {
+             enabled: true,
+-            budgetTokens: getGoogleBudget(geminiModel, effort, options.thinkingBudgets),
++            level,
+         },
+     });
+ };
+@@ -298,9 +290,6 @@ function buildParams(model, context, options = {}) {
+         if (options.thinking.level !== undefined) {
+             thinkingConfig.thinkingLevel = THINKING_LEVEL_MAP[options.thinking.level];
+         }
+-        else if (options.thinking.budgetTokens !== undefined) {
+-            thinkingConfig.thinkingBudget = options.thinking.budgetTokens;
+-        }
+         config.thinkingConfig = thinkingConfig;
+     }
+     if (options.signal) {
+@@ -316,23 +305,11 @@ function buildParams(model, context, options = {}) {
+     };
+     return params;
+ }
+-function isGemini3ProModel(model) {
+-    return model.id.includes("3-pro");
+-}
+-function isGemini3FlashModel(model) {
+-    return model.id.includes("3-flash");
+-}
+-function getGemini3ThinkingLevel(effort, model) {
+-    if (isGemini3ProModel(model)) {
+-        switch (effort) {
+-            case "minimal":
+-            case "low":
+-                return "LOW";
+-            case "medium":
+-            case "high":
+-                return "HIGH";
+-        }
+-    }
++/**
++ * Map ThinkingLevel to Google thinkingLevel enum.
++ * Unified for all Google models — no model ID branching.
++ */
++function mapThinkingLevel(effort) {
+     switch (effort) {
+         case "minimal":
+             return "MINIMAL";
+@@ -342,30 +319,8 @@ function getGemini3ThinkingLevel(effort, model) {
+             return "MEDIUM";
+         case "high":
+             return "HIGH";
++        default:
++            return "HIGH";
+     }
+ }
+-function getGoogleBudget(model, effort, customBudgets) {
+-    if (customBudgets?.[effort] !== undefined) {
+-        return customBudgets[effort];
+-    }
+-    if (model.id.includes("2.5-pro")) {
+-        const budgets = {
+-            minimal: 128,
+-            low: 2048,
+-            medium: 8192,
+-            high: 32768,
+-        };
+-        return budgets[effort];
+-    }
+-    if (model.id.includes("2.5-flash")) {
+-        const budgets = {
+-            minimal: 128,
+-            low: 2048,
+-            medium: 8192,
+-            high: 24576,
+-        };
+-        return budgets[effort];
+-    }
+-    return -1;
+-}
+ //# sourceMappingURL=google-vertex.js.map
+\ No newline at end of file
+diff --git a/dist/providers/google.js b/dist/providers/google.js
+index ccd384b2f534ab4db43f93c864dc3d2e18f6ada3..032d070024cf704e3ff4e52fdcc336cab45fd731 100644
+--- a/dist/providers/google.js
++++ b/dist/providers/google.js
+@@ -216,22 +216,14 @@ export const streamSimpleGoogle = (model, context, options) => {
+     if (!options?.reasoning) {
+         return streamGoogle(model, context, { ...base, thinking: { enabled: false } });
+     }
++    // Always use thinkingLevel for all Google models
+     const effort = clampReasoning(options.reasoning);
+-    const googleModel = model;
+-    if (isGemini3ProModel(googleModel) || isGemini3FlashModel(googleModel)) {
+-        return streamGoogle(model, context, {
+-            ...base,
+-            thinking: {
+-                enabled: true,
+-                level: getGemini3ThinkingLevel(effort, googleModel),
+-            },
+-        });
+-    }
++    const level = mapThinkingLevel(effort);
+     return streamGoogle(model, context, {
+         ...base,
+         thinking: {
+             enabled: true,
+-            budgetTokens: getGoogleBudget(googleModel, effort, options.thinkingBudgets),
++            level,
+         },
+     });
+ };
+@@ -276,12 +268,8 @@ function buildParams(model, context, options = {}) {
+     if (options.thinking?.enabled && model.reasoning) {
+         const thinkingConfig = { includeThoughts: true };
+         if (options.thinking.level !== undefined) {
+-            // Cast to any since our GoogleThinkingLevel mirrors Google's ThinkingLevel enum values
+             thinkingConfig.thinkingLevel = options.thinking.level;
+         }
+-        else if (options.thinking.budgetTokens !== undefined) {
+-            thinkingConfig.thinkingBudget = options.thinking.budgetTokens;
+-        }
+         config.thinkingConfig = thinkingConfig;
+     }
+     if (options.signal) {
+@@ -297,23 +285,11 @@ function buildParams(model, context, options = {}) {
+     };
+     return params;
+ }
+-function isGemini3ProModel(model) {
+-    return model.id.includes("3-pro");
+-}
+-function isGemini3FlashModel(model) {
+-    return model.id.includes("3-flash");
+-}
+-function getGemini3ThinkingLevel(effort, model) {
+-    if (isGemini3ProModel(model)) {
+-        switch (effort) {
+-            case "minimal":
+-            case "low":
+-                return "LOW";
+-            case "medium":
+-            case "high":
+-                return "HIGH";
+-        }
+-    }
++/**
++ * Map ThinkingLevel to Google thinkingLevel enum.
++ * Unified for all Google models — no model ID branching.
++ */
++function mapThinkingLevel(effort) {
+     switch (effort) {
+         case "minimal":
+             return "MINIMAL";
+@@ -323,30 +299,8 @@ function getGemini3ThinkingLevel(effort, model) {
+             return "MEDIUM";
+         case "high":
+             return "HIGH";
++        default:
++            return "HIGH";
+     }
+ }
+-function getGoogleBudget(model, effort, customBudgets) {
+-    if (customBudgets?.[effort] !== undefined) {
+-        return customBudgets[effort];
+-    }
+-    if (model.id.includes("2.5-pro")) {
+-        const budgets = {
+-            minimal: 128,
+-            low: 2048,
+-            medium: 8192,
+-            high: 32768,
+-        };
+-        return budgets[effort];
+-    }
+-    if (model.id.includes("2.5-flash")) {
+-        const budgets = {
+-            minimal: 128,
+-            low: 2048,
+-            medium: 8192,
+-            high: 24576,
+-        };
+-        return budgets[effort];
+-    }
+-    return -1;
+-}
+ //# sourceMappingURL=google.js.map
