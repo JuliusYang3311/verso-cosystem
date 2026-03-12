@@ -75,17 +75,17 @@ const MODEL_CATALOG = {
     { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', reasoning: true, ctx: '200K', input: ['text', 'image'] }
   ],
   openai: [
-    { id: 'gpt-5.4', name: 'GPT-5.4', reasoning: true, ctx: '2M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-5.4-codex', name: 'GPT-5.4 Codex', reasoning: true, ctx: '2M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-5.3', name: 'GPT-5.3', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-5.2', name: 'GPT-5.2', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-5.1', name: 'GPT-5.1', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-5', name: 'GPT-5', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-5-codex', name: 'GPT-5 Codex', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio'] },
-    { id: 'gpt-4o', name: 'GPT-4o', reasoning: false, ctx: '128K', input: ['text', 'image', 'audio'] },
+    { id: 'gpt-5.4', name: 'GPT-5.4', reasoning: true, ctx: '2M', input: ['text', 'image'] },
+    { id: 'gpt-5.4-codex', name: 'GPT-5.4 Codex', reasoning: true, ctx: '2M', input: ['text', 'image'] },
+    { id: 'gpt-5.3', name: 'GPT-5.3', reasoning: true, ctx: '1M', input: ['text', 'image'] },
+    { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', reasoning: true, ctx: '1M', input: ['text', 'image'] },
+    { id: 'gpt-5.2', name: 'GPT-5.2', reasoning: true, ctx: '1M', input: ['text', 'image'] },
+    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', reasoning: true, ctx: '1M', input: ['text', 'image'] },
+    { id: 'gpt-5.1', name: 'GPT-5.1', reasoning: true, ctx: '1M', input: ['text', 'image'] },
+    { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', reasoning: true, ctx: '1M', input: ['text', 'image'] },
+    { id: 'gpt-5', name: 'GPT-5', reasoning: true, ctx: '1M', input: ['text', 'image'] },
+    { id: 'gpt-5-codex', name: 'GPT-5 Codex', reasoning: true, ctx: '1M', input: ['text', 'image'] },
+    { id: 'gpt-4o', name: 'GPT-4o', reasoning: false, ctx: '128K', input: ['text', 'image'] },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', reasoning: false, ctx: '128K', input: ['text', 'image'] },
     { id: 'o3', name: 'o3', reasoning: true, ctx: '200K', input: ['text', 'image'] },
     { id: 'o3-mini', name: 'o3 Mini', reasoning: true, ctx: '200K', input: ['text'] },
@@ -93,11 +93,11 @@ const MODEL_CATALOG = {
     { id: 'o1-mini', name: 'o1 Mini', reasoning: true, ctx: '128K', input: ['text'] }
   ],
   google: [
-    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio', 'video'] },
-    { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite (Preview)', reasoning: false, ctx: '1M', input: ['text', 'image', 'audio', 'video'] },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', reasoning: true, ctx: '2M', input: ['text', 'image', 'audio', 'video'] },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', reasoning: true, ctx: '1M', input: ['text', 'image', 'audio', 'video'] },
-    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', reasoning: false, ctx: '1M', input: ['text', 'image', 'audio', 'video'] }
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)', reasoning: true, ctx: '1M', input: ['text', 'image', 'video'] },
+    { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite (Preview)', reasoning: false, ctx: '1M', input: ['text', 'image', 'video'] },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', reasoning: true, ctx: '2M', input: ['text', 'image', 'video'] },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', reasoning: true, ctx: '1M', input: ['text', 'image', 'video'] },
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', reasoning: false, ctx: '1M', input: ['text', 'image', 'video'] }
   ],
   minimax: [
     { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', reasoning: true, ctx: '200K', input: ['text'] },
