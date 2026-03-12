@@ -67,7 +67,7 @@
         "to": "gateway/assets"
       },
       {
-        "from": "../../build-node-modules",
+        "from": "../../build-node-modules-win",
         "to": "gateway/node_modules"
       },
       {

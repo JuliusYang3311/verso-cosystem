@@ -110,7 +110,13 @@ function ensureGatewayConfig() {
     config = {};
   }
 
-  gatewayToken = resolveToken({ config, env: process.env, fs, crypto });
+  const { token, source } = resolveToken({
+    configToken: config?.gateway?.auth?.token,
+    envToken: process.env.VERSO_GATEWAY_TOKEN,
+    fs, crypto,
+  });
+  console.log('[Main] Gateway token source:', source);
+  gatewayToken = token;
   ensureGatewayFields(config, gatewayToken);
 
   if (!fs.existsSync(configDir)) {
@@ -227,7 +233,11 @@ function launchGateway(port) {
     console.log(`[Main] Gateway process exited with code ${code}`);
     gatewayProcess = null;
     if (code !== 0 && code !== null) {
-      const errMsg = stderrBuf.trim().slice(-500) || `exit code ${code}`;
+      // Capture both the error message (first line) and stack trace tail for diagnostics
+      const lines = stderrBuf.trim().split('\n');
+      const firstErr = lines.find(l => /error|Error|ERR!|MODULE_NOT_FOUND|Cannot find/i.test(l)) || lines[0] || '';
+      const tail = stderrBuf.trim().slice(-300);
+      const errMsg = (firstErr + '\n' + tail).slice(0, 800) || `exit code ${code}`;
       sendGatewayError(`Gateway crashed: ${errMsg}`);
     }
     if (!app.isQuitting) {

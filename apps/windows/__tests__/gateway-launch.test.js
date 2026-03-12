@@ -59,3 +59,36 @@ describe('Windows gateway launch configuration', () => {
     expect(mainJs).toContain("path.join(resolvedGatewayRoot, 'node.exe')");
   });
 });
+
+// ── resolveToken usage: must extract .token string, not pass whole object ───
+//
+// Bug: gatewayToken = resolveToken(...) assigned the {token, source} object.
+// ensureGatewayFields then set config.gateway.auth.token = {token, source},
+// causing: "gateway.auth.token: Invalid input: expected string, received object"
+
+describe('Windows main.js: resolveToken result handling', () => {
+  const windowsDir = path.resolve(import.meta.dirname, '..');
+  const mainJs = fs.readFileSync(path.join(windowsDir, 'main.js'), 'utf8');
+
+  it('destructures {token, source} from resolveToken (not assigned whole object)', () => {
+    // Must use destructuring so gatewayToken is a string, not {token, source}.
+    expect(mainJs).toMatch(/const\s*\{\s*token\s*,\s*source\s*\}\s*=\s*resolveToken\s*\(/);
+  });
+
+  it('passes configToken (not config object) to resolveToken', () => {
+    // gateway-config.cjs reads opts.configToken; passing opts.config is silently ignored.
+    expect(mainJs).toContain('configToken: config?.gateway?.auth?.token');
+    expect(mainJs).not.toMatch(/resolveToken\s*\(\s*\{\s*config\s*[,}]/);
+  });
+
+  it('passes envToken (not env object) to resolveToken', () => {
+    // gateway-config.cjs reads opts.envToken; passing opts.env is silently ignored.
+    expect(mainJs).toContain('envToken: process.env.VERSO_GATEWAY_TOKEN');
+  });
+
+  it('gatewayToken is assigned from destructured token, not resolveToken return', () => {
+    // After destructuring, must assign the string: gatewayToken = token
+    expect(mainJs).toContain('gatewayToken = token;');
+    expect(mainJs).not.toMatch(/gatewayToken\s*=\s*resolveToken\s*\(/);
+  });
+});

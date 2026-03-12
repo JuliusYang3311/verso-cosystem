@@ -12,6 +12,63 @@ NODE_VERSION="22.14.0"
 PLATFORM="win"
 ARCH="x64"
 
+# ─── fix_pnpm_dep_isolation ──────────────────────────────────────────────────
+# Problem: pnpm stores packages in .pnpm/<name>@<ver>/node_modules/<name>/ and
+# places isolated sibling deps (different version than hoisted) next to them in
+# .pnpm/<name>@<ver>/node_modules/<dep>/. When rsync -aL dereferences top-level
+# symlinks (node_modules/X → .pnpm/.../X), the copied dir has no node_modules/,
+# so Node.js falls back to the hoisted version instead of the isolated one.
+#
+# This function injects the correct isolated dep versions into the affected
+# package directories. Add new entries to FIXES when a new collision is detected.
+fix_pnpm_dep_isolation() {
+  local staging="$1"
+  echo ""
+  echo "=== Fixing pnpm dep isolation (hoisting collisions) ==="
+
+  # Format: "top-level-package : isolated-dep @ version"
+  # Each entry means: <package> uses <dep>@<version> (not the hoisted version),
+  # so we inject .pnpm/<dep>@<version>/node_modules/<dep> into <package>/node_modules/.
+  local -a FIXES=(
+    # proper-lockfile calls require('signal-exit') as a function at module top-level.
+    # pnpm isolates signal-exit@3.0.7 for it, but the hoisted copy is v4 (object).
+    "proper-lockfile : signal-exit @ 3.0.7"
+  )
+
+  local fixed=0
+  for fix in "${FIXES[@]}"; do
+    # Parse "pkg : dep @ ver" (spaces around delimiters are stripped)
+    local pkg dep ver
+    pkg=$(echo "$fix" | cut -d: -f1 | tr -d ' ')
+    dep=$(echo "$fix" | cut -d: -f2 | cut -d@ -f1 | tr -d ' ')
+    ver=$(echo "$fix" | cut -d: -f2 | cut -d@ -f2 | tr -d ' ')
+
+    local pkg_dir="$staging/$pkg"
+    local dep_src="$staging/.pnpm/${dep}@${ver}/node_modules/${dep}"
+    local dep_dst="$pkg_dir/node_modules/${dep}"
+
+    if [ ! -d "$pkg_dir" ]; then
+      echo "  SKIP $pkg (not in staging)"
+      continue
+    fi
+    if [ ! -d "$dep_src" ]; then
+      echo "  WARN $pkg: source $dep@$ver not found in .pnpm — skipping"
+      continue
+    fi
+    if [ -d "$dep_dst" ]; then
+      echo "  OK   $pkg/$dep already present"
+      continue
+    fi
+
+    mkdir -p "$pkg_dir/node_modules"
+    cp -r "$dep_src" "$dep_dst"
+    echo "  FIX  $pkg → injected $dep@$ver"
+    fixed=$((fixed + 1))
+  done
+
+  echo "Hoisting collision fixes: $fixed applied"
+}
+
 echo "=== Verso Desktop (Windows) Build Preparation ==="
 echo "Verso root: $VERSO_ROOT"
 echo "Windows dir: $WINDOWS_DIR"
@@ -46,8 +103,37 @@ GATEWAY_NODE="$VERSO_ROOT/node.exe"
 cp "$NODE_BIN" "$GATEWAY_NODE"
 echo "Copied Node.js binary to: $GATEWAY_NODE"
 
-# 3. Create lean production node_modules (same as electron build)
-STAGING="$VERSO_ROOT/build-node-modules"
+# 3. Ensure Windows-specific native modules are installed
+#    Building on macOS means only darwin binaries exist; we need win32-x64 variants.
+echo ""
+echo "=== Ensuring native modules for win-$ARCH ==="
+cd "$VERSO_ROOT"
+
+ensure_native_pkg() {
+  local pkg="$1"
+  local version="$2"
+  if ! ls -d "$VERSO_ROOT/node_modules/.pnpm/$(echo "$pkg" | tr '/' '+')@${version}"* &>/dev/null; then
+    echo "  Installing $pkg@$version..."
+    pnpm add -w "${pkg}@${version}" 2>/dev/null || echo "  Warning: Could not install $pkg"
+  else
+    echo "  OK: $pkg@$version"
+  fi
+}
+
+# sharp (image processing)
+SHARP_VERSION=$(node -e "const p=require('$VERSO_ROOT/package.json'); console.log(p.dependencies['sharp']?.replace('^','') || '0.34.5')" 2>/dev/null || echo "0.34.5")
+ensure_native_pkg "@img/sharp-win32-x64" "$SHARP_VERSION"
+ensure_native_pkg "@img/sharp-libvips-win32-x64" "$(node -e "try{const p=require('@img/sharp-darwin-x64/package.json');const v=Object.keys(p.optionalDependencies||{})[0];console.log(p.optionalDependencies[v]?.replace('^',''))}catch{console.log('1.2.4')}" 2>/dev/null || echo "1.2.4")"
+
+# sqlite-vec (vector search)
+SQLITE_VEC_VERSION=$(node -e "const p=require('$VERSO_ROOT/package.json'); console.log(p.dependencies['sqlite-vec'] || '0.1.7-alpha.2')" 2>/dev/null || echo "0.1.7-alpha.2")
+ensure_native_pkg "sqlite-vec-windows-x64" "$SQLITE_VEC_VERSION"
+
+echo "Done"
+
+# 4. Create lean production node_modules (Windows-specific: symlinks dereferenced)
+#    Uses a separate dir from macOS build to avoid conflicts when building in parallel.
+STAGING="$VERSO_ROOT/build-node-modules-win"
 if [ ! -d "$STAGING/.pnpm" ]; then
   echo ""
   echo "=== Creating lean production node_modules ==="
@@ -76,6 +162,7 @@ if [ ! -d "$STAGING/.pnpm" ]; then
     --exclude='.pnpm/node-llama-cpp@*'
     --exclude='.pnpm/@node-llama-cpp*'
     --exclude='.pnpm/openclaw@*'
+    --exclude='.pnpm/@openclaw*'
     --exclude='.pnpm/tsx@*'
     --exclude='.pnpm/lit@*'
     --exclude='.pnpm/@lit*'
@@ -86,15 +173,37 @@ if [ ! -d "$STAGING/.pnpm" ]; then
     --exclude='.pnpm/@esbuild*'
     --exclude='.pnpm/@cloudflare+workers-types@*'
     --exclude='.bin'
-    # Exclude non-Windows native binaries
+    # Exclude workspace self-references (circular symlinks: verso-custom → node_modules → .pnpm → ...)
+    --exclude='verso-custom'
+    --exclude='@openclaw'
+    --exclude='openclaw'
+    # macOS-only packages (crash on Windows)
+    --exclude='.pnpm/fsevents@*'
+    --exclude='fsevents'
+    --exclude='.pnpm/iconv-corefoundation@*'
+    --exclude='iconv-corefoundation'
+    --exclude='.pnpm/dmg-license@*'
+    --exclude='.pnpm/playwright@*'
+    # Exclude non-Windows native binaries (at .pnpm top level)
     --exclude='.pnpm/*darwin-arm64@*'
     --exclude='.pnpm/*darwin-x64@*'
     --exclude='.pnpm/*-linux-*'
     --exclude='.pnpm/*-android-*'
+    # Exclude macOS native binaries at any nesting depth (rsync -aL dereferences)
+    --exclude='*-darwin-arm64'
+    --exclude='*-darwin-x64'
+    --exclude='*darwin-universal'
+    --exclude='*.darwin-*.node'
+    --exclude='*mac-arm64*'
+    --exclude='*mac-x64*'
   )
 
   echo "Copying production node_modules (excluding dev packages)..."
-  rsync -a "${EXCLUDE_ARGS[@]}" "$VERSO_ROOT/node_modules/" "$STAGING/"
+  # -aL (not -a): dereference/follow symlinks so Windows gets real files.
+  # pnpm uses symlinks extensively; Windows NSIS extraction can't handle them.
+  # Workspace self-references (verso-custom, @openclaw) are excluded above to prevent
+  # infinite recursion when following symlinks.
+  rsync -aL "${EXCLUDE_ARGS[@]}" "$VERSO_ROOT/node_modules/" "$STAGING/"
 
   echo "Cleaning broken symlinks..."
   while true; do
@@ -132,10 +241,13 @@ if [ ! -d "$STAGING/.pnpm" ]; then
   echo "Original node_modules: $ORIG_SIZE"
   echo "Lean node_modules:     $LEAN_SIZE"
 else
-  echo "build-node-modules already exists, skipping."
+  echo "build-node-modules-win already exists, skipping rsync."
 fi
 
-# 3. Copy shared JS libs into app's lib/ directory
+# Always run dep isolation fixes (idempotent — safe to run on existing staging dir).
+fix_pnpm_dep_isolation "$STAGING"
+
+# 5. Copy shared JS libs into app's lib/ directory
 echo ""
 echo "=== Copying shared JS libs ==="
 SHARED_LIB="$WINDOWS_DIR/../shared/js/lib"
@@ -147,7 +259,7 @@ cp "$SHARED_LIB/gateway-config.cjs" "$APP_LIB/"
 cp "$SHARED_LIB/provider-utils.iife.js" "$APP_LIB/"
 echo "Copied shared libs to: $APP_LIB"
 
-# 4. Clean packaging-incompatible symlinks in extensions
+# 6. Clean packaging-incompatible symlinks in extensions
 echo ""
 echo "=== Cleaning packaging-incompatible symlinks in extensions ==="
 find "$VERSO_ROOT/extensions" -type l \( -name "openclaw" -o -name "verso" \) -delete 2>/dev/null || true
