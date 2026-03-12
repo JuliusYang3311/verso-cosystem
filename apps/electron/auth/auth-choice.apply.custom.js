@@ -64,7 +64,6 @@ async function promptModelList(prompter) {
             options: [
                 { label: "Text", value: "text" },
                 { label: "Image (Vision)", value: "image" },
-                { label: "Audio", value: "audio" },
                 { label: "Video", value: "video" },
             ],
             initialValues: ["text"],
