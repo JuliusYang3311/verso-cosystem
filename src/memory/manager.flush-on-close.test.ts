@@ -26,8 +26,8 @@ vi.mock("./embeddings.js", () => ({
     provider: {
       id: "mock",
       model: "mock-embed",
-      embedQuery: async () => new Array(8).fill(0.1),
-      embedBatch: async (texts: string[]) => texts.map(() => new Array(8).fill(0.1)),
+      embedQuery: async () => Array.from({ length: 8 }, () => 0.1),
+      embedBatch: async (texts: string[]) => texts.map(() => Array.from({ length: 8 }, () => 0.1)),
     },
   }),
 }));
