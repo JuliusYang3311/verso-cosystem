@@ -307,14 +307,3 @@ export async function broadcastOrchestrationEvent(
     });
   }
 }
-
-/**
- * Emit an orchestration event via a broadcast function.
- * The broadcast function is injected from the gateway context.
- */
-export function emitOrchestrationEvent(
-  broadcast: (event: string, payload: unknown) => void,
-  event: OrchestrationEvent,
-): void {
-  broadcast(event.type, event);
-}

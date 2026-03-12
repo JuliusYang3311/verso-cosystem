@@ -27,7 +27,6 @@ export type OrchestratorDaemonOptions = {
   agentId: string;
   agentSessionKey: string;
   orchestrationId: string;
-  maxWorkers?: number;
   maxFixCycles?: number;
   verifyCmd?: string;
   config?: VersoConfig;

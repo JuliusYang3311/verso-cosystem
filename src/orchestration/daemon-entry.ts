@@ -22,7 +22,6 @@ const workspaceDir = process.env.ORCHESTRATOR_WORKSPACE || process.cwd();
 const agentId = process.env.ORCHESTRATOR_AGENT_ID || "main";
 const agentSessionKey = process.env.ORCHESTRATOR_SESSION_KEY || `agent:${agentId}`;
 const orchestrationId = process.env.ORCHESTRATOR_ORCHESTRATION_ID;
-const maxWorkers = parseInt(process.env.ORCHESTRATOR_MAX_WORKERS || "4", 10);
 const maxFixCycles = parseInt(process.env.ORCHESTRATOR_MAX_FIX_CYCLES || "30", 10);
 const verifyCmd = process.env.ORCHESTRATOR_VERIFY_CMD || "";
 
@@ -35,7 +34,6 @@ logger.info("Orchestrator daemon starting", {
   orchestrationId,
   workspaceDir,
   agentId,
-  maxWorkers,
   maxFixCycles,
   gatewayPort: config.gateway?.port,
   gatewayMode: config.gateway?.mode,
@@ -75,7 +73,6 @@ runOrchestratorDaemon({
   agentId,
   agentSessionKey,
   orchestrationId,
-  maxWorkers,
   maxFixCycles,
   verifyCmd,
   config,

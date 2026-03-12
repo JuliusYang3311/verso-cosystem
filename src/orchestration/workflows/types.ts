@@ -13,8 +13,6 @@ export type WorkflowPhase = {
   specialization: WorkerSpecialization;
   /** Whether tasks in this phase can run in parallel */
   parallel: boolean;
-  /** Maximum number of parallel workers (if parallel=true) */
-  maxWorkers?: number;
   /** Template for subtask titles (can include {placeholders}) */
   subtaskTemplate: string;
   /** Default acceptance criteria for tasks in this phase */

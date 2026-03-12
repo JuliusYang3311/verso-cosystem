@@ -107,7 +107,6 @@ export type Orchestration = {
 
 export type OrchestrationConfig = {
   enabled?: boolean;
-  maxWorkers?: number;
   maxFixCycles?: number;
   maxOrchestrations?: number;
   verifyCmd?: string;
@@ -115,7 +114,6 @@ export type OrchestrationConfig = {
 
 export const ORCHESTRATION_DEFAULTS: Required<OrchestrationConfig> = {
   enabled: true,
-  maxWorkers: 4,
   maxFixCycles: 30,
   maxOrchestrations: 2,
   verifyCmd: "", // Empty = skip mechanical verification, rely on LLM acceptance criteria only

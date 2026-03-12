@@ -244,7 +244,6 @@ export async function startOrchestratorDaemon(
     const agentSessionKey = `agent:${agentId}:orch:${orchestrationId}`;
 
     // Get orchestration config
-    const maxWorkers = orchConfig?.maxWorkers ?? 4;
     const maxFixCycles = orchConfig?.maxFixCycles ?? 30;
     const verifyCmd = orchConfig?.verifyCmd ?? "";
 
@@ -270,7 +269,6 @@ export async function startOrchestratorDaemon(
         ORCHESTRATOR_WORKSPACE: workspace,
         ORCHESTRATOR_AGENT_ID: agentId,
         ORCHESTRATOR_SESSION_KEY: agentSessionKey,
-        ORCHESTRATOR_MAX_WORKERS: String(maxWorkers),
         ORCHESTRATOR_MAX_FIX_CYCLES: String(maxFixCycles),
         ORCHESTRATOR_VERIFY_CMD: verifyCmd,
         ORCHESTRATOR_ORCHESTRATION_ID: orchestrationId, // Pass orchestration ID

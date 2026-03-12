@@ -203,19 +203,6 @@ export async function listOrchestrations(): Promise<Orchestration[]> {
   return results.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
 }
 
-export async function updateOrchestration(
-  id: string,
-  updater: (orch: Orchestration) => void,
-): Promise<Orchestration | null> {
-  const orch = await loadOrchestration(id);
-  if (!orch) {
-    return null;
-  }
-  updater(orch);
-  await saveOrchestration(orch);
-  return orch;
-}
-
 export async function deleteOrchestration(id: string): Promise<boolean> {
   const filePath = orchestrationPath(id);
   if (!fs.existsSync(filePath)) {

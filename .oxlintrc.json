@@ -4,6 +4,7 @@
     "apps/desktop/**",
     "apps/macos/**",
     "src/app/**",
-    "src/canvas-host/a2ui/*.bundle.js"
+    "src/canvas-host/a2ui/*.bundle.js",
+    "build-node-modules-win/**"
   ]
 }

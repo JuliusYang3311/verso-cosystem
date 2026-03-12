@@ -5,7 +5,6 @@ import React, { useState, useEffect } from "react";
 export const GeneralSettings: React.FC = () => {
   const [theme, setTheme] = useState<"light" | "dark" | "auto">("auto");
   const [language, setLanguage] = useState("en");
-  const [maxWorkers, setMaxWorkers] = useState(4);
   const [maxFixCycles, setMaxFixCycles] = useState(3);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -26,9 +25,6 @@ export const GeneralSettings: React.FC = () => {
         }
         if ("orchestration" in config && typeof config.orchestration === "object") {
           const orch = config.orchestration as Record<string, unknown>;
-          if ("maxWorkers" in orch) {
-            setMaxWorkers(Number(orch.maxWorkers));
-          }
           if ("maxFixCycles" in orch) {
             setMaxFixCycles(Number(orch.maxFixCycles));
           }
@@ -59,7 +55,6 @@ export const GeneralSettings: React.FC = () => {
           typeof config.orchestration === "object"
             ? config.orchestration
             : {}),
-          maxWorkers,
           maxFixCycles,
         },
       };
@@ -117,22 +112,6 @@ export const GeneralSettings: React.FC = () => {
 
       <div className="settings-section">
         <h3>Orchestration</h3>
-        <div className="form-group">
-          <label htmlFor="maxWorkers">Max Parallel Workers</label>
-          <input
-            id="maxWorkers"
-            type="number"
-            min="1"
-            max="16"
-            value={maxWorkers}
-            onChange={(e) => setMaxWorkers(parseInt(e.target.value))}
-            className="input-field"
-          />
-          <span className="help-text">
-            Maximum number of parallel workers for orchestration tasks
-          </span>
-        </div>
-
         <div className="form-group">
           <label htmlFor="maxFixCycles">Max Fix Cycles</label>
           <input

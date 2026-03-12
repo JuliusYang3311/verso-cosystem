@@ -23,7 +23,6 @@ export const featureDevWorkflow: WorkflowTemplate = {
       name: "explore",
       specialization: "code-explorer",
       parallel: true,
-      maxWorkers: 2,
       subtaskTemplate: "Explore existing codebase: {aspect}",
       acceptanceCriteria: [
         "Identified all relevant files and entry points",
@@ -36,7 +35,6 @@ export const featureDevWorkflow: WorkflowTemplate = {
       name: "design",
       specialization: "code-architect",
       parallel: true,
-      maxWorkers: 2,
       dependsOn: ["explore"],
       subtaskTemplate: "Design architecture: {approach}",
       acceptanceCriteria: [
@@ -50,7 +48,6 @@ export const featureDevWorkflow: WorkflowTemplate = {
       name: "implement",
       specialization: "code-implementer",
       parallel: true,
-      maxWorkers: 4,
       dependsOn: ["design"],
       subtaskTemplate: "Implement: {component}",
       acceptanceCriteria: [
@@ -64,7 +61,6 @@ export const featureDevWorkflow: WorkflowTemplate = {
       name: "review",
       specialization: "code-reviewer",
       parallel: true,
-      maxWorkers: 3,
       dependsOn: ["implement"],
       subtaskTemplate: "Review: {aspect}",
       acceptanceCriteria: [

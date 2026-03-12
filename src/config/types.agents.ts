@@ -76,7 +76,6 @@ export type AgentConfig = {
   /** Multi-agent orchestration settings. */
   orchestration?: {
     enabled?: boolean;
-    maxWorkers?: number;
     maxFixCycles?: number;
     maxOrchestrations?: number;
     verifyCmd?: string;

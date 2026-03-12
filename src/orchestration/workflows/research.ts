@@ -18,7 +18,6 @@ export const researchWorkflow: WorkflowTemplate = {
       name: "gather",
       specialization: "researcher",
       parallel: true,
-      maxWorkers: 5,
       subtaskTemplate: "Research topic: {topic}",
       acceptanceCriteria: [
         "Comprehensive information gathered from multiple sources",

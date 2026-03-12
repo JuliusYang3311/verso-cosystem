@@ -20,7 +20,6 @@ export const refactorWorkflow: WorkflowTemplate = {
       name: "analyze",
       specialization: "code-explorer",
       parallel: true,
-      maxWorkers: 2,
       subtaskTemplate: "Analyze code: {area}",
       acceptanceCriteria: [
         "Current code structure documented",
@@ -46,7 +45,6 @@ export const refactorWorkflow: WorkflowTemplate = {
       name: "refactor",
       specialization: "code-implementer",
       parallel: true,
-      maxWorkers: 3,
       dependsOn: ["design"],
       subtaskTemplate: "Refactor: {component}",
       acceptanceCriteria: [
