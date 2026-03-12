@@ -17,6 +17,7 @@ import {
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
   createAgentSession,
+  DefaultResourceLoader,
   SessionManager,
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
@@ -123,7 +124,17 @@ export async function createVersoSession(
         : undefined,
   });
 
-  // Create the SDK session.
+  // Build a resource loader that wires the extension paths into the SDK.
+  // createAgentSession() only calls reload() on loaders it creates itself —
+  // when we supply one, we must call reload() explicitly before passing it in.
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: params.cwd,
+    agentDir: params.agentDir,
+    settingsManager,
+    additionalExtensionPaths: extensionPaths,
+  });
+  await resourceLoader.reload();
+
   const { session }: CreateAgentSessionResult = await createAgentSession({
     cwd: params.cwd,
     agentDir: params.agentDir,
@@ -135,6 +146,7 @@ export async function createVersoSession(
     customTools: params.customTools,
     sessionManager,
     settingsManager,
+    resourceLoader,
   });
 
   return { session, sessionManager, settingsManager, extensionPaths };
