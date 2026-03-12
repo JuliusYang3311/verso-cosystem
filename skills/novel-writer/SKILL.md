@@ -23,7 +23,7 @@ skills/novel-writer/
 ├── ts/                         # TypeScript source (built by tsdown → dist/skills/novel-writer/)
 │   ├── write-chapter.ts        # Autonomous engine (write + rewrite modes)
 │   ├── revert-memory.ts        # Memory rollback for rewrite mode
-│   ├── novel-memory.ts         # Isolated SQLite DBs, latent factors + greedy MMR search
+│   ├── novel-memory.ts         # Isolated SQLite DBs, 3-layer index (L0 tags / L1 sentences / L2 text), latent factor search + greedy MMR
 │   ├── context.ts              # Assemble full context (JSON memory + search results)
 │   ├── apply-patch.ts          # Apply patch + auto-index timeline + pre-patch snapshot
 │   ├── validate-patch.ts       # Validate patch safety (protected chars/keys, shrink guard)
@@ -69,13 +69,34 @@ skills/novel-writer/
 - Each project's memory is **completely isolated**. No cross-project contamination.
 - Timeline DB is **automatically re-indexed** every time `apply-patch.ts` runs.
 
-## Search: Latent Factors + Greedy MMR
+## 3-Layer Memory Architecture
+
+Matches verso's main memory system exactly:
+
+| Layer | Column         | Content                                                   | Used for                        |
+| ----- | -------------- | --------------------------------------------------------- | ------------------------------- |
+| L0    | `l0_tags`      | `{ factorId: score }` — chunk projected onto factor space | Coarse pre-filter at query time |
+| L1    | `l1_sentences` | MMR-selected key sentences (embedding + gap detection)    | Context injection               |
+| L2    | `chunks.text`  | Full chunk text                                           | Read on demand                  |
+
+**Indexing pipeline:**
+
+```
+content → chunkMarkdown()
+  → embed chunks
+  → L0: projectChunkToFactors() → l0_tags
+  → L1: splitSentences() + embedBatch + extractL1Sentences() → l1_sentences
+  → file-level vector = mean(chunk embeddings) → FILES_VECTOR_TABLE
+```
+
+## Search: Latent Factors + L0 Pre-filter + Greedy MMR
 
 Style and timeline search use the same retrieval pipeline as verso's main memory system:
 
-1. **Latent factor projection** — query is projected into a factor space (12 semantic dimensions), generating orthogonal sub-queries via MMR diversification
-2. **Parallel hybrid search** — each sub-query runs hierarchical search (file-level pre-filter → chunk-level vector + BM25)
-3. **Diversity pipeline** — all candidates are merged, deduplicated, threshold-filtered, then selected via greedy MMR to maximize marginal information gain
+1. **Latent factor projection** — query projected into factor space, generating orthogonal sub-queries via MMR diversification
+2. **L0 pre-filter** — each factor sub-query calls `getChunkIdsForFactor()` to restrict vector search to L0-matching chunks (`searchVectorFiltered`). Falls through to unfiltered search when no L0 matches exist.
+3. **Hybrid search** — vector + BM25 per sub-query (unfiltered path when no factor space)
+4. **Diversity pipeline** — all candidates merged, deduplicated, threshold-filtered, selected via greedy MMR
 
 Controlled by `context_params.json`: `latentFactorEnabled`, `factorActivationThreshold`, `factorMmrLambda`, `mmrLambda`, `baseThreshold`, `thresholdFloor`. When `latentFactorEnabled: false`, falls back to single-query hybrid search.
 
@@ -279,7 +300,13 @@ Every chapter produces a patch JSON with keys: `characters`, `world_bible`, `tim
 
 ## Embedding
 
-Provider resolved from verso config (`~/.verso/verso.json`): OpenAI, Gemini, Voyage, or local models. Embedding cache is per-DB. LLM extraction uses `agents.defaults.model`.
+Provider resolved from verso config (`~/.verso/verso.json`): OpenAI, Gemini, Voyage, or local models. Embedding cache is per-DB.
+
+- **Chunk embedding** — used for vector search and as L1 centroid
+- **Sentence embedding** — all sentences across all chunks in one batch call; used by `extractL1Sentences()` for L1 MMR selection
+- **File-level embedding** — mean of chunk embeddings; stored in `FILES_VECTOR_TABLE` for file-level vector pre-filter
+
+LLM extraction (patch generation) uses `agents.defaults.model`.
 
 ## References
 

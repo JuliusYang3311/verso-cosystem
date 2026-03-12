@@ -1,9 +1,26 @@
 /**
  * novel-memory.ts
  * Core memory bridge for novel-writer skill.
- * Creates isolated SQLite DBs with verso's full memory schema
- * (files/chunks/vec/fts/L0/L1/embedding_cache) and exposes
- * index + search operations that reuse verso's primitives.
+ *
+ * 3-layer architecture (mirrors main memory system):
+ *   L0 (l0_tags):      factor projection scores per chunk — coarse pre-filter at query time
+ *   L1 (l1_sentences): extractive key sentences (MMR + gap detection) — context injection
+ *   L2 (chunks.text):  full chunk text — read on demand via direct SQL
+ *
+ * Indexing pipeline:
+ *   content → chunkMarkdown()
+ *     → embed chunks
+ *     → L0: projectChunkToFactors()  → l0_tags { factorId: score }
+ *     → L1: splitSentences() + embedBatch + extractL1Sentences() → l1_sentences
+ *     → INSERT INTO chunks (l0_tags, l1_sentences, ...)
+ *     → file-level vector = mean(chunk embeddings) → FILES_VECTOR_TABLE
+ *
+ * Search pipeline:
+ *   query → embed
+ *     → if latent factors: queryToSubqueries()
+ *         → per factor: getChunkIdsForFactor() (L0 filter) + searchVectorFiltered()
+ *     → else: searchVector() (unfiltered)
+ *     → merge + dedup → applyDiversityPipeline (MMR)
  */
 
 import type { DatabaseSync } from "node:sqlite";
@@ -22,31 +39,36 @@ import { loadConfig } from "../../../src/config/io.js";
 import { applyDiversityPipeline, type DiverseChunk } from "../../../src/memory/chunk-diversity.js";
 import { createEmbeddingProvider } from "../../../src/memory/embeddings.js";
 import { buildFtsQuery, mergeHybridResults } from "../../../src/memory/hybrid.js";
+import { chunkMarkdown, hashText, ensureDir } from "../../../src/memory/internal.js";
 import {
-  chunkMarkdown,
-  generateL0Abstract,
-  generateFileL0,
-  hashText,
-  ensureDir,
-} from "../../../src/memory/internal.js";
-import { loadFactorSpace, queryToSubqueries } from "../../../src/memory/latent-factors.js";
+  loadFactorSpace,
+  projectChunkToFactors,
+  queryToSubqueries,
+} from "../../../src/memory/latent-factors.js";
 import {
   createBatchFailureTracker,
   runBatchWithFallback,
 } from "../../../src/memory/manager-batch-failure.js";
 import {
+  embedBatchWithRetry,
   embedChunksInBatches,
   embedQueryWithTimeout,
   computeProviderKey,
   withTimeout,
 } from "../../../src/memory/manager-embeddings.js";
-import { searchVector, searchKeyword } from "../../../src/memory/manager-search.js";
+import { extractL1Sentences, splitSentences } from "../../../src/memory/manager-l1-extractive.js";
 import {
-  VECTOR_TABLE,
+  getChunkIdsForFactor,
+  searchKeyword,
+  searchVector,
+  searchVectorFiltered,
+} from "../../../src/memory/manager-search.js";
+import {
   FILES_VECTOR_TABLE,
-  loadVectorExtension,
-  ensureVectorTable,
+  VECTOR_TABLE,
   ensureFileVectorTable,
+  ensureVectorTable,
+  loadVectorExtension,
   vectorToBlob,
 } from "../../../src/memory/manager-vectors.js";
 import { ensureMemoryIndexSchema } from "../../../src/memory/memory-schema.js";
@@ -75,6 +97,11 @@ export type NovelMemoryConfig = {
   vectorExtensionPath?: string;
   ftsEnabled?: boolean;
   cacheEnabled?: boolean;
+  /**
+   * Injected provider result for tests — bypasses resolveEmbeddingProvider().
+   * Do not use in production.
+   */
+  _providerForTest?: EmbeddingProviderResult;
 };
 
 /** Query settings resolved from verso config, matching main memory's defaults. */
@@ -109,8 +136,6 @@ export class NovelMemoryStore {
   private vectorReady: Promise<boolean> | null = null;
   private fileVectorTableReady = false;
   private fts: { enabled: boolean; available: boolean };
-  private filesFts: { available: boolean };
-  private cache: { enabled: boolean };
   private source: string;
   private chunking: { tokens: number; overlap: number };
   private batchFailureTracker;
@@ -121,7 +146,6 @@ export class NovelMemoryStore {
     providerResult: EmbeddingProviderResult;
     config: NovelMemoryConfig;
     ftsAvailable: boolean;
-    filesFtsAvailable: boolean;
     querySettings: NovelQuerySettings;
   }) {
     this.db = params.db;
@@ -134,12 +158,10 @@ export class NovelMemoryStore {
     );
     this.source = params.config.source;
     this.chunking = params.config.chunking ?? { tokens: 400, overlap: 80 };
-    this.cache = { enabled: params.config.cacheEnabled !== false };
     this.fts = {
       enabled: params.config.ftsEnabled !== false,
       available: params.ftsAvailable,
     };
-    this.filesFts = { available: params.filesFtsAvailable };
     this.vector = {
       enabled: params.config.vectorEnabled !== false,
       available: null,
@@ -158,14 +180,14 @@ export class NovelMemoryStore {
       allowExtension: config.vectorEnabled !== false,
     });
 
-    const { ftsAvailable, filesFtsAvailable } = ensureMemoryIndexSchema({
+    const { ftsAvailable } = ensureMemoryIndexSchema({
       db,
       embeddingCacheTable: EMBEDDING_CACHE_TABLE,
       ftsTable: FTS_TABLE,
       ftsEnabled: config.ftsEnabled !== false,
     });
 
-    const providerResult = await resolveEmbeddingProvider();
+    const providerResult = config._providerForTest ?? (await resolveEmbeddingProvider());
     const querySettings = resolveQuerySettings();
 
     const store = new NovelMemoryStore({
@@ -173,11 +195,9 @@ export class NovelMemoryStore {
       providerResult,
       config,
       ftsAvailable,
-      filesFtsAvailable,
       querySettings,
     });
 
-    // Read existing meta for vector dims
     const meta = store.readMeta();
     if (meta?.vectorDims) {
       store.vector.dims = meta.vectorDims;
@@ -188,19 +208,19 @@ export class NovelMemoryStore {
 
   /**
    * Index a piece of content (style chunk, timeline entry, etc.) as a virtual "file".
-   * The content is chunked, embedded, and stored with L0 abstracts.
+   *
+   * Produces:
+   *   - l0_tags: factor projection scores (empty {} when no factor space)
+   *   - l1_sentences: MMR-selected key sentences (fallback: first 3 sentences)
+   *   - l0_embedding on files: mean of chunk embeddings (for file-level vector search)
    */
   async indexContent(params: {
-    /** Virtual path identifier (e.g. "style/author-chapter-1" or "timeline/entry-42") */
     virtualPath: string;
-    /** The text content to index */
     content: string;
-    /** Force re-index even if hash matches */
     force?: boolean;
   }): Promise<{ chunks: number; skipped: boolean }> {
     const contentHash = hashText(params.content);
 
-    // Check if already indexed with same hash
     if (!params.force) {
       const existing = this.db
         .prepare(`SELECT hash FROM files WHERE path = ? AND source = ?`)
@@ -218,20 +238,44 @@ export class NovelMemoryStore {
     }
 
     const ctx = this.buildEmbeddingContext();
+
+    // 1. Embed chunks
     const embeddings = await embedChunksInBatches(ctx, chunks);
     const sample = embeddings.find((e) => e.length > 0);
     if (!sample) {
-      console.error(
-        `[novel-memory] embedChunksInBatches returned no vectors for ${chunks.length} chunks — indexing with FTS only`,
-      );
+      console.error(`[novel-memory] no chunk embeddings for ${params.virtualPath} — FTS only`);
     }
     const vectorReady = sample ? await this.ensureVectorReady(sample.length) : false;
     const now = Date.now();
 
-    // Generate L0 abstracts
-    const chunkL0s = chunks.map((c) => generateL0Abstract(c));
+    // 2. Load factor space for L0 tags (non-fatal — graceful empty fallback)
+    let factorSpace: Awaited<ReturnType<typeof loadFactorSpace>> | null = null;
+    try {
+      const space = await loadFactorSpace();
+      if (space.factors.length > 0) factorSpace = space;
+    } catch {
+      // no factor space available — l0_tags will be {}
+    }
 
-    // Clean old data for this path
+    // 3. Batch-embed all sentences across all chunks in one call (minimises round-trips)
+    const chunkSentences = chunks.map((c) => splitSentences(c.text));
+    const allSentenceTexts = chunkSentences.flatMap((ss) => ss.map((s) => s.text));
+    const sentenceOffsets: number[] = [];
+    let runningOffset = 0;
+    for (const ss of chunkSentences) {
+      sentenceOffsets.push(runningOffset);
+      runningOffset += ss.length;
+    }
+    let allSentenceEmbeddings: number[][] = [];
+    if (allSentenceTexts.length > 0) {
+      try {
+        allSentenceEmbeddings = await embedBatchWithRetry(ctx, allSentenceTexts);
+      } catch {
+        // non-fatal — l1_sentences will fall back to first 3 sentences
+      }
+    }
+
+    // 4. Clean old data for this path
     if (vectorReady) {
       try {
         this.db
@@ -252,23 +296,39 @@ export class NovelMemoryStore {
       .prepare(`DELETE FROM chunks WHERE path = ? AND source = ?`)
       .run(params.virtualPath, this.source);
 
-    // Insert chunks
+    // 5. Insert chunks with L0 tags + L1 sentences
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]!;
       const embedding = embeddings[i] ?? [];
-      const l0 = chunkL0s[i] ?? "";
+
+      // L0: factor projection tags { factorId: score }
+      const l0Tags =
+        factorSpace && embedding.length > 0
+          ? projectChunkToFactors(embedding, factorSpace, this.provider.model)
+          : {};
+
+      // L1: MMR-selected key sentences
+      const sentences = chunkSentences[i] ?? [];
+      const off = sentenceOffsets[i] ?? 0;
+      const sentEmbs = allSentenceEmbeddings.slice(off, off + sentences.length);
+      const centroid = embedding.length > 0 ? embedding : (sentEmbs[0] ?? []);
+      const l1Selected =
+        sentences.length > 0 && sentEmbs.length === sentences.length
+          ? extractL1Sentences(sentences, sentEmbs, centroid)
+          : sentences.slice(0, 3);
+
       const id = hashText(
         `${this.source}:${params.virtualPath}:${chunk.startLine}:${chunk.endLine}:${chunk.hash}:${this.provider.model}`,
       );
 
       this.db
         .prepare(
-          `INSERT INTO chunks (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at, l0_abstract)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO chunks (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at, l0_tags, l1_sentences)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              hash=excluded.hash, model=excluded.model, text=excluded.text,
              embedding=excluded.embedding, updated_at=excluded.updated_at,
-             l0_abstract=excluded.l0_abstract`,
+             l0_tags=excluded.l0_tags, l1_sentences=excluded.l1_sentences`,
         )
         .run(
           id,
@@ -281,7 +341,8 @@ export class NovelMemoryStore {
           chunk.text,
           JSON.stringify(embedding),
           now,
-          l0,
+          JSON.stringify(l0Tags),
+          JSON.stringify(l1Selected),
         );
 
       if (vectorReady && embedding.length > 0) {
@@ -310,51 +371,35 @@ export class NovelMemoryStore {
       }
     }
 
-    // File-level L0
-    const fileL0 = generateFileL0(chunkL0s);
-    let fileL0Embedding: number[] = [];
-    if (fileL0 && vectorReady && sample) {
-      try {
-        fileL0Embedding = await embedQueryWithTimeout(ctx, fileL0);
-      } catch {}
-      if (fileL0Embedding.length > 0) {
-        if (!this.fileVectorTableReady) {
-          this.fileVectorTableReady = ensureFileVectorTable(this.db, fileL0Embedding.length);
-        }
-        if (this.fileVectorTableReady) {
-          try {
-            this.db
-              .prepare(`DELETE FROM ${FILES_VECTOR_TABLE} WHERE path = ?`)
-              .run(params.virtualPath);
-          } catch {}
-          try {
-            this.db
-              .prepare(`INSERT INTO ${FILES_VECTOR_TABLE} (path, embedding) VALUES (?, ?)`)
-              .run(params.virtualPath, vectorToBlob(fileL0Embedding));
-          } catch {}
-        }
+    // 6. File-level vector = mean of chunk embeddings (replaces text-abstract approach)
+    const validEmbeddings = embeddings.filter((e) => e.length > 0);
+    const fileEmbedding = computeMeanVector(validEmbeddings);
+
+    if (fileEmbedding.length > 0 && vectorReady) {
+      if (!this.fileVectorTableReady) {
+        this.fileVectorTableReady = ensureFileVectorTable(this.db, fileEmbedding.length);
+      }
+      if (this.fileVectorTableReady) {
+        try {
+          this.db
+            .prepare(`DELETE FROM ${FILES_VECTOR_TABLE} WHERE path = ?`)
+            .run(params.virtualPath);
+        } catch {}
+        try {
+          this.db
+            .prepare(`INSERT INTO ${FILES_VECTOR_TABLE} (path, embedding) VALUES (?, ?)`)
+            .run(params.virtualPath, vectorToBlob(fileEmbedding));
+        } catch {}
       }
     }
 
-    // Write to files_fts
-    if (fileL0 && this.filesFts.available) {
-      try {
-        this.db.prepare(`DELETE FROM files_fts WHERE path = ?`).run(params.virtualPath);
-      } catch {}
-      try {
-        this.db
-          .prepare(`INSERT INTO files_fts (l0_abstract, path, source) VALUES (?, ?, ?)`)
-          .run(fileL0, params.virtualPath, this.source);
-      } catch {}
-    }
-
-    // Upsert file record
+    // Upsert file record (l0_embedding = mean of chunk embeddings; no l0_abstract)
     this.db
       .prepare(
-        `INSERT INTO files (path, source, hash, mtime, size, l0_abstract, l0_embedding) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO files (path, source, hash, mtime, size, l0_embedding) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(path) DO UPDATE SET
            source=excluded.source, hash=excluded.hash, mtime=excluded.mtime,
-           size=excluded.size, l0_abstract=excluded.l0_abstract, l0_embedding=excluded.l0_embedding`,
+           size=excluded.size, l0_embedding=excluded.l0_embedding`,
       )
       .run(
         params.virtualPath,
@@ -362,11 +407,9 @@ export class NovelMemoryStore {
         contentHash,
         now,
         params.content.length,
-        fileL0,
-        JSON.stringify(fileL0Embedding),
+        JSON.stringify(fileEmbedding),
       );
 
-    // Write meta
     this.writeMeta({
       model: this.provider.model,
       provider: this.provider.id,
@@ -380,15 +423,11 @@ export class NovelMemoryStore {
   }
 
   /**
-   * Search the index using hierarchical search with hybrid (vector + FTS),
-   * latent factor multi-dimensional sub-queries, and greedy MMR diversity selection.
+   * Search the index using hybrid (vector + FTS), latent factor sub-queries,
+   * and greedy MMR diversity selection.
    *
-   * Pipeline:
-   *   1. Embed query
-   *   2. If latent factors enabled: project query → factor space → generate sub-queries
-   *   3. Run hierarchical/flat hybrid search per sub-query (or single query if factors disabled)
-   *   4. Merge all candidates → dedup → threshold filter → greedy MMR selection
-   *   5. Return top results with maximized marginal information gain
+   * When latent factors are active, each factor sub-query uses L0 pre-filtering
+   * (getChunkIdsForFactor → searchVectorFiltered) before fine vector search.
    */
   async search(params: { query: string }): Promise<SearchRowResult[]> {
     const query = params.query.trim();
@@ -404,20 +443,16 @@ export class NovelMemoryStore {
     try {
       queryVec = await embedQueryWithTimeout(ctx, query);
     } catch (err) {
-      console.error(
-        `[novel-memory] query embedding failed, falling back to FTS-only: ${String(err)}`,
-      );
+      console.error(`[novel-memory] query embed failed, falling back to FTS: ${String(err)}`);
       queryVec = [];
     }
     const hasVector = queryVec.some((v) => v !== 0);
 
-    // Load context params for MMR + latent factor settings
     const ctxParams = await loadContextParams();
     const mmrLambda = ctxParams.mmrLambda ?? 0.6;
     const threshold = ctxParams.baseThreshold;
     const thresholdFloor = ctxParams.thresholdFloor;
 
-    // Determine sub-queries via latent factor projection
     let queries: Array<{ query: string; queryVec: number[]; factorId?: string }> = [
       { query, queryVec },
     ];
@@ -426,18 +461,16 @@ export class NovelMemoryStore {
       try {
         const space = await loadFactorSpace();
         if (space.factors.length > 0) {
-          const providerModel = this.provider.model;
           const { subqueries } = queryToSubqueries({
             queryVec,
             queryText: query,
             space,
-            providerModel,
+            providerModel: this.provider.model,
             useCase: "novel",
             threshold: ctxParams.factorActivationThreshold ?? 0.35,
             mmrLambda: ctxParams.factorMmrLambda ?? 0.7,
           });
           if (subqueries.length > 0) {
-            // Embed sub-queries and run them alongside the original
             const subVecs = await Promise.all(
               subqueries.map((sq) => embedQueryWithTimeout(ctx, sq.subquery).catch(() => queryVec)),
             );
@@ -452,17 +485,22 @@ export class NovelMemoryStore {
           }
         }
       } catch {
-        // Latent factor failure is non-fatal — continue with original query
+        // latent factor failure is non-fatal
       }
     }
 
-    // Run searches for all queries in parallel, collect all candidates
     const allCandidates: DiverseChunk[] = [];
     await Promise.all(
       queries.map(async (q) => {
-        const results = await this.runSingleSearch(q.query, q.queryVec, candidates, ctxParams);
+        const results = await this.runSingleSearch(
+          q.query,
+          q.queryVec,
+          candidates,
+          q.factorId,
+          ctxParams,
+        );
         for (const r of results) {
-          const chunk: DiverseChunk = {
+          allCandidates.push({
             key: `${r.path}:${r.startLine}`,
             path: r.path,
             startLine: r.startLine,
@@ -472,25 +510,21 @@ export class NovelMemoryStore {
             source: r.source ?? this.source,
             timestamp: r.timestamp,
             factorsUsed: q.factorId ? [{ id: q.factorId, score: r.score }] : undefined,
-          };
-          allCandidates.push(chunk);
+          });
         }
       }),
     );
 
     if (allCandidates.length === 0) return [];
 
-    // Apply diversity pipeline: dedup → threshold → greedy MMR
-    const budgetTokens = qs.maxResults * 200; // generous budget for novel search
     const { chunks: diverseResults } = applyDiversityPipeline({
       chunks: allCandidates,
-      budgetTokens,
+      budgetTokens: qs.maxResults * 200,
       threshold,
       thresholdFloor,
       mmrLambda,
     });
 
-    // Convert back to SearchRowResult
     return diverseResults.slice(0, qs.maxResults).map((c) => ({
       id: c.id ?? `${c.path}:${c.startLine}`,
       path: c.path,
@@ -503,80 +537,6 @@ export class NovelMemoryStore {
       l0Tags: c.l0Tags,
       l1Sentences: c.l1Sentences ? JSON.stringify(c.l1Sentences) : undefined,
     })) as SearchRowResult[];
-  }
-
-  /**
-   * Run a single hybrid search (hierarchical → flat fallback) for one query.
-   * Extracted from the old search() to support multi-query latent factor pipeline.
-   */
-  private async runSingleSearch(
-    query: string,
-    queryVec: number[],
-    limit: number,
-    _ctxParams: ContextParams = DEFAULT_CONTEXT_PARAMS,
-  ): Promise<SearchRowResult[]> {
-    const hasVector = queryVec.some((v) => v !== 0);
-    const sourceFilter = this.buildSourceFilter();
-    const sourceFilterAliased = this.buildSourceFilter("c");
-
-    // Vector search
-    const vectorResults = hasVector
-      ? await searchVector({
-          db: this.db,
-          vectorTable: VECTOR_TABLE,
-          providerModel: this.provider.model,
-          queryVec,
-          limit,
-          snippetMaxChars: SNIPPET_MAX_CHARS,
-          ensureVectorReady: async (dims) => this.ensureVectorReady(dims),
-          sourceFilterVec: sourceFilterAliased,
-          sourceFilterChunks: sourceFilter,
-        }).catch(() => [])
-      : [];
-
-    if (!this.fts.available) {
-      return vectorResults;
-    }
-
-    const keywordResults = await searchKeyword({
-      db: this.db,
-      ftsTable: FTS_TABLE,
-      providerModel: this.provider.model,
-      query,
-      limit,
-      snippetMaxChars: SNIPPET_MAX_CHARS,
-      sourceFilter,
-      buildFtsQuery: (raw) => buildFtsQuery(raw),
-      bm25RankToScore: (rank) => -rank, // negate so softmax ranks correctly
-    }).catch(() => []);
-
-    if (keywordResults.length === 0) {
-      return vectorResults;
-    }
-
-    return mergeHybridResults({
-      vector: vectorResults.map((r) => ({
-        id: r.id,
-        path: r.path,
-        startLine: r.startLine,
-        endLine: r.endLine,
-        source: r.source,
-        snippet: r.snippet,
-        vectorScore: r.score,
-        timestamp: r.timestamp,
-      })),
-      keyword: keywordResults.map((r) => ({
-        id: r.id,
-        path: r.path,
-        startLine: r.startLine,
-        endLine: r.endLine,
-        source: r.source,
-        snippet: r.snippet,
-        textScore: r.textScore,
-      })),
-      vectorWeight: this.querySettings.hybrid.vectorWeight,
-      textWeight: this.querySettings.hybrid.textWeight,
-    }) as SearchRowResult[];
   }
 
   /** Get stats about the index. */
@@ -619,9 +579,6 @@ export class NovelMemoryStore {
     try {
       this.db.prepare(`DELETE FROM ${FILES_VECTOR_TABLE} WHERE path = ?`).run(virtualPath);
     } catch {}
-    try {
-      this.db.prepare(`DELETE FROM files_fts WHERE path = ?`).run(virtualPath);
-    } catch {}
   }
 
   close(): void {
@@ -629,6 +586,106 @@ export class NovelMemoryStore {
   }
 
   // --- Private helpers ---
+
+  /**
+   * Run one hybrid search.
+   *
+   * When factorId is set, restricts vector search to L0-matching chunks via
+   * getChunkIdsForFactor + searchVectorFiltered. Falls through to unfiltered
+   * search when the factor has no matching chunks in the index.
+   */
+  private async runSingleSearch(
+    query: string,
+    queryVec: number[],
+    limit: number,
+    factorId: string | undefined,
+    _ctxParams: ContextParams = DEFAULT_CONTEXT_PARAMS,
+  ): Promise<SearchRowResult[]> {
+    const hasVector = queryVec.some((v) => v !== 0);
+    const sourceFilter = this.buildSourceFilter();
+    const sourceFilterAliased = this.buildSourceFilter("c");
+
+    // L0-filtered path: use factor tags as pre-filter when factorId is known
+    if (factorId && hasVector) {
+      const l0Matches = getChunkIdsForFactor({
+        db: this.db,
+        providerModel: this.provider.model,
+        factorId,
+        sourceFilter,
+      });
+      if (l0Matches.length > 0) {
+        const vectorResults = await searchVectorFiltered({
+          db: this.db,
+          vectorTable: VECTOR_TABLE,
+          providerModel: this.provider.model,
+          queryVec,
+          chunkIds: l0Matches.map((m) => m.id),
+          limit,
+          snippetMaxChars: SNIPPET_MAX_CHARS,
+          ensureVectorReady: async (dims) => this.ensureVectorReady(dims),
+          sourceFilterVec: sourceFilterAliased,
+          sourceFilterChunks: sourceFilter,
+        }).catch(() => []);
+        if (vectorResults.length > 0) return vectorResults;
+        // fallthrough: no L0-filtered results → unfiltered
+      }
+    }
+
+    // Unfiltered vector search
+    const vectorResults = hasVector
+      ? await searchVector({
+          db: this.db,
+          vectorTable: VECTOR_TABLE,
+          providerModel: this.provider.model,
+          queryVec,
+          limit,
+          snippetMaxChars: SNIPPET_MAX_CHARS,
+          ensureVectorReady: async (dims) => this.ensureVectorReady(dims),
+          sourceFilterVec: sourceFilterAliased,
+          sourceFilterChunks: sourceFilter,
+        }).catch(() => [])
+      : [];
+
+    if (!this.fts.available) return vectorResults;
+
+    const keywordResults = await searchKeyword({
+      db: this.db,
+      ftsTable: FTS_TABLE,
+      providerModel: this.provider.model,
+      query,
+      limit,
+      snippetMaxChars: SNIPPET_MAX_CHARS,
+      sourceFilter,
+      buildFtsQuery: (raw) => buildFtsQuery(raw),
+      bm25RankToScore: (rank) => -rank,
+    }).catch(() => []);
+
+    if (keywordResults.length === 0) return vectorResults;
+
+    return mergeHybridResults({
+      vector: vectorResults.map((r) => ({
+        id: r.id,
+        path: r.path,
+        startLine: r.startLine,
+        endLine: r.endLine,
+        source: r.source,
+        snippet: r.snippet,
+        vectorScore: r.score,
+        timestamp: r.timestamp,
+      })),
+      keyword: keywordResults.map((r) => ({
+        id: r.id,
+        path: r.path,
+        startLine: r.startLine,
+        endLine: r.endLine,
+        source: r.source,
+        snippet: r.snippet,
+        textScore: r.textScore,
+      })),
+      vectorWeight: this.querySettings.hybrid.vectorWeight,
+      textWeight: this.querySettings.hybrid.textWeight,
+    }) as SearchRowResult[];
+  }
 
   private buildSourceFilter(alias?: string): { sql: string; params: string[] } {
     const col = alias ? `${alias}.source` : "source";
@@ -640,7 +697,7 @@ export class NovelMemoryStore {
       db: this.db,
       provider: this.provider,
       providerKey: this.providerKey,
-      cache: this.cache,
+      cache: { enabled: true },
       cacheTable: EMBEDDING_CACHE_TABLE,
       batch: {
         enabled: false,
@@ -705,24 +762,31 @@ export class NovelMemoryStore {
   }
 }
 
-// --- Embedding provider resolution ---
+// --- Private utilities ---
+
+/** Compute element-wise mean of a set of equal-length vectors. */
+function computeMeanVector(vecs: number[][]): number[] {
+  if (vecs.length === 0) return [];
+  const dims = vecs[0]!.length;
+  if (dims === 0) return [];
+  const mean = Array.from<number>({ length: dims }).fill(0);
+  for (const v of vecs) {
+    for (let i = 0; i < dims; i++) mean[i]! += v[i]!;
+  }
+  for (let i = 0; i < dims; i++) mean[i]! /= vecs.length;
+  return mean;
+}
+
+// --- Provider & config resolution ---
 
 async function resolveEmbeddingProvider(): Promise<EmbeddingProviderResult> {
   const cfg = loadVersoConfig();
-
-  // Try to get provider settings from verso config
   const memSearch = cfg?.agents?.defaults?.memorySearch;
   const provider = memSearch?.provider ?? "auto";
   const model = memSearch?.model ?? "";
-  // Default fallback to "local" instead of "none" — with "auto" + "none",
-  // all remote providers fail silently when config is empty, leaving no provider.
   const fallback = memSearch?.fallback ?? "local";
   const remote = memSearch?.remote;
   const local = memSearch?.local;
-
-  // Resolve agentDir the same way the main memory manager does —
-  // without this, auth resolution falls back to the default agent dir
-  // and custom provider keys (OAuth, newapi, etc.) are not found.
   const agentDir = resolveAgentDir(cfg, "main");
 
   return createEmbeddingProvider({
