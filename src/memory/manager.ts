@@ -19,7 +19,6 @@ import { resolveAgentDir, resolveAgentWorkspaceDir } from "../agents/agent-scope
 import { loadContextParams } from "../agents/dynamic-context.js";
 import { resolveMemorySearchConfig } from "../agents/memory-search.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { onSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import { resolveUserPath } from "../utils.js";
 import { DEFAULT_GEMINI_EMBEDDING_MODEL } from "./embeddings-gemini.js";
 import { DEFAULT_OPENAI_EMBEDDING_MODEL } from "./embeddings-openai.js";
@@ -80,18 +79,6 @@ import {
   type SearchRowResult,
 } from "./manager-search.js";
 import {
-  type SessionDeltaState,
-  resetSessionDelta,
-  processSessionDeltaBatch,
-} from "./manager-session-delta.js";
-import {
-  type SessionFileEntry,
-  listSessionFiles,
-  sessionPathForFile,
-  buildSessionEntry,
-  isSessionFileForAgent,
-} from "./manager-session-files.js";
-import {
   type VectorState,
   VECTOR_TABLE,
   FILES_VECTOR_TABLE,
@@ -124,7 +111,6 @@ const META_KEY = "memory_index_meta_v1";
 const SNIPPET_MAX_CHARS = 700;
 const FTS_TABLE = "chunks_fts";
 const EMBEDDING_CACHE_TABLE = "embedding_cache";
-const SESSION_DIRTY_DEBOUNCE_MS = 5000;
 const EMBEDDING_INDEX_CONCURRENCY = 4;
 const VECTOR_LOAD_TIMEOUT_MS = 30_000;
 
@@ -180,16 +166,11 @@ export class MemoryIndexManager implements MemorySearchManager {
   private vectorReady: Promise<boolean> | null = null;
   private watcher: FSWatcher | null = null;
   private watchTimer: NodeJS.Timeout | null = null;
-  private sessionWatchTimer: NodeJS.Timeout | null = null;
-  private sessionUnsubscribe: (() => void) | null = null;
   private intervalTimer: NodeJS.Timeout | null = null;
   private closed = false;
   private dirty = false;
-  private sessionsDirty = false;
-  private sessionsDirtyFiles = new Set<string>();
-  private sessionPendingFiles = new Set<string>();
-  private sessionDeltas = new Map<string, SessionDeltaState>();
-  private sessionWarm = new Set<string>();
+  /** In-memory buffers for direct session turn indexing (no file I/O). */
+  private sessionBuffers = new Map<string, { bytes: number; turns: number; chunks: string[] }>();
   private syncing: Promise<void> | null = null;
 
   static async get(params: {
@@ -353,7 +334,6 @@ export class MemoryIndexManager implements MemorySearchManager {
       this.vector.dims = meta.vectorDims;
     }
     this.ensureWatcher();
-    this.ensureSessionListener();
     this.ensureIntervalSync();
     this.dirty = this.sources.has("memory");
     this.batch = this.resolveBatchConfig();
@@ -374,20 +354,13 @@ export class MemoryIndexManager implements MemorySearchManager {
     }
   }
 
-  async warmSession(sessionKey?: string): Promise<void> {
+  async warmSession(_sessionKey?: string): Promise<void> {
     if (!this.settings.sync.onSessionStart) {
-      return;
-    }
-    const key = sessionKey?.trim() || "";
-    if (key && this.sessionWarm.has(key)) {
       return;
     }
     void this.sync({ reason: "session-start" }).catch((err) => {
       log.warn(`memory sync failed (session-start): ${String(err)}`);
     });
-    if (key) {
-      this.sessionWarm.add(key);
-    }
   }
 
   async search(
@@ -398,7 +371,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     },
   ): Promise<MemorySearchResult[]> {
     void this.warmSession(opts?.sessionKey);
-    if (this.settings.sync.onSearch && (this.dirty || this.sessionsDirty)) {
+    if (this.settings.sync.onSearch && this.dirty) {
       void this.sync({ reason: "search" }).catch((err) => {
         log.warn(`memory sync failed (search): ${String(err)}`);
       });
@@ -887,7 +860,7 @@ export class MemoryIndexManager implements MemorySearchManager {
       backend: "builtin",
       files: files?.c ?? 0,
       chunks: chunks?.c ?? 0,
-      dirty: this.dirty || this.sessionsDirty,
+      dirty: this.dirty,
       workspaceDir: this.workspaceDir,
       dbPath: this.settings.store.path,
       provider: this.provider.id,
@@ -982,6 +955,46 @@ export class MemoryIndexManager implements MemorySearchManager {
     await this.indexFile(entry, { source, content });
   }
 
+  /**
+   * Index a session turn directly into SQL — no file I/O.
+   * Accumulates user + assistant text in an in-memory buffer per session.
+   * Flushes to indexContent() when deltaBytes or deltaMessages threshold is met.
+   */
+  async indexSessionTurn(params: {
+    sessionId: string;
+    userText: string;
+    assistantText: string;
+  }): Promise<void> {
+    const { sessionId, userText, assistantText } = params;
+    const thresholds = this.settings.sync.sessions;
+    if (!thresholds) return;
+
+    const chunk = [
+      userText.trim() ? `User: ${userText.trim()}` : "",
+      assistantText.trim() ? `Assistant: ${assistantText.trim()}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    if (!chunk) return;
+
+    let buf = this.sessionBuffers.get(sessionId);
+    if (!buf) {
+      buf = { bytes: 0, turns: 0, chunks: [] };
+      this.sessionBuffers.set(sessionId, buf);
+    }
+    buf.chunks.push(chunk);
+    buf.bytes += Buffer.byteLength(chunk, "utf-8");
+    buf.turns += 1;
+
+    const shouldFlush = buf.bytes >= thresholds.deltaBytes || buf.turns >= thresholds.deltaMessages;
+    if (!shouldFlush) return;
+
+    const content = buf.chunks.join("\n\n---\n\n");
+    this.sessionBuffers.delete(sessionId);
+
+    await this.indexContent({ path: `sessions/${sessionId}`, content, source: "sessions" });
+  }
+
   async close(): Promise<void> {
     if (this.closed) {
       return;
@@ -991,10 +1004,6 @@ export class MemoryIndexManager implements MemorySearchManager {
       clearTimeout(this.watchTimer);
       this.watchTimer = null;
     }
-    if (this.sessionWatchTimer) {
-      clearTimeout(this.sessionWatchTimer);
-      this.sessionWatchTimer = null;
-    }
     if (this.intervalTimer) {
       clearInterval(this.intervalTimer);
       this.intervalTimer = null;
@@ -1002,10 +1011,6 @@ export class MemoryIndexManager implements MemorySearchManager {
     if (this.watcher) {
       await this.watcher.close();
       this.watcher = null;
-    }
-    if (this.sessionUnsubscribe) {
-      this.sessionUnsubscribe();
-      this.sessionUnsubscribe = null;
     }
     this.db.close();
     INDEX_CACHE.delete(this.cacheKey);
@@ -1178,46 +1183,6 @@ export class MemoryIndexManager implements MemorySearchManager {
     this.watcher.on("unlink", markDirty);
   }
 
-  private ensureSessionListener() {
-    if (!this.sources.has("sessions") || this.sessionUnsubscribe) {
-      return;
-    }
-    this.sessionUnsubscribe = onSessionTranscriptUpdate((update) => {
-      if (this.closed) {
-        return;
-      }
-      const sessionFile = update.sessionFile;
-      if (!isSessionFileForAgent(sessionFile, this.agentId)) {
-        return;
-      }
-      this.scheduleSessionDirty(sessionFile);
-    });
-  }
-
-  // --- Session delta tracking (delegates to manager-session-delta.ts) ---
-
-  private scheduleSessionDirty(sessionFile: string) {
-    this.sessionPendingFiles.add(sessionFile);
-    if (this.sessionWatchTimer) {
-      return;
-    }
-    this.sessionWatchTimer = setTimeout(() => {
-      this.sessionWatchTimer = null;
-      void processSessionDeltaBatch({
-        pendingFiles: this.sessionPendingFiles,
-        thresholds: this.settings.sync.sessions,
-        deltas: this.sessionDeltas,
-        dirtyFiles: this.sessionsDirtyFiles,
-        sync: async (reason) => {
-          this.sessionsDirty = true;
-          await this.sync({ reason });
-        },
-      }).catch((err) => {
-        log.warn(`memory session delta failed: ${String(err)}`);
-      });
-    }, SESSION_DIRTY_DEBOUNCE_MS);
-  }
-
   private ensureIntervalSync() {
     const minutes = this.settings.sync.intervalMinutes;
     if (!minutes || minutes <= 0 || this.intervalTimer) {
@@ -1244,26 +1209,6 @@ export class MemoryIndexManager implements MemorySearchManager {
         log.warn(`memory sync failed (watch): ${String(err)}`);
       });
     }, this.settings.sync.watchDebounceMs);
-  }
-
-  private shouldSyncSessions(
-    params?: { reason?: string; force?: boolean },
-    needsFullReindex = false,
-  ) {
-    if (!this.sources.has("sessions")) {
-      return false;
-    }
-    if (params?.force) {
-      return true;
-    }
-    const reason = params?.reason;
-    if (reason === "session-start" || reason === "watch") {
-      return false;
-    }
-    if (needsFullReindex) {
-      return true;
-    }
-    return this.sessionsDirty && this.sessionsDirtyFiles.size > 0;
   }
 
   // --- Sync orchestration ---
@@ -1344,107 +1289,6 @@ export class MemoryIndexManager implements MemorySearchManager {
     }
   }
 
-  private async syncSessionFiles(params: {
-    needsFullReindex: boolean;
-    progress?: MemorySyncProgressState;
-  }) {
-    const files = await listSessionFiles(this.agentId, this.customSessionsDir);
-    const activePaths = new Set(files.map((file) => sessionPathForFile(file)));
-    const indexAll = params.needsFullReindex || this.sessionsDirtyFiles.size === 0;
-    log.debug("memory sync: indexing session files", {
-      files: files.length,
-      indexAll,
-      dirtyFiles: this.sessionsDirtyFiles.size,
-      batch: this.batch.enabled,
-      concurrency: this.getIndexConcurrency(),
-    });
-    if (params.progress) {
-      params.progress.total += files.length;
-      params.progress.report({
-        completed: params.progress.completed,
-        total: params.progress.total,
-        label: this.batch.enabled ? "Indexing session files (batch)..." : "Indexing session files…",
-      });
-    }
-
-    const tasks = files.map((absPath) => async () => {
-      if (!indexAll && !this.sessionsDirtyFiles.has(absPath)) {
-        if (params.progress) {
-          params.progress.completed += 1;
-          params.progress.report({
-            completed: params.progress.completed,
-            total: params.progress.total,
-          });
-        }
-        return;
-      }
-      const entry = await buildSessionEntry(absPath);
-      if (!entry) {
-        if (params.progress) {
-          params.progress.completed += 1;
-          params.progress.report({
-            completed: params.progress.completed,
-            total: params.progress.total,
-          });
-        }
-        return;
-      }
-      const record = this.db
-        .prepare(`SELECT hash FROM files WHERE path = ? AND source = ?`)
-        .get(entry.path, "sessions") as { hash: string } | undefined;
-      if (!params.needsFullReindex && record?.hash === entry.hash) {
-        if (params.progress) {
-          params.progress.completed += 1;
-          params.progress.report({
-            completed: params.progress.completed,
-            total: params.progress.total,
-          });
-        }
-        resetSessionDelta(absPath, entry.size, this.sessionDeltas);
-        return;
-      }
-      await this.indexFile(entry, { source: "sessions", content: entry.content });
-      resetSessionDelta(absPath, entry.size, this.sessionDeltas);
-      if (params.progress) {
-        params.progress.completed += 1;
-        params.progress.report({
-          completed: params.progress.completed,
-          total: params.progress.total,
-        });
-      }
-    });
-    await runWithConcurrency(tasks, this.getIndexConcurrency());
-
-    const staleRows = this.db
-      .prepare(`SELECT path FROM files WHERE source = ?`)
-      .all("sessions") as Array<{ path: string }>;
-    for (const stale of staleRows) {
-      if (activePaths.has(stale.path)) {
-        continue;
-      }
-      this.db
-        .prepare(`DELETE FROM files WHERE path = ? AND source = ?`)
-        .run(stale.path, "sessions");
-      try {
-        this.db
-          .prepare(
-            `DELETE FROM ${VECTOR_TABLE} WHERE id IN (SELECT id FROM chunks WHERE path = ? AND source = ?)`,
-          )
-          .run(stale.path, "sessions");
-      } catch {}
-      this.db
-        .prepare(`DELETE FROM chunks WHERE path = ? AND source = ?`)
-        .run(stale.path, "sessions");
-      if (this.fts.enabled && this.fts.available) {
-        try {
-          this.db
-            .prepare(`DELETE FROM ${FTS_TABLE} WHERE path = ? AND source = ? AND model = ?`)
-            .run(stale.path, "sessions", this.provider.model);
-        } catch {}
-      }
-    }
-  }
-
   private createSyncProgress(
     onProgress: (update: MemorySyncProgressUpdate) => void,
   ): MemorySyncProgressState {
@@ -1506,21 +1350,10 @@ export class MemoryIndexManager implements MemorySearchManager {
 
       const shouldSyncMemory =
         this.sources.has("memory") && (params?.force || needsFullReindex || this.dirty);
-      const shouldSyncSessions = this.shouldSyncSessions(params, needsFullReindex);
 
       if (shouldSyncMemory) {
         await this.syncMemoryFiles({ needsFullReindex, progress: progress ?? undefined });
         this.dirty = false;
-      }
-
-      if (shouldSyncSessions) {
-        await this.syncSessionFiles({ needsFullReindex, progress: progress ?? undefined });
-        this.sessionsDirty = false;
-        this.sessionsDirtyFiles.clear();
-      } else if (this.sessionsDirtyFiles.size > 0) {
-        this.sessionsDirty = true;
-      } else {
-        this.sessionsDirty = false;
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -1660,25 +1493,9 @@ export class MemoryIndexManager implements MemorySearchManager {
         cache: this.cache,
         cacheTable: EMBEDDING_CACHE_TABLE,
       });
-      const shouldSyncMemory = this.sources.has("memory");
-      const shouldSyncSessions = this.shouldSyncSessions(
-        { reason: params.reason, force: params.force },
-        true,
-      );
-
-      if (shouldSyncMemory) {
+      if (this.sources.has("memory")) {
         await this.syncMemoryFiles({ needsFullReindex: true, progress: params.progress });
         this.dirty = false;
-      }
-
-      if (shouldSyncSessions) {
-        await this.syncSessionFiles({ needsFullReindex: true, progress: params.progress });
-        this.sessionsDirty = false;
-        this.sessionsDirtyFiles.clear();
-      } else if (this.sessionsDirtyFiles.size > 0) {
-        this.sessionsDirty = true;
-      } else {
-        this.sessionsDirty = false;
       }
 
       nextMeta = {
@@ -1733,7 +1550,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     }
     dropVectorTable(this.db);
     this.vector.dims = undefined;
-    this.sessionsDirtyFiles.clear();
+    this.sessionBuffers.clear();
   }
 
   private readMeta(): MemoryIndexMeta | null {
@@ -1788,7 +1605,7 @@ export class MemoryIndexManager implements MemorySearchManager {
   }
 
   private async indexFile(
-    entry: MemoryFileEntry | SessionFileEntry,
+    entry: MemoryFileEntry,
     options: { source: MemorySource; content?: string },
   ) {
     const content = options.content ?? (await fs.readFile(entry.absPath, "utf-8"));

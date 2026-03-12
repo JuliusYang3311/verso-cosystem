@@ -7,6 +7,7 @@ import { resolveAgentConfig } from "./agent-scope.js";
 
 export type ResolvedMemorySearchConfig = {
   enabled: boolean;
+  /** Runtime search sources. Always ["memory", "sessions"] — sessions indexed directly via indexSessionTurn(). */
   sources: Array<"memory" | "sessions">;
   extraPaths: string[];
   provider: "openai" | "local" | "gemini" | "anthropic" | "voyage" | "auto";
@@ -21,10 +22,6 @@ export type ResolvedMemorySearchConfig = {
       pollIntervalMs: number;
       timeoutMinutes: number;
     };
-  };
-  experimental: {
-    sessionMemory: boolean;
-    l1LlmMode: boolean;
   };
   fallback: "openai" | "gemini" | "local" | "voyage" | "none";
   model: string;
@@ -85,27 +82,8 @@ const DEFAULT_HYBRID_VECTOR_WEIGHT = 0.7;
 // textWeight = 1 - vectorWeight, no separate default needed
 const DEFAULT_HYBRID_CANDIDATE_MULTIPLIER = 4;
 const DEFAULT_CACHE_ENABLED = true;
-const DEFAULT_SOURCES: Array<"memory" | "sessions"> = ["memory"];
-
-function normalizeSources(
-  sources: Array<"memory" | "sessions"> | undefined,
-  sessionMemoryEnabled: boolean,
-): Array<"memory" | "sessions"> {
-  const normalized = new Set<"memory" | "sessions">();
-  const input = sources?.length ? sources : DEFAULT_SOURCES;
-  for (const source of input) {
-    if (source === "memory") {
-      normalized.add("memory");
-    }
-    if (source === "sessions" && sessionMemoryEnabled) {
-      normalized.add("sessions");
-    }
-  }
-  if (normalized.size === 0) {
-    normalized.add("memory");
-  }
-  return Array.from(normalized);
-}
+/** Both sources always enabled: memory (file watcher) + sessions (direct indexSessionTurn). */
+const RUNTIME_SOURCES: Array<"memory" | "sessions"> = ["memory", "sessions"];
 
 function resolveStorePath(agentId: string, raw?: string): string {
   const stateDir = resolveStateDir(process.env, os.homedir);
@@ -124,10 +102,6 @@ function mergeConfig(
   _cfg: VersoConfig,
 ): ResolvedMemorySearchConfig {
   const enabled = overrides?.enabled ?? defaults?.enabled ?? true;
-  const sessionMemory =
-    overrides?.experimental?.sessionMemory ?? defaults?.experimental?.sessionMemory ?? false;
-  const l1LlmMode =
-    overrides?.experimental?.l1LlmMode ?? defaults?.experimental?.l1LlmMode ?? false;
   const provider = overrides?.provider ?? defaults?.provider ?? "auto";
   const defaultRemote = defaults?.remote;
   const overrideRemote = overrides?.remote;
@@ -179,7 +153,7 @@ function mergeConfig(
     modelPath: overrides?.local?.modelPath ?? defaults?.local?.modelPath,
     modelCacheDir: overrides?.local?.modelCacheDir ?? defaults?.local?.modelCacheDir,
   };
-  const sources = normalizeSources(overrides?.sources ?? defaults?.sources, sessionMemory);
+  const sources = RUNTIME_SOURCES;
   const rawPaths = [...(defaults?.extraPaths ?? []), ...(overrides?.extraPaths ?? [])]
     .map((value) => value.trim())
     .filter(Boolean);
@@ -258,10 +232,6 @@ function mergeConfig(
     extraPaths,
     provider,
     remote,
-    experimental: {
-      sessionMemory,
-      l1LlmMode,
-    },
     fallback,
     model,
     local,

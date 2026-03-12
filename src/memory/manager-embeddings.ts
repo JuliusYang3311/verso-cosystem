@@ -15,7 +15,6 @@ import type {
 } from "./embeddings.js";
 import type { MemoryChunk, MemoryFileEntry } from "./internal.js";
 import type { BatchConfig } from "./manager-batch.js";
-import type { SessionFileEntry } from "./manager-session-files.js";
 import type { MemorySource } from "./types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runGeminiEmbeddingBatches, type GeminiBatchRequest } from "./batch-gemini.js";
@@ -203,7 +202,7 @@ export function computeProviderKey(
 export async function embedChunksWithBatch(
   ctx: EmbeddingContext,
   chunks: MemoryChunk[],
-  entry: MemoryFileEntry | SessionFileEntry,
+  entry: MemoryFileEntry,
   source: MemorySource,
 ): Promise<number[][]> {
   if (ctx.provider.id === "openai" && ctx.openAi) {
@@ -221,7 +220,7 @@ export async function embedChunksWithBatch(
 async function embedChunksWithVoyageBatch(
   ctx: EmbeddingContext,
   chunks: MemoryChunk[],
-  entry: MemoryFileEntry | SessionFileEntry,
+  entry: MemoryFileEntry,
   source: MemorySource,
 ): Promise<number[][]> {
   const voyage = ctx.voyage;
@@ -314,7 +313,7 @@ async function embedChunksWithVoyageBatch(
 async function embedChunksWithOpenAiBatch(
   ctx: EmbeddingContext,
   chunks: MemoryChunk[],
-  entry: MemoryFileEntry | SessionFileEntry,
+  entry: MemoryFileEntry,
   source: MemorySource,
 ): Promise<number[][]> {
   const openAi = ctx.openAi;
@@ -410,7 +409,7 @@ async function embedChunksWithOpenAiBatch(
 async function embedChunksWithGeminiBatch(
   ctx: EmbeddingContext,
   chunks: MemoryChunk[],
-  entry: MemoryFileEntry | SessionFileEntry,
+  entry: MemoryFileEntry,
   source: MemorySource,
 ): Promise<number[][]> {
   const gemini = ctx.gemini;

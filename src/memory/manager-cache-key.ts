@@ -35,7 +35,6 @@ export function computeMemoryManagerCacheKey(params: {
               : undefined,
           }
         : undefined,
-      experimental: settings.experimental,
       store: {
         driver: settings.store.driver,
         path: settings.store.path,

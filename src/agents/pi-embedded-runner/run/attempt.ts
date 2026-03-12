@@ -995,6 +995,23 @@ export async function runEmbeddedAttempt(
         )
         .map((entry) => ({ toolName: entry.toolName, meta: entry.meta }));
 
+      // Index this turn directly into memory (no file I/O).
+      // Uses in-memory buffer with delta thresholds — fire-and-forget, non-fatal.
+      if (memoryManagerForContext?.indexSessionTurn && !aborted && !promptError) {
+        const assistantText = assistantTexts.join("").trim();
+        if (assistantText) {
+          memoryManagerForContext
+            .indexSessionTurn({
+              sessionId: sessionIdUsed ?? params.sessionId,
+              userText: params.prompt,
+              assistantText,
+            })
+            .catch((err) => {
+              log.warn(`session turn index failed (non-fatal): ${String(err)}`);
+            });
+        }
+      }
+
       return {
         aborted,
         timedOut,

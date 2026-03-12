@@ -226,9 +226,6 @@ const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.memorySearch.enabled": "Enable Memory Search",
   "agents.defaults.memorySearch.sources": "Memory Search Sources",
   "agents.defaults.memorySearch.extraPaths": "Extra Memory Paths",
-  "agents.defaults.memorySearch.experimental.sessionMemory":
-    "Memory Search Session Index (Experimental)",
-  "agents.defaults.memorySearch.experimental.l1LlmMode": "Memory L1 LLM Mode (Experimental)",
   "agents.defaults.memorySearch.provider": "Memory Search Provider",
   "agents.defaults.memorySearch.remote.baseUrl": "Remote Embedding Base URL",
   "agents.defaults.memorySearch.remote.apiKey": "Remote Embedding API Key",
@@ -517,10 +514,6 @@ const FIELD_HELP: Record<string, string> = {
     'Sources to index for memory search (default: ["memory"]; add "sessions" to include session transcripts).',
   "agents.defaults.memorySearch.extraPaths":
     "Extra paths to include in memory search (directories or .md files; relative paths resolved from workspace).",
-  "agents.defaults.memorySearch.experimental.sessionMemory":
-    "Enable experimental session transcript indexing for memory search (default: false).",
-  "agents.defaults.memorySearch.experimental.l1LlmMode":
-    "Enable L1 overview generation using session LLM instead of heuristic extraction (default: false). When enabled, uses the session's LLM to generate structured summaries for memory chunks.",
   "agents.defaults.memorySearch.provider":
     'Embedding provider ("openai", "gemini", "voyage", or "local").',
   "agents.defaults.memorySearch.remote.baseUrl":

@@ -216,43 +216,16 @@ describe("memory search config", () => {
     });
   });
 
-  it("gates session sources behind experimental flag", () => {
+  it("always includes both memory and sessions sources", () => {
+    // Sessions are indexed directly via indexSessionTurn() — always enabled.
     const cfg = {
       agents: {
         defaults: {
-          memorySearch: {
-            provider: "openai",
-            sources: ["memory", "sessions"],
-          },
-        },
-        list: [
-          {
-            id: "main",
-            default: true,
-            memorySearch: {
-              experimental: { sessionMemory: false },
-            },
-          },
-        ],
-      },
-    };
-    const resolved = resolveMemorySearchConfig(cfg, "main");
-    expect(resolved?.sources).toEqual(["memory"]);
-  });
-
-  it("allows session sources when experimental flag is enabled", () => {
-    const cfg = {
-      agents: {
-        defaults: {
-          memorySearch: {
-            provider: "openai",
-            sources: ["memory", "sessions"],
-            experimental: { sessionMemory: true },
-          },
+          memorySearch: { provider: "openai" },
         },
       },
     };
     const resolved = resolveMemorySearchConfig(cfg, "main");
-    expect(resolved?.sources).toContain("sessions");
+    expect(resolved?.sources).toEqual(["memory", "sessions"]);
   });
 });

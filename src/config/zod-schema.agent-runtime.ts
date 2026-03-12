@@ -318,15 +318,7 @@ export const AgentToolsSchema = z
 export const MemorySearchSchema = z
   .object({
     enabled: z.boolean().optional(),
-    sources: z.array(z.union([z.literal("memory"), z.literal("sessions")])).optional(),
     extraPaths: z.array(z.string()).optional(),
-    experimental: z
-      .object({
-        sessionMemory: z.boolean().optional(),
-        l1LlmMode: z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
     provider: z
       .union([z.literal("openai"), z.literal("local"), z.literal("gemini"), z.literal("voyage")])
       .optional(),

@@ -19,11 +19,9 @@ import {
 import { promptTwitterConfig } from "../commands/configure.twitter.js";
 import {
   applyEmbeddingModel,
-  applyMemoryL1LlmMode,
   applyPrimaryModel,
   promptDefaultModel,
   promptEmbeddingModel,
-  promptMemoryL1LlmMode,
 } from "../commands/model-picker.js";
 import { setupChannels } from "../commands/onboard-channels.js";
 import {
@@ -418,9 +416,6 @@ export async function runOnboardingWizard(
       preferredProvider: resolvePreferredProviderForAuthChoice(authChoice),
     });
     nextConfig = applyEmbeddingModel(nextConfig, embeddingSelection);
-
-    const l1LlmEnabled = await promptMemoryL1LlmMode({ config: nextConfig, prompter });
-    nextConfig = applyMemoryL1LlmMode(nextConfig, l1LlmEnabled);
   }
 
   await warnIfModelConfigLooksOff(nextConfig, prompter);

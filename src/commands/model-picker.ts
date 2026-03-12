@@ -654,38 +654,6 @@ export async function promptEmbeddingModel(params: {
   return { provider: p as EmbeddingProvider, model: m };
 }
 
-export async function promptMemoryL1LlmMode(params: {
-  config: VersoConfig;
-  prompter: WizardPrompter;
-}): Promise<boolean> {
-  const current = params.config.agents?.defaults?.memorySearch?.experimental?.l1LlmMode ?? false;
-  return params.prompter.confirm({
-    message: "Enable Memory L1 LLM Mode? (uses LLM to generate richer memory summaries)",
-    initialValue: current,
-  });
-}
-
-export function applyMemoryL1LlmMode(cfg: VersoConfig, enabled: boolean): VersoConfig {
-  const defaults = cfg.agents?.defaults;
-  const memorySearch = defaults?.memorySearch ? { ...defaults.memorySearch } : {};
-  return {
-    ...cfg,
-    agents: {
-      ...cfg.agents,
-      defaults: {
-        ...defaults,
-        memorySearch: {
-          ...memorySearch,
-          experimental: {
-            ...memorySearch.experimental,
-            l1LlmMode: enabled,
-          },
-        },
-      },
-    },
-  };
-}
-
 export function applyEmbeddingModel(
   cfg: VersoConfig,
   params: { provider: string; model: string; clearRemote?: boolean },

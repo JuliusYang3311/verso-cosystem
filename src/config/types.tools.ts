@@ -212,17 +212,8 @@ export type AgentToolsConfig = {
 export type MemorySearchConfig = {
   /** Enable vector memory search (default: true). */
   enabled?: boolean;
-  /** Sources to index and search (default: ["memory"]). */
-  sources?: Array<"memory" | "sessions">;
   /** Extra paths to include in memory search (directories or .md files). */
   extraPaths?: string[];
-  /** Experimental memory search settings. */
-  experimental?: {
-    /** Enable session transcript indexing (experimental, default: false). */
-    sessionMemory?: boolean;
-    /** Enable L1 overview generation using LLM (default: false, uses heuristic). */
-    l1LlmMode?: boolean;
-  };
   /** Embedding provider mode. */
   provider?: "openai" | "gemini" | "anthropic" | "local" | "voyage";
   remote?: {
@@ -283,9 +274,9 @@ export type MemorySearchConfig = {
     watchDebounceMs?: number;
     intervalMinutes?: number;
     sessions?: {
-      /** Minimum appended bytes before session transcripts are reindexed. */
+      /** Minimum accumulated bytes before buffered session turns are flushed to the index. */
       deltaBytes?: number;
-      /** Minimum appended JSONL lines before session transcripts are reindexed. */
+      /** Minimum accumulated turns before buffered session turns are flushed to the index. */
       deltaMessages?: number;
     };
   };

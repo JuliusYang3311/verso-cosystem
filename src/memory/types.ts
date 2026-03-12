@@ -99,5 +99,15 @@ export interface MemorySearchManager {
   embedBatch?(texts: string[]): Promise<number[][]>;
   /** Index arbitrary text content directly into SQL (no file needed). */
   indexContent?(params: { path: string; content: string; source?: MemorySource }): Promise<void>;
+  /**
+   * Index a session turn directly (no file I/O).
+   * Accumulates content in an in-memory buffer and flushes to SQL when delta
+   * thresholds (bytes or turns) are met. Call after each completed agent turn.
+   */
+  indexSessionTurn?(params: {
+    sessionId: string;
+    userText: string;
+    assistantText: string;
+  }): Promise<void>;
   close?(): Promise<void>;
 }
