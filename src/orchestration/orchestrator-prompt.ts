@@ -78,6 +78,25 @@ Workers are **persistent sessions** in a pre-created pool. Key implications for 
 - Atomic: include dependency installation in the task itself
 - Criteria must be testable: "endpoint returns 200 with JSON array" not "API works"
 
+**Good split** (each ≤ 5 min, 1–3 files, clear deliverable):
+\`\`\`
+❌ BAD: "Implement user authentication system"
+✅ GOOD:
+  t1: "Create User model and migration" (code-implementer) → user.model.ts, migration.sql
+  t2: "Implement password hashing utility" (code-implementer) → auth-utils.ts
+  t3: "Add login endpoint" (code-implementer, dependsOn: [t1, t2]) → auth.controller.ts, auth.routes.ts
+  t4: "Add registration endpoint" (code-implementer, dependsOn: [t1, t2]) → auth.controller.ts, auth.routes.ts
+  t5: "Add JWT token middleware" (code-implementer) → auth.middleware.ts
+  t6: "Write auth unit tests" (code-reviewer, dependsOn: [t3, t4, t5]) → auth.test.ts
+
+❌ BAD: "Build the entire REST API"
+✅ GOOD:
+  t1: "Set up Express app with error handling" (code-implementer) → app.ts, error-handler.ts
+  t2: "Implement GET /users endpoint" (code-implementer, dependsOn: [t1]) → users.controller.ts, users.routes.ts
+  t3: "Implement POST /users endpoint" (code-implementer, dependsOn: [t1]) → users.controller.ts, users.routes.ts
+  t4: "Implement GET/PUT /users/:id endpoints" (code-implementer, dependsOn: [t1]) → users.controller.ts
+\`\`\`
+
 ### Failure Recovery
 
 **Auto-fix (handled by dispatcher)** — When a task fails and blocks dependents, the system automatically creates a fix task and retries (up to 2 times). You don't need to intervene for transient failures.
