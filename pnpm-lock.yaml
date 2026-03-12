@@ -50,6 +50,12 @@ importers:
       '@img/sharp-libvips-darwin-arm64':
         specifier: 1.2.4
         version: 1.2.4
+      '@img/sharp-libvips-win32-x64':
+        specifier: 1.2.4
+        version: 1.2.4
+      '@img/sharp-win32-x64':
+        specifier: 0.34.5
+        version: 0.34.5
       '@larksuiteoapi/node-sdk':
         specifier: ^1.58.0
         version: 1.58.0
@@ -183,6 +189,9 @@ importers:
         specifier: 0.1.7-alpha.2
         version: 0.1.7-alpha.2
       sqlite-vec-darwin-arm64:
+        specifier: 0.1.7-alpha.2
+        version: 0.1.7-alpha.2
+      sqlite-vec-windows-x64:
         specifier: 0.1.7-alpha.2
         version: 0.1.7-alpha.2
       tar:
@@ -995,6 +1004,9 @@ packages:
     resolution: {integrity: sha512-+LpyBk7L44ZIXwz/VYfglaX/okxezESc6UxDSoyo2Ks6Jxc4Y7sGjpgU9s4PMgqgjj1gZCylTieNamqA1MF7Dg==}
     cpu: [x64]
     os: [linux]
+
+  '@img/sharp-libvips-win32-x64@1.2.4':
+    resolution: {integrity: sha512-fpCMPMNm6z5dA0fEFTXn93JJJql0ya7Z5rSC80pd5IJE0/TBzRSGI1zx4CHYOSTBls26TxRGUxnfNgEJk4DNeA==}
 
   '@img/sharp-linux-arm64@0.34.5':
     resolution: {integrity: sha512-bKQzaJRY/bkPOXyKx5EVup7qkaojECG6NLYswgktOZjaXecSAeCWiZwwiFf3/Y+O1HrauiE3FVsGxFg8c24rZg==}
@@ -5659,6 +5671,8 @@ snapshots:
   '@img/sharp-libvips-linuxmusl-x64@1.2.4':
     optional: true
 
+  '@img/sharp-libvips-win32-x64@1.2.4': {}
+
   '@img/sharp-linux-arm64@0.34.5':
     optionalDependencies:
       '@img/sharp-libvips-linux-arm64': 1.2.4
@@ -5710,8 +5724,7 @@ snapshots:
   '@img/sharp-win32-ia32@0.34.5':
     optional: true
 
-  '@img/sharp-win32-x64@0.34.5':
-    optional: true
+  '@img/sharp-win32-x64@0.34.5': {}
 
   '@isaacs/balanced-match@4.0.1': {}
 
@@ -9507,8 +9520,7 @@ snapshots:
   sqlite-vec-linux-x64@0.1.7-alpha.2:
     optional: true
 
-  sqlite-vec-windows-x64@0.1.7-alpha.2:
-    optional: true
+  sqlite-vec-windows-x64@0.1.7-alpha.2: {}
 
   sqlite-vec@0.1.7-alpha.2:
     optionalDependencies:

@@ -487,3 +487,170 @@ describe("memory index", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// L1 indexing + search threading + L2 readChunk integration
+// ---------------------------------------------------------------------------
+
+describe("memory index — L1/L2 layer integration", () => {
+  let workspaceDir: string;
+  let indexPath: string;
+  let manager: MemoryIndexManager | null = null;
+
+  const cfg = () => ({
+    agents: {
+      defaults: {
+        workspace: workspaceDir,
+        memorySearch: {
+          provider: "openai",
+          model: "mock-embed",
+          store: { path: indexPath },
+          sync: { watch: false, onSessionStart: false, onSearch: true },
+          query: { minScore: 0 },
+        },
+      },
+      list: [{ id: "main", default: true }],
+    },
+  });
+
+  beforeEach(async () => {
+    workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "verso-l1l2-"));
+    indexPath = path.join(workspaceDir, "index.sqlite");
+    await fs.mkdir(path.join(workspaceDir, "memory"));
+    // Multi-sentence content so L1 extraction has material to work with
+    await fs.writeFile(
+      path.join(workspaceDir, "memory", "notes.md"),
+      [
+        "# Project Notes",
+        "",
+        "Alpha is the first Greek letter.",
+        "Beta is the second Greek letter.",
+        "Gamma is the third Greek letter.",
+        "Delta is the fourth Greek letter.",
+        "These letters are used in mathematics and science.",
+      ].join("\n"),
+    );
+  });
+
+  afterEach(async () => {
+    if (manager) {
+      await manager.close();
+      manager = null;
+    }
+    await fs.rm(workspaceDir, { recursive: true, force: true });
+  });
+
+  it("L1: l1_sentences column is written (non-empty JSON array) after indexing", async () => {
+    const result = await getMemorySearchManager({ cfg: cfg(), agentId: "main" });
+    manager = result.manager!;
+    await manager.sync({ force: true });
+
+    // Direct DB inspection via internal field
+    const db = (manager as any).db as import("node:sqlite").DatabaseSync;
+    const rows = db
+      .prepare(`SELECT l1_sentences FROM chunks WHERE source = 'memory'`)
+      .all() as Array<{ l1_sentences: string }>;
+
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(() => JSON.parse(row.l1_sentences)).not.toThrow();
+      const sentences = JSON.parse(row.l1_sentences) as unknown[];
+      expect(Array.isArray(sentences)).toBe(true);
+      expect(sentences.length).toBeGreaterThan(0);
+      for (const s of sentences as Array<{ text: string; startChar: number; endChar: number }>) {
+        expect(typeof s.text).toBe("string");
+        expect(s.text.length).toBeGreaterThan(0);
+        expect(typeof s.startChar).toBe("number");
+        expect(typeof s.endChar).toBe("number");
+        expect(s.endChar).toBeGreaterThanOrEqual(s.startChar);
+      }
+    }
+  });
+
+  it("L1: search results include l1Sentences populated from indexed chunks", async () => {
+    const result = await getMemorySearchManager({ cfg: cfg(), agentId: "main" });
+    manager = result.manager!;
+    await manager.sync({ force: true });
+
+    const results = await manager.search("alpha");
+    expect(results.length).toBeGreaterThan(0);
+
+    // At least one result should have l1Sentences
+    const withL1 = results.filter((r) => r.l1Sentences && r.l1Sentences.length > 0);
+    expect(withL1.length).toBeGreaterThan(0);
+
+    for (const r of withL1) {
+      expect(Array.isArray(r.l1Sentences)).toBe(true);
+      for (const s of r.l1Sentences!) {
+        expect(typeof s.text).toBe("string");
+        expect(typeof s.startChar).toBe("number");
+        expect(typeof s.endChar).toBe("number");
+      }
+    }
+  });
+
+  it("L1: search result snippet is built from l1Sentences text (not raw L2 chunk)", async () => {
+    const result = await getMemorySearchManager({ cfg: cfg(), agentId: "main" });
+    manager = result.manager!;
+    await manager.sync({ force: true });
+
+    const results = await manager.search("alpha");
+    const withL1 = results.find((r) => r.l1Sentences && r.l1Sentences.length > 0);
+    if (!withL1) return; // skip if no L1 sentences (e.g. very short content)
+
+    // Snippet should be composed of L1 sentence text joined together
+    const expectedSnippet = withL1.l1Sentences!.map((s) => s.text).join(" ");
+    expect(withL1.snippet).toBe(expectedSnippet);
+  });
+
+  it("L2: readChunk() returns full chunk text by ID from search results", async () => {
+    const result = await getMemorySearchManager({ cfg: cfg(), agentId: "main" });
+    manager = result.manager!;
+    await manager.sync({ force: true });
+
+    const results = await manager.search("alpha");
+    expect(results.length).toBeGreaterThan(0);
+
+    const first = results[0]!;
+    expect(first.id).toBeTruthy();
+
+    // memory_get equivalent: readChunk by ID
+    const chunk = await manager.readChunk(first.id);
+    expect(chunk).not.toBeNull();
+    expect(typeof chunk!.text).toBe("string");
+    expect(chunk!.text.length).toBeGreaterThan(0);
+    expect(chunk!.path).toContain("notes.md");
+    expect(typeof chunk!.startLine).toBe("number");
+    expect(typeof chunk!.endLine).toBe("number");
+
+    // L2 text must contain the L1 sentences (L1 is extracted from L2)
+    if (first.l1Sentences && first.l1Sentences.length > 0) {
+      for (const s of first.l1Sentences) {
+        expect(chunk!.text).toContain(s.text.slice(0, 15));
+      }
+    }
+  });
+
+  it("L2: readChunk() with 'chunk:' prefix is equivalent to bare ID", async () => {
+    const result = await getMemorySearchManager({ cfg: cfg(), agentId: "main" });
+    manager = result.manager!;
+    await manager.sync({ force: true });
+
+    const results = await manager.search("alpha");
+    const first = results[0]!;
+
+    const byBareId = await manager.readChunk(first.id);
+    const byPrefixId = await manager.readChunk(`chunk:${first.id}`);
+
+    expect(byPrefixId).toEqual(byBareId);
+  });
+
+  it("L2: readChunk() returns null for unknown chunk ID", async () => {
+    const result = await getMemorySearchManager({ cfg: cfg(), agentId: "main" });
+    manager = result.manager!;
+    await manager.sync({ force: true });
+
+    const chunk = await manager.readChunk("nonexistent-chunk-id-xyz");
+    expect(chunk).toBeNull();
+  });
+});

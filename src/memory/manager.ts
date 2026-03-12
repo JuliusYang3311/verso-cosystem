@@ -638,11 +638,18 @@ export class MemoryIndexManager implements MemorySearchManager {
     vectorWeight: number;
     textWeight: number;
   }): MemorySearchResult[] {
-    // Build metadata lookup from vector results (keyword search doesn't provide l0Tags/l1Sentences)
+    // Build metadata lookup: vector results provide l0Tags + l1Sentences;
+    // keyword results now also provide l1Sentences (via FTS→chunks JOIN).
+    // Vector metadata takes precedence when a chunk appears in both sources.
     const metaMap = new Map<
       string,
       { l0Tags?: Record<string, number>; l1Sentences?: import("./types.js").L1Sentence[] }
     >();
+    for (const r of params.keyword) {
+      if (r.l1Sentences) {
+        metaMap.set(r.id, { l1Sentences: r.l1Sentences });
+      }
+    }
     for (const r of params.vector) {
       if (r.l0Tags || r.l1Sentences) {
         metaMap.set(r.id, { l0Tags: r.l0Tags, l1Sentences: r.l1Sentences });

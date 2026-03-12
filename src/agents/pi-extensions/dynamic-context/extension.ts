@@ -92,10 +92,13 @@ export default function dynamicContextExtension(api: ExtensionAPI): void {
       // Inject memory snippets as synthetic context message
       if (result.retrievedChunks.length > 0) {
         const memorySnippets = result.retrievedChunks
-          .map(
-            (c) =>
-              `[${c.path}:${c.startLine}-${c.endLine}] (score=${c.score.toFixed(2)})\n${c.snippet}`,
-          )
+          .map((c) => {
+            const header = `[${c.path}:${c.startLine}-${c.endLine}] (score=${c.score.toFixed(2)})`;
+            const ref = c.id
+              ? `→ memory_get({"chunkId": "${c.id}"})`
+              : `→ memory_get({"path": "${c.path}", "from": ${c.startLine}, "lines": ${c.endLine - c.startLine}})`;
+            return `${header}\n${c.snippet}\n${ref}`;
+          })
           .join("\n---\n");
         finalMessages = [
           {

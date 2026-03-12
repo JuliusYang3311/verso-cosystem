@@ -20,6 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { EmbeddingProviderResult } from "../../../src/memory/embeddings.js";
+import type { LatentFactorSpace } from "../../../src/memory/latent-factors.js";
 import { NovelMemoryStore, type NovelMemoryConfig } from "./novel-memory.js";
 
 // ---------------------------------------------------------------------------
@@ -250,6 +251,53 @@ describe("NovelMemoryStore — 3-layer indexing chain", () => {
     }
   });
 
+  it("search() results carry l1Sentences from indexed chunks (L1 threaded through)", async () => {
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
+    const results = await store.search({ query: "gothic atmosphere castle" });
+    expect(results.length).toBeGreaterThan(0);
+
+    // At least one result must have l1Sentences populated (not undefined/null)
+    const withL1 = results.filter((r) => r.l1Sentences !== undefined && r.l1Sentences !== null);
+    expect(withL1.length).toBeGreaterThan(0);
+
+    // Each present l1Sentences must be a parseable JSON array of sentence objects
+    for (const r of withL1) {
+      const sentences = JSON.parse(r.l1Sentences as string) as unknown[];
+      expect(Array.isArray(sentences)).toBe(true);
+      expect(sentences.length).toBeGreaterThan(0);
+      for (const s of sentences as Array<{ text: string; startChar: number; endChar: number }>) {
+        expect(typeof s.text).toBe("string");
+        expect(typeof s.startChar).toBe("number");
+        expect(typeof s.endChar).toBe("number");
+      }
+    }
+  });
+
+  it("search() results include source field matching the store source", async () => {
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
+    const results = await store.search({ query: "gothic atmosphere castle" });
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.source).toBe("style");
+    }
+  });
+
+  it("search() snippet (L2) contains text from the indexed content", async () => {
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
+    const results = await store.search({ query: "gothic atmosphere castle" });
+    expect(results.length).toBeGreaterThan(0);
+
+    for (const r of results) {
+      // Snippet must be a non-empty substring derivable from the original content
+      expect(r.snippet.trim().length).toBeGreaterThan(0);
+      // Every word in the snippet (first 20 chars) should appear somewhere in the source
+      const probe = r.snippet.slice(0, 20).trim();
+      if (probe.length > 0) {
+        expect(STYLE_CONTENT).toContain(probe);
+      }
+    }
+  });
+
   it("search() returns empty array for empty query", async () => {
     await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
     const results = await store.search({ query: "" });
@@ -397,6 +445,225 @@ describe("NovelMemoryStore — L1 sentence quality", () => {
         expect(s.endChar).toBeLessThanOrEqual(row.text.length + 1);
       }
     }
+
+    store.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit: computeMeanVector (via files.l0_embedding SQL inspection)
+// ---------------------------------------------------------------------------
+
+describe("NovelMemoryStore — file-level embedding (computeMeanVector)", () => {
+  it("files.l0_embedding is a non-empty JSON array after indexing", async () => {
+    const store = await openStore();
+
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
+
+    const row = (store as any).db
+      .prepare(`SELECT l0_embedding FROM files WHERE path = 'style/gothic'`)
+      .get() as { l0_embedding: string } | undefined;
+
+    expect(row).toBeDefined();
+    expect(() => JSON.parse(row!.l0_embedding)).not.toThrow();
+    const vec = JSON.parse(row!.l0_embedding) as unknown;
+    expect(Array.isArray(vec)).toBe(true);
+    expect((vec as number[]).length).toBeGreaterThan(0);
+
+    store.close();
+  });
+
+  it("files.l0_embedding is the mean of chunk embeddings (element-wise)", async () => {
+    const store = await openStore();
+
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
+
+    // Collect all chunk embeddings for this path
+    const chunkRows = (store as any).db
+      .prepare(`SELECT embedding FROM chunks WHERE path = 'style/gothic' AND source = 'style'`)
+      .all() as Array<{ embedding: string }>;
+
+    const chunkVecs = chunkRows
+      .map((r) => JSON.parse(r.embedding) as number[])
+      .filter((v) => v.length > 0);
+
+    expect(chunkVecs.length).toBeGreaterThan(0);
+
+    // Recompute expected mean
+    const dims = chunkVecs[0]!.length;
+    const expected = Array.from<number>({ length: dims }).fill(0);
+    for (const v of chunkVecs) {
+      for (let i = 0; i < dims; i++) expected[i]! += v[i]!;
+    }
+    for (let i = 0; i < dims; i++) expected[i]! /= chunkVecs.length;
+
+    const fileRow = (store as any).db
+      .prepare(`SELECT l0_embedding FROM files WHERE path = 'style/gothic'`)
+      .get() as { l0_embedding: string };
+
+    const actual = JSON.parse(fileRow.l0_embedding) as number[];
+    expect(actual.length).toBe(dims);
+    for (let i = 0; i < dims; i++) {
+      expect(actual[i]!).toBeCloseTo(expected[i]!, 10);
+    }
+
+    store.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// L0-filtered search path (factorId injection via _factorSpaceForTest)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fake factor space aligned with the fake embedding provider (model = "test-model").
+ * The factor vector is makeVec("gothic darkness castle") so that gothic-style content
+ * gets a non-zero cosine similarity → non-empty l0_tags after projectChunkToFactors().
+ */
+function makeFakeFactorSpace(): LatentFactorSpace {
+  return {
+    version: "1.0.0",
+    factors: [
+      {
+        id: "fact-gothic",
+        description: "gothic darkness atmosphere castle",
+        subqueryTemplate: "{topic} gothic atmosphere",
+        vectors: { "test-model": makeVec("gothic darkness castle") },
+        weights: {},
+      },
+      {
+        id: "fact-technique",
+        description: "writing technique description sensory",
+        subqueryTemplate: "{topic} writing technique sensory",
+        vectors: { "test-model": makeVec("writing technique sensory detail") },
+        weights: {},
+      },
+    ],
+  };
+}
+
+async function openStoreWithFactors(
+  overrides: Partial<NovelMemoryConfig> = {},
+): Promise<NovelMemoryStore> {
+  return NovelMemoryStore.open({
+    dbPath: makeTmpPath(),
+    source: "style",
+    vectorEnabled: false,
+    ftsEnabled: true,
+    cacheEnabled: false,
+    _providerForTest: fakeProviderResult,
+    _factorSpaceForTest: makeFakeFactorSpace(),
+    ...overrides,
+  });
+}
+
+describe("NovelMemoryStore — L0-filtered search path", () => {
+  it("indexContent() writes non-empty l0_tags when factor space is injected", async () => {
+    const store = await openStoreWithFactors();
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
+
+    const rows = (store as any).db
+      .prepare(`SELECT l0_tags FROM chunks WHERE source = 'style'`)
+      .all() as Array<{ l0_tags: string }>;
+
+    expect(rows.length).toBeGreaterThan(0);
+    // At least one chunk should have non-empty l0_tags (factor scores)
+    const nonEmpty = rows.filter((r) => r.l0_tags !== "{}");
+    expect(nonEmpty.length).toBeGreaterThan(0);
+
+    // Each non-empty l0_tags should contain known factor IDs
+    for (const row of nonEmpty) {
+      const tags = JSON.parse(row.l0_tags) as Record<string, number>;
+      const factorIds = Object.keys(tags);
+      expect(factorIds.length).toBeGreaterThan(0);
+      for (const id of factorIds) {
+        expect(["fact-gothic", "fact-technique"]).toContain(id);
+        expect(tags[id]).toBeGreaterThan(0);
+      }
+    }
+
+    store.close();
+  });
+
+  it("l0_tags scores are in (0, 1] range", async () => {
+    const store = await openStoreWithFactors();
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
+
+    const rows = (store as any).db
+      .prepare(`SELECT l0_tags FROM chunks WHERE source = 'style' AND l0_tags != '{}'`)
+      .all() as Array<{ l0_tags: string }>;
+
+    for (const row of rows) {
+      const tags = JSON.parse(row.l0_tags) as Record<string, number>;
+      for (const score of Object.values(tags)) {
+        expect(score).toBeGreaterThan(0);
+        expect(score).toBeLessThanOrEqual(1);
+      }
+    }
+
+    store.close();
+  });
+
+  it("search() still returns results with factor space injected (FTS fallthrough)", async () => {
+    const store = await openStoreWithFactors();
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
+
+    // vectorEnabled=false so L0-filtered vector search returns empty → falls through to FTS
+    const results = await store.search({ query: "gothic atmosphere castle" });
+    expect(results.length).toBeGreaterThan(0);
+
+    store.close();
+  });
+
+  it("l0_tags are stable across re-indexing with same content", async () => {
+    const store = await openStoreWithFactors();
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT, force: true });
+
+    const before = (store as any).db
+      .prepare(`SELECT id, l0_tags FROM chunks WHERE source = 'style' ORDER BY id`)
+      .all() as Array<{ id: string; l0_tags: string }>;
+
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT, force: true });
+
+    const after = (store as any).db
+      .prepare(`SELECT id, l0_tags FROM chunks WHERE source = 'style' ORDER BY id`)
+      .all() as Array<{ id: string; l0_tags: string }>;
+
+    expect(after.length).toBe(before.length);
+    for (let i = 0; i < before.length; i++) {
+      expect(after[i]!.l0_tags).toBe(before[i]!.l0_tags);
+    }
+
+    store.close();
+  });
+
+  it("different content produces different l0_tags distributions", async () => {
+    const store = await openStoreWithFactors();
+    await store.indexContent({ virtualPath: "style/gothic", content: STYLE_CONTENT });
+    await store.indexContent({ virtualPath: "style/timeline", content: TIMELINE_CONTENT });
+
+    const gothicTags = (store as any).db
+      .prepare(`SELECT l0_tags FROM chunks WHERE path = 'style/gothic' AND l0_tags != '{}'`)
+      .all() as Array<{ l0_tags: string }>;
+
+    const timelineTags = (store as any).db
+      .prepare(`SELECT l0_tags FROM chunks WHERE path = 'style/timeline' AND l0_tags != '{}'`)
+      .all() as Array<{ l0_tags: string }>;
+
+    // Both paths produced tagged chunks
+    expect(gothicTags.length).toBeGreaterThan(0);
+    expect(timelineTags.length).toBeGreaterThan(0);
+
+    // Collect all distinct score sets — gothic and timeline should differ overall
+    const gothicScoreSets = gothicTags.map((r) =>
+      JSON.stringify(JSON.parse(r.l0_tags) as Record<string, number>),
+    );
+    const timelineScoreSets = timelineTags.map((r) =>
+      JSON.stringify(JSON.parse(r.l0_tags) as Record<string, number>),
+    );
+    // The two corpora should not produce identical tag distributions for all chunks
+    const allSame = gothicScoreSets.every((s) => timelineScoreSets.includes(s));
+    expect(allSame).toBe(false);
 
     store.close();
   });

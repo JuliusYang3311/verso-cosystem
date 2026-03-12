@@ -9,6 +9,7 @@ export type HybridVectorResult = {
   snippet: string;
   vectorScore: number;
   timestamp?: number;
+  l1Sentences?: string;
 };
 
 export type HybridKeywordResult = {
@@ -19,6 +20,7 @@ export type HybridKeywordResult = {
   source: HybridSource;
   snippet: string;
   textScore: number;
+  l1Sentences?: string;
 };
 
 /**
@@ -87,6 +89,7 @@ export function mergeHybridResults(params: {
   snippet: string;
   source: HybridSource;
   timestamp?: number;
+  l1Sentences?: string;
 }> {
   const entryMap = new Map<
     string,
@@ -99,6 +102,7 @@ export function mergeHybridResults(params: {
       snippet: string;
       rawScore: number;
       timestamp?: number;
+      l1Sentences?: string;
     }
   >();
 
@@ -114,6 +118,7 @@ export function mergeHybridResults(params: {
       snippet: r.snippet,
       rawScore: params.vectorWeight * vecSm[i],
       timestamp: r.timestamp,
+      l1Sentences: r.l1Sentences,
     });
   }
 
@@ -127,6 +132,10 @@ export function mergeHybridResults(params: {
       if (r.snippet && r.snippet.length > 0) {
         existing.snippet = r.snippet;
       }
+      // Prefer vector l1Sentences if already set; fill in from keyword if missing
+      if (!existing.l1Sentences && r.l1Sentences) {
+        existing.l1Sentences = r.l1Sentences;
+      }
     } else {
       entryMap.set(r.id, {
         id: r.id,
@@ -137,6 +146,7 @@ export function mergeHybridResults(params: {
         snippet: r.snippet,
         rawScore: contribution,
         timestamp: undefined,
+        l1Sentences: r.l1Sentences,
       });
     }
   }
@@ -151,6 +161,7 @@ export function mergeHybridResults(params: {
       snippet: entry.snippet,
       source: entry.source,
       timestamp: entry.timestamp,
+      l1Sentences: entry.l1Sentences,
     }))
     .sort((a, b) => b.score - a.score);
 }

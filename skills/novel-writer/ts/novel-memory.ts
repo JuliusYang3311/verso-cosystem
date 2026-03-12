@@ -29,6 +29,7 @@ import type { EmbeddingProvider, EmbeddingProviderResult } from "../../../src/me
 import type { EmbeddingContext } from "../../../src/memory/manager-embeddings.js";
 import type { SearchRowResult } from "../../../src/memory/manager-search.js";
 import type { VectorState } from "../../../src/memory/manager-vectors.js";
+import type { L1Sentence } from "../../../src/memory/types.js";
 import { resolveAgentDir } from "../../../src/agents/agent-scope.js";
 import {
   DEFAULT_CONTEXT_PARAMS,
@@ -41,6 +42,7 @@ import { createEmbeddingProvider } from "../../../src/memory/embeddings.js";
 import { buildFtsQuery, mergeHybridResults } from "../../../src/memory/hybrid.js";
 import { chunkMarkdown, hashText, ensureDir } from "../../../src/memory/internal.js";
 import {
+  type LatentFactorSpace,
   loadFactorSpace,
   projectChunkToFactors,
   queryToSubqueries,
@@ -102,6 +104,13 @@ export type NovelMemoryConfig = {
    * Do not use in production.
    */
   _providerForTest?: EmbeddingProviderResult;
+  /**
+   * Injected factor space for tests — bypasses loadFactorSpace() in both
+   * indexContent() and search(). Allows testing the L0-filtered search path
+   * without a factor space file on disk.
+   * Do not use in production.
+   */
+  _factorSpaceForTest?: LatentFactorSpace;
 };
 
 /** Query settings resolved from verso config, matching main memory's defaults. */
@@ -140,6 +149,7 @@ export class NovelMemoryStore {
   private chunking: { tokens: number; overlap: number };
   private batchFailureTracker;
   private querySettings: NovelQuerySettings;
+  private _testFactorSpace: LatentFactorSpace | undefined;
 
   private constructor(params: {
     db: DatabaseSync;
@@ -169,6 +179,7 @@ export class NovelMemoryStore {
     };
     this.batchFailureTracker = createBatchFailureTracker(false);
     this.querySettings = params.querySettings;
+    this._testFactorSpace = params.config._factorSpaceForTest;
   }
 
   static async open(config: NovelMemoryConfig): Promise<NovelMemoryStore> {
@@ -249,9 +260,9 @@ export class NovelMemoryStore {
     const now = Date.now();
 
     // 2. Load factor space for L0 tags (non-fatal — graceful empty fallback)
-    let factorSpace: Awaited<ReturnType<typeof loadFactorSpace>> | null = null;
+    let factorSpace: LatentFactorSpace | null = null;
     try {
-      const space = await loadFactorSpace();
+      const space = this._testFactorSpace ?? (await loadFactorSpace());
       if (space.factors.length > 0) factorSpace = space;
     } catch {
       // no factor space available — l0_tags will be {}
@@ -459,7 +470,7 @@ export class NovelMemoryStore {
 
     if (ctxParams.latentFactorEnabled && hasVector) {
       try {
-        const space = await loadFactorSpace();
+        const space = this._testFactorSpace ?? (await loadFactorSpace());
         if (space.factors.length > 0) {
           const { subqueries } = queryToSubqueries({
             queryVec,
@@ -509,6 +520,7 @@ export class NovelMemoryStore {
             score: r.score,
             source: r.source ?? this.source,
             timestamp: r.timestamp,
+            l1Sentences: r.l1Sentences ? (JSON.parse(r.l1Sentences) as L1Sentence[]) : undefined,
             factorsUsed: q.factorId ? [{ id: q.factorId, score: r.score }] : undefined,
           });
         }
@@ -672,6 +684,7 @@ export class NovelMemoryStore {
         snippet: r.snippet,
         vectorScore: r.score,
         timestamp: r.timestamp,
+        l1Sentences: r.l1Sentences,
       })),
       keyword: keywordResults.map((r) => ({
         id: r.id,
@@ -681,6 +694,7 @@ export class NovelMemoryStore {
         source: r.source,
         snippet: r.snippet,
         textScore: r.textScore,
+        l1Sentences: r.l1Sentences,
       })),
       vectorWeight: this.querySettings.hybrid.vectorWeight,
       textWeight: this.querySettings.hybrid.textWeight,

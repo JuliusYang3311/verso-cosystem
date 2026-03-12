@@ -69,8 +69,9 @@ export function createMemorySearchTool(options: {
           sessionKey: options.agentSessionKey,
         });
         const decorated = decorateCitations(rawResults, includeCitations);
+        const forLlm = decorated.map(({ l1Sentences: _l1, l0Tags: _l0, ...rest }) => rest);
         return jsonResult({
-          results: decorated,
+          results: forLlm,
           provider: manager.status().provider,
           model: manager.status().model,
           fallback: manager.status().fallback,

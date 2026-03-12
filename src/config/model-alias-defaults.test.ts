@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { VersoConfig } from "./types.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../agents/defaults.js";
 import { applyModelDefaults } from "./defaults.js";
+import { ModelDefinitionSchema } from "./zod-schema.core.js";
 
 describe("applyModelDefaults", () => {
   it("adds default aliases when models are present", () => {
@@ -98,5 +99,76 @@ describe("applyModelDefaults", () => {
 
     expect(model?.contextWindow).toBe(32768);
     expect(model?.maxTokens).toBe(32768);
+  });
+
+  it("preserves thinkingLevel through applyModelDefaults", () => {
+    const cfg = {
+      models: {
+        providers: {
+          newapi: {
+            baseUrl: "https://code.z-daha.cc/",
+            api: "anthropic-messages",
+            models: [
+              {
+                id: "claude-opus-4-6-thinking",
+                name: "claude-opus-4-6-thinking",
+                reasoning: true,
+                thinkingLevel: "high",
+                input: ["text", "image"],
+                contextWindow: 200000,
+                maxTokens: 8192,
+              },
+            ],
+          },
+        },
+      },
+    } satisfies VersoConfig;
+
+    const next = applyModelDefaults(cfg);
+    const model = next.models?.providers?.newapi?.models?.[0];
+
+    expect(model?.thinkingLevel).toBe("high");
+    expect(model?.reasoning).toBe(true);
+    expect(model?.input).toEqual(["text", "image"]);
+  });
+});
+
+describe("ModelDefinitionSchema (zod)", () => {
+  it("accepts thinkingLevel field", () => {
+    const result = ModelDefinitionSchema.safeParse({
+      id: "test",
+      name: "test",
+      reasoning: true,
+      thinkingLevel: "high",
+      input: ["text", "image"],
+      contextWindow: 200000,
+      maxTokens: 8192,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.thinkingLevel).toBe("high");
+  });
+
+  it("rejects unknown fields (strict mode still works)", () => {
+    const result = ModelDefinitionSchema.safeParse({
+      id: "test",
+      name: "test",
+      unknownField: "should-fail",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("allows model without thinkingLevel", () => {
+    const result = ModelDefinitionSchema.safeParse({
+      id: "test",
+      name: "test",
+      reasoning: false,
+      input: ["text"],
+      contextWindow: 200000,
+      maxTokens: 8192,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.thinkingLevel).toBeUndefined();
   });
 });

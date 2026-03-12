@@ -13,26 +13,54 @@
  */
 
 import fsSync from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { NovelMemoryStore } from "./novel-memory.js";
 
-// Resolve skill root reliably whether running from source (ts/) or bundled (dist/skills/novel-writer/)
-function findRepoRoot(): string {
-  let dir = import.meta.dirname;
-  for (let i = 0; i < 10; i++) {
-    if (fsSync.existsSync(path.join(dir, "package.json"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
+// ---------------------------------------------------------------------------
+// Path resolution: projects → user workspace, style DB → state dir
+// ---------------------------------------------------------------------------
+
+function expandHome(p: string): string {
+  return p.startsWith("~/") || p === "~" ? path.join(os.homedir(), p.slice(2)) : p;
 }
 
-const SKILL_ROOT = path.join(findRepoRoot(), "skills", "novel-writer");
-export const PROJECTS_DIR = path.join(SKILL_ROOT, "projects");
-export const STYLE_DB_PATH = path.join(SKILL_ROOT, "style", "style_memory.sqlite");
+function resolveVersoStateDir(): string {
+  const override = process.env.VERSO_STATE_DIR?.trim() || process.env.CLAWDBOT_STATE_DIR?.trim();
+  return override ? expandHome(override) : path.join(os.homedir(), ".verso");
+}
+
+function resolveNovelPaths(): { projectsDir: string; styleDbPath: string } {
+  const stateDir = resolveVersoStateDir();
+
+  // Read workspace from verso config (agents.defaults.workspace)
+  let workspaceDir: string | undefined;
+  try {
+    const configPath = process.env.VERSO_CONFIG_PATH?.trim() || path.join(stateDir, "verso.json");
+    const raw = fsSync.readFileSync(configPath, "utf-8");
+    const cfg = JSON.parse(raw) as Record<string, unknown>;
+    const ws = (cfg?.agents as Record<string, unknown> | undefined)?.defaults as
+      | Record<string, unknown>
+      | undefined;
+    const rawWs = (ws?.workspace as string | undefined)?.trim();
+    if (rawWs) workspaceDir = expandHome(rawWs);
+  } catch {
+    // config missing or unreadable — fall back to default workspace
+  }
+
+  const effectiveWorkspace = workspaceDir ?? path.join(stateDir, "workspace");
+  const novelRoot = path.join(effectiveWorkspace, "novel-writer");
+  return {
+    projectsDir: path.join(novelRoot, "projects"),
+    styleDbPath: path.join(novelRoot, "style", "style_memory.sqlite"),
+  };
+}
+
+const { projectsDir, styleDbPath } = resolveNovelPaths();
+export const PROJECTS_DIR = projectsDir;
+export const STYLE_DB_PATH = styleDbPath;
 
 // Log resolved paths once at startup for diagnostics
 console.error(`[novel-writer] PROJECTS_DIR=${PROJECTS_DIR}`);

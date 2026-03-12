@@ -178,7 +178,8 @@ export async function searchKeyword(params: {
   const rows = params.db
     .prepare(
       `SELECT id, path, source, start_line, end_line, text,\n` +
-        `       bm25(${params.ftsTable}) AS rank\n` +
+        `       bm25(${params.ftsTable}) AS rank,\n` +
+        `       (SELECT l1_sentences FROM chunks WHERE id = ${params.ftsTable}.id) AS l1_sentences\n` +
         `  FROM ${params.ftsTable}\n` +
         ` WHERE ${params.ftsTable} MATCH ? AND model = ?${params.sourceFilter.sql}\n` +
         ` ORDER BY rank ASC\n` +
@@ -192,6 +193,7 @@ export async function searchKeyword(params: {
     end_line: number;
     text: string;
     rank: number;
+    l1_sentences: string | null;
   }>;
 
   return rows.map((row) => {
@@ -205,6 +207,7 @@ export async function searchKeyword(params: {
       textScore,
       snippet: truncateUtf16Safe(row.text, params.snippetMaxChars),
       source: row.source,
+      l1Sentences: row.l1_sentences || undefined,
     };
   });
 }
