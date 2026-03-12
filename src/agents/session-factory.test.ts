@@ -134,10 +134,10 @@ describe("DefaultResourceLoader extension loading", () => {
 });
 
 // ---------------------------------------------------------------------------
-// WeakMap runtime wiring
+// Symbol runtime wiring
 // ---------------------------------------------------------------------------
 
-describe("WeakMap runtime wiring", () => {
+describe("Symbol runtime wiring", () => {
   it("stores runtime keyed by sessionManager after buildEmbeddedExtensionPaths", () => {
     const sessionManager = SessionManager.inMemory();
     const { manager } = makeMemoryManager();

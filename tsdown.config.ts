@@ -63,6 +63,20 @@ export default defineConfig([
     fixedExtension: false,
     platform: "node",
   },
+  // Pi-extensions are loaded at runtime by jiti via DefaultResourceLoader.
+  // They MUST be separate .js files — not bundled into the main chunk — so that
+  // jiti can find and load them independently.
+  {
+    entry: [
+      "src/agents/pi-extensions/dynamic-context.ts",
+      "src/agents/pi-extensions/context-pruning.ts",
+      "src/agents/pi-extensions/compaction-safeguard.ts",
+    ],
+    outDir: "dist/pi-extensions",
+    env,
+    fixedExtension: false,
+    platform: "node",
+  },
   {
     entry: [
       "skills/novel-writer/ts/write-chapter.ts",

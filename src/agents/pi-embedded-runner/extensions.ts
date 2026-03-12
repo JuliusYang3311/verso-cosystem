@@ -16,10 +16,14 @@ import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "./cache-t
 
 function resolvePiExtensionPath(id: string): string {
   const self = fileURLToPath(import.meta.url);
-  const dir = path.dirname(self);
-  // In dev this file is `.ts` (tsx), in production it's `.js`.
-  const ext = path.extname(self) === ".ts" ? "ts" : "js";
-  return path.join(dir, "..", "pi-extensions", `${id}.${ext}`);
+  const isDev = path.extname(self) === ".ts";
+  if (isDev) {
+    // Dev (tsx): this file lives in pi-embedded-runner/, extensions are one level up.
+    return path.join(path.dirname(self), "..", "pi-extensions", `${id}.ts`);
+  }
+  // Prod (bundled): this file is inside dist/. Extension files are compiled to
+  // dist/pi-extensions/ by tsdown as separate entry points loadable by jiti.
+  return path.join(path.dirname(self), "pi-extensions", `${id}.js`);
 }
 
 function resolveContextWindowTokens(params: {

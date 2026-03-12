@@ -7,10 +7,11 @@ export type ContextPruningRuntimeValue = {
   lastCacheTouchAt?: number | null;
 };
 
-// Session-scoped runtime registry keyed by object identity.
-// Important: this relies on Pi passing the same SessionManager object instance into
-// ExtensionContext (ctx.sessionManager) that we used when calling setContextPruningRuntime.
-const REGISTRY = new WeakMap<object, ContextPruningRuntimeValue>();
+// Session-scoped runtime stored directly on the sessionManager object via a
+// well-known Symbol. Symbol.for() uses the global symbol registry, so the same
+// key is resolved even across separate bundle instances (main chunk vs jiti-loaded
+// extension file), which a module-local WeakMap cannot guarantee.
+const RUNTIME_KEY = Symbol.for("verso.contextPruningRuntime");
 
 export function setContextPruningRuntime(
   sessionManager: unknown,
@@ -19,14 +20,11 @@ export function setContextPruningRuntime(
   if (!sessionManager || typeof sessionManager !== "object") {
     return;
   }
-
-  const key = sessionManager;
   if (value === null) {
-    REGISTRY.delete(key);
+    delete (sessionManager as Record<symbol, unknown>)[RUNTIME_KEY];
     return;
   }
-
-  REGISTRY.set(key, value);
+  (sessionManager as Record<symbol, unknown>)[RUNTIME_KEY] = value;
 }
 
 export function getContextPruningRuntime(
@@ -35,6 +33,7 @@ export function getContextPruningRuntime(
   if (!sessionManager || typeof sessionManager !== "object") {
     return null;
   }
-
-  return REGISTRY.get(sessionManager) ?? null;
+  return (
+    ((sessionManager as Record<symbol, unknown>)[RUNTIME_KEY] as ContextPruningRuntimeValue) ?? null
+  );
 }

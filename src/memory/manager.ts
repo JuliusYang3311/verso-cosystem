@@ -996,9 +996,13 @@ export class MemoryIndexManager implements MemorySearchManager {
     const shouldFlush = buf.bytes >= thresholds.deltaBytes || buf.turns >= thresholds.deltaMessages;
     if (!shouldFlush) return;
 
+    await this.flushSessionBuffer(sessionId, buf);
+  }
+
+  /** Flush one session buffer to the index and remove it from the map. */
+  private async flushSessionBuffer(sessionId: string, buf: { chunks: string[] }): Promise<void> {
     const content = buf.chunks.join("\n\n---\n\n");
     this.sessionBuffers.delete(sessionId);
-
     await this.indexContent({ path: `sessions/${sessionId}`, content, source: "sessions" });
   }
 
@@ -1018,6 +1022,14 @@ export class MemoryIndexManager implements MemorySearchManager {
     if (this.watcher) {
       await this.watcher.close();
       this.watcher = null;
+    }
+    // Flush any buffered session turns before closing the DB so they are not lost.
+    if (this.sessionBuffers.size > 0) {
+      await Promise.allSettled(
+        Array.from(this.sessionBuffers.entries()).map(([sid, buf]) =>
+          this.flushSessionBuffer(sid, buf),
+        ),
+      );
     }
     this.db.close();
     INDEX_CACHE.delete(this.cacheKey);

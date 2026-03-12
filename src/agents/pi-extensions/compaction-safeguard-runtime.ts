@@ -3,9 +3,11 @@ export type CompactionSafeguardRuntimeValue = {
   contextWindowTokens?: number;
 };
 
-// Session-scoped runtime registry keyed by object identity.
-// Follows the same WeakMap pattern as context-pruning/runtime.ts.
-const REGISTRY = new WeakMap<object, CompactionSafeguardRuntimeValue>();
+// Session-scoped runtime stored directly on the sessionManager object via a
+// well-known Symbol. Symbol.for() uses the global symbol registry, so the same
+// key is resolved even across separate bundle instances (main chunk vs jiti-loaded
+// extension file), which a module-local WeakMap cannot guarantee.
+const RUNTIME_KEY = Symbol.for("verso.compactionSafeguardRuntime");
 
 export function setCompactionSafeguardRuntime(
   sessionManager: unknown,
@@ -14,14 +16,11 @@ export function setCompactionSafeguardRuntime(
   if (!sessionManager || typeof sessionManager !== "object") {
     return;
   }
-
-  const key = sessionManager;
   if (value === null) {
-    REGISTRY.delete(key);
+    delete (sessionManager as Record<symbol, unknown>)[RUNTIME_KEY];
     return;
   }
-
-  REGISTRY.set(key, value);
+  (sessionManager as Record<symbol, unknown>)[RUNTIME_KEY] = value;
 }
 
 export function getCompactionSafeguardRuntime(
@@ -30,6 +29,8 @@ export function getCompactionSafeguardRuntime(
   if (!sessionManager || typeof sessionManager !== "object") {
     return null;
   }
-
-  return REGISTRY.get(sessionManager) ?? null;
+  return (
+    ((sessionManager as Record<symbol, unknown>)[RUNTIME_KEY] as CompactionSafeguardRuntimeValue) ??
+    null
+  );
 }

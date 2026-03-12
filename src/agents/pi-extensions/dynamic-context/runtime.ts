@@ -7,10 +7,11 @@ export type DynamicContextRuntime = {
   contextLimit?: number;
 };
 
-// Session-scoped runtime registry keyed by object identity.
-// Same pattern as context-pruning/runtime.ts — relies on Pi passing
-// the same SessionManager object instance into ExtensionContext.
-const REGISTRY = new WeakMap<object, DynamicContextRuntime>();
+// Session-scoped runtime stored directly on the sessionManager object via a
+// well-known Symbol. Symbol.for() uses the global symbol registry, so the same
+// key is resolved even across separate bundle instances (main chunk vs jiti-loaded
+// extension file), which a module-local WeakMap cannot guarantee.
+const RUNTIME_KEY = Symbol.for("verso.dynamicContextRuntime");
 
 export function setDynamicContextRuntime(
   sessionManager: unknown,
@@ -20,15 +21,17 @@ export function setDynamicContextRuntime(
     return;
   }
   if (value === null) {
-    REGISTRY.delete(sessionManager);
+    delete (sessionManager as Record<symbol, unknown>)[RUNTIME_KEY];
     return;
   }
-  REGISTRY.set(sessionManager, value);
+  (sessionManager as Record<symbol, unknown>)[RUNTIME_KEY] = value;
 }
 
 export function getDynamicContextRuntime(sessionManager: unknown): DynamicContextRuntime | null {
   if (!sessionManager || typeof sessionManager !== "object") {
     return null;
   }
-  return REGISTRY.get(sessionManager) ?? null;
+  return (
+    ((sessionManager as Record<symbol, unknown>)[RUNTIME_KEY] as DynamicContextRuntime) ?? null
+  );
 }
