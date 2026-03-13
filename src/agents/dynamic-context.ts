@@ -50,6 +50,9 @@ export type ContextParams = {
   utilizationPriorEnabled?: boolean;
   utilizationPriorStrength?: number;
   utilizationMinSamples?: number;
+  /** Confidence ramp half-life: number of inject samples at which confidence ≈ 0.5.
+   *  Controls how quickly the prior reaches full strength. Higher = more conservative. */
+  utilizationPriorHalfLife?: number;
   utilizationThresholdBoost?: number;
   l1MissRateThreshold?: number;
   l2BudgetRatio?: number;

@@ -20,6 +20,11 @@ import { loadContextParams } from "../agents/dynamic-context.js";
 import { resolveMemorySearchConfig } from "../agents/memory-search.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveUserPath } from "../utils.js";
+import {
+  loadConsolidationCandidates,
+  findMergeCandidates,
+  applyMerges,
+} from "./chunk-consolidation.js";
 import { DEFAULT_GEMINI_EMBEDDING_MODEL } from "./embeddings-gemini.js";
 import { DEFAULT_OPENAI_EMBEDDING_MODEL } from "./embeddings-openai.js";
 import { DEFAULT_VOYAGE_EMBEDDING_MODEL } from "./embeddings-voyage.js";
@@ -633,12 +638,19 @@ export class MemoryIndexManager implements MemorySearchManager {
     const minSamples = contextParams.utilizationMinSamples ?? 3;
     if (strength === 0) return results;
 
+    // Half-life: number of inject samples at which confidence reaches ~50%.
+    // Evolver-tunable via utilizationPriorHalfLife (default 10).
+    const halfLife = contextParams.utilizationPriorHalfLife ?? 10;
+    const decayRate = Math.LN2 / Math.max(halfLife, 1);
+
     return results.map((r) => {
       if (!r.id) return r;
       const stats = this.getChunkUtilizationStats(r.id);
       if (!stats || stats.injectCount < minSamples) return r;
-      // multiplier ∈ [1 - strength/2, 1 + strength/2]
-      const multiplier = 1.0 + strength * (stats.utilizationRate - 0.5);
+      // Confidence ramp: at halfLife samples → ~0.5, at 3×halfLife → ~0.87
+      const confidence = 1 - Math.exp(-stats.injectCount * decayRate);
+      const rawMultiplier = 1.0 + strength * (stats.utilizationRate - 0.5);
+      const multiplier = 1.0 + confidence * (rawMultiplier - 1.0);
       return { ...r, score: r.score * multiplier };
     });
   }
@@ -1003,6 +1015,8 @@ export class MemoryIndexManager implements MemorySearchManager {
       hash,
     };
     await this.indexFile(entry, { source, content });
+    // Consolidate within this path (session or memory file)
+    await this.consolidateChunks({ source, path: params.path });
   }
 
   /**
@@ -1061,6 +1075,121 @@ export class MemoryIndexManager implements MemorySearchManager {
 
   getSessionUtilizationRate(sessionId: string, windowMs?: number): number | null {
     return utilizationModule.getSessionUtilizationRate(this.db, sessionId, windowMs);
+  }
+
+  /**
+   * Consolidate similar chunks within the same path.
+   * Runs after indexing to merge near-duplicate chunks caused by
+   * overlapping re-chunking after edits. Works for both memory and session chunks.
+   *
+   * Each merged chunk is:
+   *   - Re-embedded from scratch (not averaged)
+   *   - L1 re-extracted via embedding-based MMR (same as indexFile)
+   *   - L0 re-projected from the new embedding
+   *   - FTS and vector tables updated
+   */
+  private async consolidateChunks(opts?: { source?: string; path?: string }): Promise<void> {
+    try {
+      const candidates = loadConsolidationCandidates(this.db, opts);
+      if (candidates.length < 2) return;
+      const plans = findMergeCandidates(candidates, {
+        similarityThreshold: this.settings.consolidation?.similarityThreshold ?? 0.92,
+        maxMergedChars: this.settings.consolidation?.maxMergedChars ?? 6400,
+      });
+      if (plans.length === 0) return;
+
+      // Load factor space once for L0 projection
+      let factorSpace: Awaited<ReturnType<typeof loadFactorSpace>> | null = null;
+      try {
+        factorSpace = await loadFactorSpace();
+        if (factorSpace.factors.length === 0) factorSpace = null;
+      } catch {
+        factorSpace = null;
+      }
+
+      const vectorReady = this.vector.enabled && this.vector.available;
+
+      await applyMerges(this.db, plans, {
+        hashText,
+
+        embedText: async (text: string) => {
+          const results = await this.provider.embedBatch([text]);
+          return results[0] ?? [];
+        },
+
+        extractL1: async (text: string, chunkEmbedding: number[]) => {
+          const sentences = splitSentences(text);
+          if (sentences.length <= 1 || chunkEmbedding.length === 0) return sentences;
+          try {
+            const sentenceEmbeddings = await this.provider.embedBatch(sentences.map((s) => s.text));
+            return extractL1Sentences(sentences, sentenceEmbeddings, chunkEmbedding);
+          } catch {
+            return sentences;
+          }
+        },
+
+        projectL0: (embedding: number[]) => {
+          if (!factorSpace || embedding.length === 0) return {};
+          return projectChunkToFactors(embedding, factorSpace, this.provider.model);
+        },
+
+        onDelete: (chunkId: string) => {
+          // Clean up FTS
+          if (this.fts.enabled && this.fts.available) {
+            try {
+              this.db.prepare(`DELETE FROM ${FTS_TABLE} WHERE id = ?`).run(chunkId);
+            } catch {
+              /* ignore */
+            }
+          }
+          // Clean up vector table
+          if (vectorReady) {
+            try {
+              this.db.prepare(`DELETE FROM ${VECTOR_TABLE} WHERE id = ?`).run(chunkId);
+            } catch {
+              /* ignore */
+            }
+          }
+        },
+
+        onUpsert: (chunk) => {
+          // Update FTS
+          if (this.fts.enabled && this.fts.available) {
+            try {
+              this.db.prepare(`DELETE FROM ${FTS_TABLE} WHERE id = ?`).run(chunk.id);
+              this.db
+                .prepare(
+                  `INSERT INTO ${FTS_TABLE} (text, id, path, source, model, start_line, end_line) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                )
+                .run(
+                  chunk.text,
+                  chunk.id,
+                  chunk.path,
+                  chunk.source,
+                  chunk.model,
+                  chunk.startLine,
+                  chunk.endLine,
+                );
+            } catch {
+              /* ignore */
+            }
+          }
+          // Update vector table
+          if (vectorReady && chunk.embedding.length > 0) {
+            try {
+              this.db.prepare(`DELETE FROM ${VECTOR_TABLE} WHERE id = ?`).run(chunk.id);
+              this.db
+                .prepare(`INSERT INTO ${VECTOR_TABLE} (id, embedding) VALUES (?, ?)`)
+                .run(chunk.id, vectorToBlob(chunk.embedding));
+            } catch {
+              /* ignore */
+            }
+          }
+        },
+      });
+    } catch {
+      // Consolidation is best-effort; don't block sync
+    }
   }
 
   async close(): Promise<void> {
@@ -1337,6 +1466,9 @@ export class MemoryIndexManager implements MemorySearchManager {
       }
     });
     await runWithConcurrency(tasks, this.getIndexConcurrency());
+
+    // Consolidate near-duplicate chunks across all memory files
+    await this.consolidateChunks({ source: "memory" });
 
     const staleRows = this.db
       .prepare(`SELECT path FROM files WHERE source = ?`)

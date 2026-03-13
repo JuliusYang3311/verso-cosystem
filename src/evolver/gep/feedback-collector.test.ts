@@ -274,3 +274,66 @@ describe("DEFAULT_CONTEXT_PARAMS", () => {
     expect(typeof DEFAULT_CONTEXT_PARAMS.baseThreshold).toBe("number");
   });
 });
+
+// ---------------------------------------------------------------------------
+// feedback.jsonl rotation
+// ---------------------------------------------------------------------------
+
+describe("feedback rotation", () => {
+  it("does not rotate when under ROTATION_MAX (2000) entries", () => {
+    // Write 100 entries — well under threshold
+    for (let i = 0; i < 100; i++) {
+      recordFeedback({ signal: `sig_${i}` });
+    }
+    const feedback = loadRecentFeedback(200);
+    expect(feedback).toHaveLength(100);
+    // First entry should still be present
+    expect(feedback[0].signal).toBe("sig_0");
+  });
+
+  it("rotates to ROTATION_KEEP (1000) entries when exceeding ROTATION_MAX (2000)", () => {
+    // Write 2001 entries to trigger rotation
+    for (let i = 0; i < 2001; i++) {
+      recordFeedback({ signal: `sig_${i}` });
+    }
+    const feedback = loadRecentFeedback(2000);
+    // After rotation: only the latest 1000 should remain
+    expect(feedback).toHaveLength(1000);
+    // The oldest surviving entry should be sig_1001 (0-indexed: entries 1001..2000)
+    expect(feedback[0].signal).toBe("sig_1001");
+    // The newest entry should be the last one written
+    expect(feedback[feedback.length - 1].signal).toBe("sig_2000");
+  });
+
+  it("preserves entry integrity after rotation", () => {
+    for (let i = 0; i < 2001; i++) {
+      recordFeedback({ signal: `sig_${i}`, sessionId: `s_${i}` });
+    }
+    const feedback = loadRecentFeedback(5);
+    // Each entry should be valid JSON with expected fields
+    for (const entry of feedback) {
+      expect(entry.timestamp).toBeTruthy();
+      expect(entry.type).toBe("implicit");
+      expect(entry.signal).toBeTruthy();
+      expect(entry.context_params_snapshot).toBeTruthy();
+    }
+  });
+
+  it("rotation uses atomic tmp+rename (no partial writes)", () => {
+    // Write exactly 2001 to trigger rotation once
+    for (let i = 0; i < 2001; i++) {
+      recordFeedback({ signal: `sig_${i}` });
+    }
+    // Verify no .tmp file left behind
+    const feedbackPath = path.join(tmpGepDir, "feedback.jsonl");
+    expect(fs.existsSync(feedbackPath + ".tmp")).toBe(false);
+    // After rotation: exactly 1000 entries remain
+    const content = fs.readFileSync(feedbackPath, "utf8");
+    const lines = content.split("\n").filter(Boolean);
+    expect(lines).toHaveLength(1000);
+    // Each line should be valid JSON
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+  });
+});

@@ -65,6 +65,12 @@ export type ResolvedMemorySearchConfig = {
     enabled: boolean;
     maxEntries?: number;
   };
+  consolidation?: {
+    /** Cosine similarity threshold for merging (default 0.92). */
+    similarityThreshold?: number;
+    /** Max merged text chars (default 6400 ≈ 1600 tokens). */
+    maxMergedChars?: number;
+  };
 };
 
 const DEFAULT_OPENAI_MODEL = "text-embedding-3-small";

@@ -19,6 +19,7 @@
   "utilizationPriorEnabled": true,
   "utilizationPriorStrength": 0.3,
   "utilizationMinSamples": 3,
+  "utilizationPriorHalfLife": 10,
   "utilizationThresholdBoost": 0.05,
   "l1MissRateThreshold": 0.5,
   "l2BudgetRatio": 0.3,

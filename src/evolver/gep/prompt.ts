@@ -411,6 +411,7 @@ A. context_params.json — search & retrieval parameters:
 - \`utilizationPriorEnabled\` (bool, default: true) — enable utilization-based ranking adjustment
 - \`utilizationPriorStrength\` (float, 0.0–1.0, default: 0.3) — ranking adjustment magnitude
 - \`utilizationMinSamples\` (int, ≥1, default: 3) — min observations before applying prior
+- \`utilizationPriorHalfLife\` (int, ≥1, default: 10) — inject count at which prior confidence reaches ~50%; higher = more conservative ramp-up
 - \`utilizationThresholdBoost\` (float, 0.0–0.3, default: 0.1) — max threshold increase under low utilization
 - \`l1MissRateThreshold\` (float, 0.0–1.0, default: 0.5) — L1 miss rate above which chunk served as L2
 - \`l2BudgetRatio\` (float, 0.0–0.5, default: 0.3) — max fraction of retrieval budget for L2 text

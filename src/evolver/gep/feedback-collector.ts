@@ -123,7 +123,11 @@ function getFeedbackPath(): string {
   return path.join(getGepAssetsDir(), FEEDBACK_FILE);
 }
 
-/** Record a feedback event. */
+/** Max entries before rotation triggers. Keep latest ROTATION_KEEP entries. */
+const ROTATION_MAX = 2000;
+const ROTATION_KEEP = 1000;
+
+/** Record a feedback event, rotating the file when it exceeds ROTATION_MAX entries. */
 export function recordFeedback(feedback: FeedbackInput): FeedbackEntry {
   const entry: FeedbackEntry = {
     timestamp: new Date().toISOString(),
@@ -140,6 +144,21 @@ export function recordFeedback(feedback: FeedbackInput): FeedbackEntry {
     fs.mkdirSync(dir, { recursive: true });
   }
   fs.appendFileSync(filePath, JSON.stringify(entry) + "\n", "utf8");
+
+  // Rotate: if the file exceeds ROTATION_MAX lines, keep only the latest ROTATION_KEEP
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    const lines = content.split("\n").filter(Boolean);
+    if (lines.length > ROTATION_MAX) {
+      const kept = lines.slice(-ROTATION_KEEP);
+      const tmp = filePath + ".tmp";
+      fs.writeFileSync(tmp, kept.join("\n") + "\n", "utf8");
+      fs.renameSync(tmp, filePath);
+    }
+  } catch {
+    // Rotation failure is non-critical
+  }
+
   return entry;
 }
 

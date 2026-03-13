@@ -187,28 +187,90 @@ export function getRecentUtilizationSummary(
 
 // ---------- Attribution helpers ----------
 
-/** Minimum substring length to count as a utilization match. */
-const MIN_PHRASE_LENGTH = 20;
+/**
+ * Minimum "information units" for a phrase to be considered meaningful.
+ * A single threshold governs both CJK and Latin text — CJK characters
+ * are weighted higher (≈2.5 info-units each) because they carry more
+ * information per character than Latin (1 info-unit each).
+ */
+const MIN_INFO_UNITS = 20;
+const CJK_CHAR_WEIGHT = 2.5;
 
-/** Regex: extract phrases of ≥20 characters (letter/digit start). */
-const PHRASE_RE = /[\p{L}\p{N}][^\n]{18,}/gu;
+/** CJK codepoint ranges: CJK Unified, Extension A, Compat, Kana, Hangul. */
+const CJK_RANGE_RE =
+  /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/;
+
+/** CJK clause-splitting punctuation + newlines. */
+const CJK_CLAUSE_SPLIT_RE = /[，。；！？、\n]/;
+
+/** Latin phrase extraction: ≥18 non-newline chars starting with letter/digit. */
+const LATIN_PHRASE_RE = /[\p{L}\p{N}][^\n]{18,}/gu;
+
+/** Compute information units for a string: CJK chars count as ~2.5, others as 1. */
+function infoUnits(text: string): number {
+  let units = 0;
+  for (const ch of text) {
+    units += CJK_RANGE_RE.test(ch) ? CJK_CHAR_WEIGHT : 1;
+  }
+  return units;
+}
+
+/**
+ * Does the text contain enough CJK to warrant clause-level splitting?
+ * Threshold: >30% CJK codepoints.
+ */
+function hasCjkMajority(text: string): boolean {
+  let cjk = 0;
+  let total = 0;
+  for (const ch of text) {
+    total++;
+    if (CJK_RANGE_RE.test(ch)) cjk++;
+  }
+  return total > 0 && cjk / total > 0.3;
+}
+
+/**
+ * Extract meaningful phrases from text, handling both CJK and Latin scripts.
+ *
+ * CJK text: split by clause-level punctuation (，。；！？、), keep clauses
+ * whose information weight ≥ MIN_INFO_UNITS. This avoids matching entire
+ * lines as a single phrase.
+ *
+ * Latin/mixed text: regex extraction of ≥20-char substrings.
+ *
+ * Both paths use the same information-unit threshold — no separate hardcoded
+ * constants per script.
+ */
+export function extractPhrases(text: string): string[] {
+  if (!text) return [];
+
+  if (hasCjkMajority(text)) {
+    return text
+      .split(CJK_CLAUSE_SPLIT_RE)
+      .map((clause) => clause.trim())
+      .filter((clause) => clause.length > 0 && infoUnits(clause) >= MIN_INFO_UNITS);
+  }
+
+  return (text.match(LATIN_PHRASE_RE) ?? []).filter((p) => infoUnits(p) >= MIN_INFO_UNITS);
+}
 
 /**
  * Detect whether an LLM output utilized content from a snippet.
  *
- * Intentionally simple: extracts phrases ≥20 chars from the snippet and
- * checks for substring presence in the output. Designed for statistical
- * accuracy over many samples, not per-instance precision.
+ * Extracts phrases from the snippet (CJK-aware clause splitting) and checks
+ * for substring presence in the output. Uses information-unit weighting so
+ * the same threshold governs both scripts. Designed for statistical accuracy
+ * over many samples, not per-instance precision.
  */
 export function detectUtilization(snippet: string, output: string): boolean {
   if (!snippet || !output) return false;
 
-  const phrases = snippet.match(PHRASE_RE);
-  if (!phrases) return false;
+  const phrases = extractPhrases(snippet);
+  if (phrases.length === 0) return false;
 
   const outputLower = output.toLowerCase();
   for (const phrase of phrases) {
-    if (phrase.length >= MIN_PHRASE_LENGTH && outputLower.includes(phrase.toLowerCase())) {
+    if (outputLower.includes(phrase.toLowerCase())) {
       return true;
     }
   }

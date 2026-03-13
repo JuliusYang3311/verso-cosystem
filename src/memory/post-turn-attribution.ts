@@ -13,6 +13,7 @@
 
 import type { InjectedChunkRecord } from "../agents/pi-extensions/dynamic-context/runtime.js";
 import type { MemorySearchManager, UtilizationEvent, UtilizationEventType } from "./types.js";
+import { detectUtilization } from "./utilization.js";
 
 // ---------- Types ----------
 
@@ -125,23 +126,8 @@ export function computeAttribution(input: AttributionInput): AttributionResult {
   };
 }
 
-// ---------- Phrase matching (inlined from utilization.ts for zero-dep) ----------
-
-const MIN_PHRASE_LENGTH = 20;
-const PHRASE_RE = /[\p{L}\p{N}][^\n]{18,}/gu;
-
-function detectPhraseMatch(snippet: string, output: string): boolean {
-  if (!snippet || !output) return false;
-  const phrases = snippet.match(PHRASE_RE);
-  if (!phrases) return false;
-  const outputLower = output.toLowerCase();
-  for (const phrase of phrases) {
-    if (phrase.length >= MIN_PHRASE_LENGTH && outputLower.includes(phrase.toLowerCase())) {
-      return true;
-    }
-  }
-  return false;
-}
+// Phrase matching delegated to utilization.ts (CJK-aware implementation).
+const detectPhraseMatch = detectUtilization;
 
 // ---------- Full attribution pipeline ----------
 

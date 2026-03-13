@@ -73,10 +73,10 @@ export default function dynamicContextExtension(api: ExtensionAPI): void {
       if (searchQuery && runtime.memoryManager) {
         try {
           // Get session utilization rate for adaptive threshold
-          const sessionUtilRate = runtime.memoryManager.getSessionUtilizationRate?.(
-            /* sessionId is not easily available here; use a general recent window */
-            "",
-          );
+          const sessionId =
+            (ctx.sessionManager as unknown as { getSessionId?: () => string }).getSessionId?.() ??
+            "";
+          const sessionUtilRate = runtime.memoryManager.getSessionUtilizationRate?.(sessionId);
           if (
             sessionUtilRate !== undefined &&
             sessionUtilRate !== null &&
