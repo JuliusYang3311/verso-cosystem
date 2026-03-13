@@ -1,5 +1,28 @@
 export type MemorySource = "memory" | "sessions";
 
+// ---------- Utilization tracking ----------
+
+export type UtilizationEventType = "injected" | "utilized" | "ignored" | "l1_miss" | "misleading";
+
+export type UtilizationEvent = {
+  chunkId: string;
+  sessionId: string;
+  event: UtilizationEventType;
+  factorIds: string[];
+  queryHash?: string;
+  score?: number;
+  timestamp: number;
+};
+
+export type ChunkUtilizationStats = {
+  injectCount: number;
+  utilizeCount: number;
+  ignoredCount: number;
+  l1MissCount: number;
+  misleadingCount: number;
+  utilizationRate: number;
+};
+
 export type L1Sentence = {
   text: string;
   startChar: number;
@@ -110,4 +133,11 @@ export interface MemorySearchManager {
     assistantText: string;
   }): Promise<void>;
   close?(): Promise<void>;
+
+  /** Record utilization events for injected chunks. */
+  recordUtilization?(events: UtilizationEvent[]): void;
+  /** Get aggregate utilization stats for a chunk. */
+  getChunkUtilizationStats?(chunkId: string): ChunkUtilizationStats | null;
+  /** Get session-level utilization rate. */
+  getSessionUtilizationRate?(sessionId: string, windowMs?: number): number | null;
 }

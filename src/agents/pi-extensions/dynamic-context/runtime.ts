@@ -1,10 +1,23 @@
 import type { VersoConfig } from "../../../config/types.js";
 import type { MemorySearchManager } from "../../../memory/types.js";
 
+/** Record of a chunk injected into <memory-context> during a single LLM call. */
+export type InjectedChunkRecord = {
+  id: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  snippet: string;
+  score: number;
+  factorIds: string[];
+};
+
 export type DynamicContextRuntime = {
   memoryManager: MemorySearchManager | null;
   config?: VersoConfig;
   contextLimit?: number;
+  /** Chunks injected in the most recent context event. Reset each turn. */
+  lastInjectedChunks: InjectedChunkRecord[];
 };
 
 // Session-scoped runtime stored directly on the sessionManager object via a

@@ -4,6 +4,8 @@
  * Fires on every "context" event (before each LLM call).
  * - Searches memory via injected memoryManager
  * - Applies dynamic budget allocation (recent ratio + retrieval ratio)
+ * - Adaptive threshold based on session utilization feedback
+ * - L1/L2 adaptive selection per chunk
  * - Injects <memory-context> snippets
  * - Returns trimmed messages to the SDK
  *
@@ -12,6 +14,7 @@
  */
 
 import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { computeAdaptiveThreshold } from "../../../memory/utilization.js";
 import { buildDynamicContext, loadContextParams } from "../../dynamic-context.js";
 import { getDynamicContextRuntime } from "./runtime.js";
 
@@ -28,25 +31,51 @@ export default function dynamicContextExtension(api: ExtensionAPI): void {
     }
 
     try {
-      // Extract search query from last user message
-      const lastUserMsg = messages
-        .toReversed()
-        .find(
+      // Load evolver-tunable params
+      const contextParams = await loadContextParams();
+
+      // Extract search query from last user message(s)
+      const querySourceMessages = contextParams.querySourceMessages ?? 1;
+      const queryMaxChars = contextParams.queryMaxChars ?? 500;
+      const userMessages = messages
+        .filter(
           (m) =>
             m &&
             typeof m === "object" &&
             (m as { role?: string }).role === "user" &&
             typeof (m as { content?: unknown }).content === "string",
-        );
-      const searchQuery =
-        lastUserMsg && typeof (lastUserMsg as { content?: unknown }).content === "string"
-          ? (lastUserMsg as { content: string }).content.slice(0, 500)
-          : "";
+        )
+        .slice(-querySourceMessages);
+      const searchQuery = userMessages
+        .map((m) => (m as { content: string }).content)
+        .join("\n")
+        .slice(0, queryMaxChars);
 
       // Retrieve memory chunks
       let retrievedChunks: Parameters<typeof buildDynamicContext>[0]["retrievedChunks"] = [];
+
+      // Apply adaptive threshold: raise threshold when utilization is low
+      let effectiveParams = contextParams;
       if (searchQuery && runtime.memoryManager) {
         try {
+          // Get session utilization rate for adaptive threshold
+          const sessionUtilRate = runtime.memoryManager.getSessionUtilizationRate?.(
+            /* sessionId is not easily available here; use a general recent window */
+            "",
+          );
+          if (
+            sessionUtilRate !== undefined &&
+            sessionUtilRate !== null &&
+            contextParams.utilizationThresholdBoost
+          ) {
+            const adaptedThreshold = computeAdaptiveThreshold(
+              contextParams.baseThreshold,
+              sessionUtilRate,
+              contextParams.utilizationThresholdBoost,
+            );
+            effectiveParams = { ...contextParams, baseThreshold: adaptedThreshold };
+          }
+
           const results = await runtime.memoryManager.search(searchQuery);
           retrievedChunks = results.map((r) => ({
             id: r.id,
@@ -60,6 +89,48 @@ export default function dynamicContextExtension(api: ExtensionAPI): void {
             l0Tags: r.l0Tags,
             l1Sentences: r.l1Sentences,
           }));
+
+          // L1/L2 adaptive selection: upgrade high-L1-miss chunks to L2
+          if (
+            typeof runtime.memoryManager.getChunkUtilizationStats === "function" &&
+            typeof runtime.memoryManager.readChunk === "function"
+          ) {
+            const l1MissRateThreshold = contextParams.l1MissRateThreshold ?? 0.5;
+            const l2BudgetRatio = contextParams.l2BudgetRatio ?? 0.3;
+            const minSamples = contextParams.utilizationMinSamples ?? 3;
+            // Estimate total retrieval budget for L2 cap
+            const contextLimit = runtime.contextLimit ?? ctx.model?.contextWindow ?? 200_000;
+            const systemPromptTokens = Math.ceil((ctx.getSystemPrompt?.() ?? "").length / 4);
+            const totalBudget = Math.floor(contextLimit * 0.8 - systemPromptTokens - 4_000);
+            const l2TokenBudget = Math.floor(totalBudget * l2BudgetRatio);
+            let l2TokensUsed = 0;
+
+            retrievedChunks = await Promise.all(
+              retrievedChunks.map(async (chunk) => {
+                if (!chunk.id || l2TokensUsed >= l2TokenBudget) return chunk;
+                try {
+                  const stats = runtime.memoryManager!.getChunkUtilizationStats!(chunk.id);
+                  if (
+                    stats &&
+                    stats.injectCount >= minSamples &&
+                    stats.l1MissCount / stats.injectCount > l1MissRateThreshold
+                  ) {
+                    const l2 = await runtime.memoryManager!.readChunk!(chunk.id);
+                    if (l2) {
+                      const l2Tokens = Math.ceil(l2.text.length / 4);
+                      if (l2TokensUsed + l2Tokens <= l2TokenBudget) {
+                        l2TokensUsed += l2Tokens;
+                        return { ...chunk, snippet: l2.text };
+                      }
+                    }
+                  }
+                } catch {
+                  // Fall back to L1 snippet
+                }
+                return chunk;
+              }),
+            );
+          }
         } catch {
           // Memory retrieval failure is non-fatal
         }
@@ -72,9 +143,6 @@ export default function dynamicContextExtension(api: ExtensionAPI): void {
       // Context limit: runtime override > model context window > default
       const contextLimit = runtime.contextLimit ?? ctx.model?.contextWindow ?? 200_000;
 
-      // Load evolver-tunable params
-      const contextParams = await loadContextParams();
-
       // Build dynamic context
       const result = buildDynamicContext({
         allMessages: messages,
@@ -83,8 +151,19 @@ export default function dynamicContextExtension(api: ExtensionAPI): void {
         systemPromptTokens,
         reserveForReply: 4_000,
         compactionSummary: null,
-        params: contextParams,
+        params: effectiveParams,
       });
+
+      // Record injected chunks on runtime for post-turn attribution
+      runtime.lastInjectedChunks = result.retrievedChunks.map((c) => ({
+        id: c.id ?? "",
+        path: c.path,
+        startLine: c.startLine,
+        endLine: c.endLine,
+        snippet: c.snippet,
+        score: c.score,
+        factorIds: Object.keys(c.l0Tags ?? {}),
+      }));
 
       // Assemble final messages
       let finalMessages = result.recentMessages;

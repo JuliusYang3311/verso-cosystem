@@ -1012,6 +1012,119 @@ export async function runEmbeddedAttempt(
         }
       }
 
+      // Post-turn attribution: record how injected chunks were used by the LLM.
+      // All required data is already available at this point.
+      if (!aborted && !promptError && sessionManager) {
+        try {
+          const { getDynamicContextRuntime } =
+            await import("../../pi-extensions/dynamic-context/runtime.js");
+          const dcRuntime = getDynamicContextRuntime(sessionManager);
+          const injected = dcRuntime?.lastInjectedChunks ?? [];
+          if (injected.length > 0 && memoryManagerForContext?.recordUtilization) {
+            const { detectUtilization } = await import("../../../memory/utilization.js");
+            const assistantOutput = assistantTexts.join("");
+            const memoryGetChunkIds = new Set(
+              toolMetasNormalized
+                .filter((t) => t.toolName === "memory_get" && t.meta)
+                .map((t) => {
+                  try {
+                    return JSON.parse(t.meta!).chunkId as string | undefined;
+                  } catch {
+                    return undefined;
+                  }
+                })
+                .filter(Boolean) as string[],
+            );
+            const sid = sessionIdUsed ?? params.sessionId;
+            const now = Date.now();
+            const events: import("../../../memory/types.js").UtilizationEvent[] = [];
+
+            for (const chunk of injected) {
+              // Always record the injection event
+              events.push({
+                chunkId: chunk.id,
+                sessionId: sid,
+                event: "injected",
+                factorIds: chunk.factorIds,
+                score: chunk.score,
+                timestamp: now,
+              });
+
+              // Determine attribution (priority order)
+              let attribution: import("../../../memory/types.js").UtilizationEventType;
+              if (chunk.id && memoryGetChunkIds.has(chunk.id)) {
+                attribution = "l1_miss";
+              } else if (detectUtilization(chunk.snippet, assistantOutput)) {
+                attribution = "utilized";
+              } else {
+                attribution = "ignored";
+              }
+
+              events.push({
+                chunkId: chunk.id,
+                sessionId: sid,
+                event: attribution,
+                factorIds: chunk.factorIds,
+                score: chunk.score,
+                timestamp: now,
+              });
+            }
+
+            memoryManagerForContext.recordUtilization(events);
+            dcRuntime!.lastInjectedChunks = [];
+
+            // Emit session-level aggregation to feedback.jsonl for evolver
+            try {
+              const utilizedCount = events.filter((e) => e.event === "utilized").length;
+              const ignoredCount = events.filter((e) => e.event === "ignored").length;
+              const l1MissCount = events.filter((e) => e.event === "l1_miss").length;
+              const misleadingCount = events.filter((e) => e.event === "misleading").length;
+              const injectedCount = injected.length;
+              const memorySearchCalls = toolMetasNormalized.filter(
+                (t) => t.toolName === "memory_search",
+              ).length;
+
+              if (injectedCount > 0) {
+                const { recordFeedback } =
+                  await import("../../../evolver/gep/feedback-collector.js");
+                recordFeedback({
+                  type: "implicit",
+                  signal: "memory_session_utilization",
+                  sessionId: sid,
+                  details: {
+                    injected_count: injectedCount,
+                    utilized_count: utilizedCount,
+                    ignored_count: ignoredCount,
+                    l1_miss_count: l1MissCount,
+                    misleading_count: misleadingCount,
+                    utilization_rate: utilizedCount / injectedCount,
+                    l1_miss_rate: l1MissCount / injectedCount,
+                    ignored_ratio: ignoredCount / injectedCount,
+                    retrieval_gaps: memorySearchCalls,
+                    avg_score_utilized:
+                      utilizedCount > 0
+                        ? events
+                            .filter((e) => e.event === "utilized")
+                            .reduce((s, e) => s + (e.score ?? 0), 0) / utilizedCount
+                        : 0,
+                    avg_score_ignored:
+                      ignoredCount > 0
+                        ? events
+                            .filter((e) => e.event === "ignored")
+                            .reduce((s, e) => s + (e.score ?? 0), 0) / ignoredCount
+                        : 0,
+                  },
+                });
+              }
+            } catch {
+              // Feedback recording is non-critical
+            }
+          }
+        } catch {
+          // Utilization tracking is non-critical
+        }
+      }
+
       return {
         aborted,
         timedOut,

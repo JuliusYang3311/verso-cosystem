@@ -36,18 +36,9 @@ export type FactorMissEvent = {
   timestamp: number;
 };
 
-export type ThresholdFeedbackEvent = {
-  factorId: string;
-  currentThreshold: number;
-  suggestedThreshold: number;
-  providerModel: string;
-  timestamp: number;
-};
-
 export type DimensionHooks = {
   onFactorHit(event: FactorHitEvent): void;
   onFactorMiss(event: FactorMissEvent): void;
-  onThresholdFeedback(event: ThresholdFeedbackEvent): void;
 };
 
 // ---------- Learning hyperparameters ----------
@@ -117,48 +108,7 @@ export const learningDimensionHooks: DimensionHooks = {
   onFactorMiss(event) {
     accumulateUpdate(event.factorId, event.providerModel, event.useCase, -MISS_DECAY);
   },
-  onThresholdFeedback(_event) {
-    // Threshold tuning is handled by the evolver's GEP loop, not online
-  },
 };
-
-// ---------- Logging implementation (fallback) ----------
-
-export const loggingDimensionHooks: DimensionHooks = {
-  onFactorHit(event) {
-    console.debug(
-      `[latent-factor] hit factor=${event.factorId} score=${event.retrievalScore.toFixed(3)} model=${event.providerModel}`,
-    );
-  },
-  onFactorMiss(event) {
-    console.debug(`[latent-factor] miss factor=${event.factorId} model=${event.providerModel}`);
-  },
-  onThresholdFeedback(event) {
-    console.debug(
-      `[latent-factor] threshold-feedback factor=${event.factorId} current=${event.currentThreshold} suggested=${event.suggestedThreshold} model=${event.providerModel}`,
-    );
-  },
-};
-
-// ---------- No-op implementation (for testing) ----------
-
-export const noopDimensionHooks: DimensionHooks = {
-  onFactorHit: () => {},
-  onFactorMiss: () => {},
-  onThresholdFeedback: () => {},
-};
-
-// ---------- Hook registry ----------
-
-let _activeHooks: DimensionHooks = learningDimensionHooks;
-
-export function getDimensionHooks(): DimensionHooks {
-  return _activeHooks;
-}
-
-export function registerDimensionHooks(hooks: DimensionHooks): void {
-  _activeHooks = hooks;
-}
 
 // ---------- Convenience emitters ----------
 
@@ -169,7 +119,7 @@ export function emitFactorHit(
   providerModel: string,
   useCase = "memory",
 ): void {
-  _activeHooks.onFactorHit({
+  learningDimensionHooks.onFactorHit({
     factorId,
     querySnippet,
     retrievalScore,
@@ -185,26 +135,11 @@ export function emitFactorMiss(
   providerModel: string,
   useCase = "memory",
 ): void {
-  _activeHooks.onFactorMiss({
+  learningDimensionHooks.onFactorMiss({
     factorId,
     querySnippet,
     providerModel,
     useCase,
-    timestamp: Date.now(),
-  });
-}
-
-export function emitThresholdFeedback(
-  factorId: string,
-  currentThreshold: number,
-  suggestedThreshold: number,
-  providerModel: string,
-): void {
-  _activeHooks.onThresholdFeedback({
-    factorId,
-    currentThreshold,
-    suggestedThreshold,
-    providerModel,
     timestamp: Date.now(),
   });
 }

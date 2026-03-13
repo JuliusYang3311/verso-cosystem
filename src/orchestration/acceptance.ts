@@ -6,7 +6,12 @@
 // the evaluator compare before/after and judge whether fixes actually improved things.
 
 import { execSync } from "node:child_process";
-import type { AcceptanceResult, AcceptanceVerdict, Orchestration } from "./types.js";
+import type {
+  AcceptanceResult,
+  AcceptanceVerdict,
+  FactCheckResult,
+  Orchestration,
+} from "./types.js";
 
 const logger = {
   info: (...args: unknown[]) => console.log("[orchestration-acceptance]", ...args),
@@ -190,9 +195,20 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
               file?: string;
               line?: number;
             }>;
+            factCheck?: {
+              checked?: number;
+              verified?: number;
+              contradicted?: number;
+              unverifiable?: number;
+              details?: Array<{
+                claim?: string;
+                status?: string;
+                source?: string;
+              }>;
+            };
           };
 
-          const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 100;
+          let confidence = typeof parsed.confidence === "number" ? parsed.confidence : 100;
           const issues =
             Array.isArray(parsed.issues) && parsed.issues.length > 0
               ? parsed.issues.map((issue) => ({
@@ -204,14 +220,61 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
                 }))
               : undefined;
 
+          // Parse fact-check results and auto-flag high contradiction ratios
+          let factCheck: FactCheckResult | undefined;
+          let factCheckFailed = false;
+          if (
+            parsed.factCheck &&
+            typeof parsed.factCheck.checked === "number" &&
+            parsed.factCheck.checked > 0
+          ) {
+            factCheck = {
+              checked: parsed.factCheck.checked,
+              verified: parsed.factCheck.verified ?? 0,
+              contradicted: parsed.factCheck.contradicted ?? 0,
+              unverifiable: parsed.factCheck.unverifiable ?? 0,
+              details: Array.isArray(parsed.factCheck.details)
+                ? parsed.factCheck.details.map((d) => ({
+                    claim: d.claim ?? "",
+                    status:
+                      (d.status as "verified" | "contradicted" | "unverifiable") ?? "unverifiable",
+                    source: d.source,
+                  }))
+                : undefined,
+            };
+
+            // Auto-fail if >30% of checked claims are contradicted
+            const contradictionRatio = factCheck.contradicted / factCheck.checked;
+            if (contradictionRatio > 0.3) {
+              factCheckFailed = true;
+              confidence = Math.min(confidence, 40); // Cap confidence when facts are wrong
+              const factIssue = {
+                severity: "critical" as const,
+                confidence: 95,
+                description: `Fact-check failure: ${factCheck.contradicted}/${factCheck.checked} claims contradicted by authoritative sources (${(contradictionRatio * 100).toFixed(0)}% contradiction rate)`,
+                file: undefined as string | undefined,
+                line: undefined as number | undefined,
+              };
+              if (issues) {
+                issues.push(factIssue);
+              }
+              logger.warn("Fact-check contradiction threshold exceeded", {
+                checked: factCheck.checked,
+                contradicted: factCheck.contradicted,
+                ratio: contradictionRatio,
+              });
+            }
+          }
+
           verdicts.push({
             subtaskId: "overall",
-            passed: parsed.passed === true,
+            passed: factCheckFailed ? false : parsed.passed === true,
             confidence,
             reasoning:
               parsed.reasoning ??
               (parsed.passed ? "Project meets requirements" : "Project incomplete"),
             issues,
+            factCheck,
           });
         } catch {
           const lower = lastText.toLowerCase();

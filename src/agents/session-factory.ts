@@ -120,6 +120,7 @@ export async function createVersoSession(
             memoryManager: params.memoryManager ?? null,
             config: params.config,
             contextLimit: params.contextLimit,
+            lastInjectedChunks: [],
           }
         : undefined,
   });

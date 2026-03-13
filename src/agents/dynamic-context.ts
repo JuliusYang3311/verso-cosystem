@@ -46,6 +46,19 @@ export type ContextParams = {
   webSearchMmrLambda?: number;
   webSearchMmrMinGain?: number;
   webSearchBudgetTokens?: number;
+  // Utilization feedback params
+  utilizationPriorEnabled?: boolean;
+  utilizationPriorStrength?: number;
+  utilizationMinSamples?: number;
+  utilizationThresholdBoost?: number;
+  l1MissRateThreshold?: number;
+  l2BudgetRatio?: number;
+  // Per-source time decay
+  sessionTimeDecayLambda?: number;
+  memoryTimeDecayLambda?: number;
+  // Query extraction params
+  queryMaxChars?: number;
+  querySourceMessages?: number;
 };
 
 export type RetrievedChunk = {
@@ -263,9 +276,14 @@ export function filterRetrievedChunks(
     return { chunks: [], tokensUsed: 0, thresholdUsed: params.baseThreshold };
   }
 
-  // Apply time decay before handing off to the diversity pipeline
+  // Apply per-source time decay before handing off to the diversity pipeline.
+  // Sessions decay faster (conversations age quickly), memory files decay slower.
   const decayed = chunks.map((chunk) => {
-    const decay = chunk.timestamp ? timeDecayFactor(chunk.timestamp, params.timeDecayLambda) : 1;
+    const lambda =
+      chunk.source === "sessions"
+        ? (params.sessionTimeDecayLambda ?? params.timeDecayLambda)
+        : (params.memoryTimeDecayLambda ?? params.timeDecayLambda);
+    const decay = chunk.timestamp ? timeDecayFactor(chunk.timestamp, lambda) : 1;
     return toDiverseChunk({ ...chunk, score: chunk.score * decay });
   });
 
@@ -299,7 +317,6 @@ function estimateSnippetTokens(text: string): number {
  */
 export function progressiveLoadChunks(
   chunks: RetrievedChunk[],
-  _params: ContextParams,
   budgetTokens: number,
 ): { chunks: RetrievedChunk[]; tokensUsed: number } {
   if (chunks.length === 0 || budgetTokens <= 0) {
@@ -423,7 +440,6 @@ export function buildDynamicContext(options: {
         const mmrResult = mmrSelectChunks(filtered, Number.MAX_SAFE_INTEGER, mmrLambda);
         const result = progressiveLoadChunks(
           mmrResult.chunks.map(fromDiverseChunk),
-          params,
           retrievalBudget,
         );
         const threshold =

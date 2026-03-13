@@ -824,6 +824,14 @@ async function run(): Promise<EvolveResult | null> {
       return [];
     }
   })();
+  // Load recent feedback for memory utilization signal detection
+  let recentFeedback: Array<Record<string, unknown>> = [];
+  try {
+    const { loadRecentFeedback } = await import("./gep/feedback-collector.js");
+    recentFeedback = loadRecentFeedback(50) as unknown as Array<Record<string, unknown>>;
+  } catch {
+    // feedback-collector not available — skip
+  }
   const signals = extractSignals({
     recentSessionTranscript: recentMasterLog,
     todayLog,
@@ -833,6 +841,17 @@ async function run(): Promise<EvolveResult | null> {
       intent?: string;
       signals?: unknown[];
       genes_used?: unknown[];
+      [key: string]: unknown;
+    }>,
+    recentFeedback: recentFeedback as Array<{
+      signal?: string;
+      details?: {
+        utilization_rate?: number;
+        l1_miss_rate?: number;
+        ignored_ratio?: number;
+        retrieval_gaps?: number;
+        injected_count?: number;
+      } | null;
       [key: string]: unknown;
     }>,
   });

@@ -128,9 +128,34 @@ Example — "Redis approach keeps failing":
 **feature-dev**: explore → architect → implement → review → accept
 **bug-fix**: investigate → fix → verify
 **refactor**: analyze → design → refactor → verify
-**research**: parallel research → synthesize
+**research**: gather data → parallel analysis → synthesize
 
-For feature-dev/refactor, launch 2-3 parallel workers per phase. After architects complete, YOU select the best approach. After reviewers complete, YOU decide whether to fix or proceed.`;
+For feature-dev/refactor, launch 2-3 parallel workers per phase. After architects complete, YOU select the best approach. After reviewers complete, YOU decide whether to fix or proceed.
+
+### Research & Analysis Tasks — Data-First Rule
+
+When the task involves producing factual content (reports, analysis, summaries, comparisons, recommendations based on real-world data):
+
+1. **First subtasks MUST be \`researcher\` specialization data-gathering tasks.** These workers use \`web_search\` and \`web_fetch\` to collect authoritative, up-to-date data. Each data-gathering task should target a specific domain (e.g. "Gather macro indicators from FRED/BLS", "Fetch latest earnings data for NVDA/MSFT/GOOGL").
+
+2. **All analysis/writing subtasks MUST \`dependsOn\` the data-gathering tasks.** This ensures analysis workers can retrieve collected data via \`memory_search\` before writing.
+
+3. **Data-gathering acceptance criteria must require source attribution.** e.g. "Each data point includes source URL and retrieval timestamp."
+
+4. **Never allow workers to produce factual claims from model memory alone.** If a worker cannot find data via tools, it must state "data unavailable" rather than fabricate.
+
+Example — "Generate Q1 market analysis report":
+\`\`\`
+❌ BAD: t1: "Write macro section" (code-implementer) — worker will hallucinate data
+✅ GOOD:
+  t1: "Gather US macro indicators" (researcher) — web_search for CPI, GDP, unemployment, Fed rate
+  t2: "Gather index performance data" (researcher) — web_search for S&P 500, Nasdaq, DJIA YTD
+  t3: "Gather earnings data for target stocks" (researcher) — web_search for individual stock metrics
+  t4: "Write macro analysis section" (code-implementer, dependsOn: [t1]) — uses memory_search to retrieve t1 data
+  t5: "Write sector analysis section" (code-implementer, dependsOn: [t2]) — uses memory_search to retrieve t2 data
+  t6: "Write stock analysis section" (code-implementer, dependsOn: [t3]) — uses memory_search to retrieve t3 data
+  t7: "Synthesize and write executive summary" (code-implementer, dependsOn: [t4, t5, t6])
+\`\`\``;
 }
 
 /**

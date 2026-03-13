@@ -400,4 +400,88 @@ describe("extractSignals", () => {
     const result = extractSignals({ userSnippet: "user.md missing" });
     expect(result.length).toBeGreaterThan(0);
   });
+
+  // --- Memory utilization signals ---
+
+  it("emits memory_low_utilization when avg utilization rate < 0.3", () => {
+    const feedback = Array.from({ length: 4 }, () => ({
+      signal: "memory_session_utilization",
+      details: { utilization_rate: 0.2, l1_miss_rate: 0, ignored_ratio: 0.5, retrieval_gaps: 0 },
+    }));
+    const result = extractSignals({ recentFeedback: feedback });
+    expect(result).toContain("memory_low_utilization");
+  });
+
+  it("emits memory_high_utilization when avg utilization rate > 0.8", () => {
+    const feedback = Array.from({ length: 3 }, () => ({
+      signal: "memory_session_utilization",
+      details: { utilization_rate: 0.9, l1_miss_rate: 0, ignored_ratio: 0.05, retrieval_gaps: 0 },
+    }));
+    const result = extractSignals({ recentFeedback: feedback });
+    expect(result).toContain("memory_high_utilization");
+  });
+
+  it("emits memory_high_l1_miss when avg L1 miss rate > 0.4", () => {
+    const feedback = Array.from({ length: 3 }, () => ({
+      signal: "memory_session_utilization",
+      details: { utilization_rate: 0.5, l1_miss_rate: 0.6, ignored_ratio: 0.3, retrieval_gaps: 0 },
+    }));
+    const result = extractSignals({ recentFeedback: feedback });
+    expect(result).toContain("memory_high_l1_miss");
+  });
+
+  it("emits memory_noise_dominant when ignored ratio > 0.7", () => {
+    const feedback = Array.from({ length: 3 }, () => ({
+      signal: "memory_session_utilization",
+      details: { utilization_rate: 0.1, l1_miss_rate: 0, ignored_ratio: 0.8, retrieval_gaps: 0 },
+    }));
+    const result = extractSignals({ recentFeedback: feedback });
+    expect(result).toContain("memory_noise_dominant");
+  });
+
+  it("emits memory_retrieval_gap when total retrieval gaps > 3", () => {
+    const feedback = Array.from({ length: 3 }, () => ({
+      signal: "memory_session_utilization",
+      details: { utilization_rate: 0.5, l1_miss_rate: 0, ignored_ratio: 0.3, retrieval_gaps: 2 },
+    }));
+    const result = extractSignals({ recentFeedback: feedback });
+    expect(result).toContain("memory_retrieval_gap");
+  });
+
+  it("does not emit memory signals when fewer than 3 feedback entries", () => {
+    const feedback = [
+      {
+        signal: "memory_session_utilization",
+        details: {
+          utilization_rate: 0.1,
+          l1_miss_rate: 0.8,
+          ignored_ratio: 0.9,
+          retrieval_gaps: 5,
+        },
+      },
+      {
+        signal: "memory_session_utilization",
+        details: {
+          utilization_rate: 0.1,
+          l1_miss_rate: 0.8,
+          ignored_ratio: 0.9,
+          retrieval_gaps: 5,
+        },
+      },
+    ];
+    const result = extractSignals({ recentFeedback: feedback });
+    expect(result).not.toContain("memory_low_utilization");
+    expect(result).not.toContain("memory_high_l1_miss");
+    expect(result).not.toContain("memory_noise_dominant");
+    expect(result).not.toContain("memory_retrieval_gap");
+  });
+
+  it("ignores non-memory feedback entries", () => {
+    const feedback = Array.from({ length: 5 }, () => ({
+      signal: "user_correction",
+      details: { utilization_rate: 0.1 },
+    }));
+    const result = extractSignals({ recentFeedback: feedback });
+    expect(result).not.toContain("memory_low_utilization");
+  });
 });

@@ -5,7 +5,7 @@ export function ensureMemoryIndexSchema(params: {
   embeddingCacheTable: string;
   ftsTable: string;
   ftsEnabled: boolean;
-}): { ftsAvailable: boolean; filesFtsAvailable: boolean; ftsError?: string } {
+}): { ftsAvailable: boolean; ftsError?: string } {
   params.db.exec(`
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
@@ -99,14 +99,7 @@ export function ensureMemoryIndexSchema(params: {
   ensureColumn(params.db, "files", "source", "TEXT NOT NULL DEFAULT 'memory'");
   ensureColumn(params.db, "chunks", "source", "TEXT NOT NULL DEFAULT 'memory'");
 
-  // Legacy L0/L1 columns (kept for migration compatibility, no longer written)
-  ensureColumn(params.db, "chunks", "l0_abstract", "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(params.db, "chunks", "l1_overview", "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(params.db, "chunks", "l1_status", "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(params.db, "files", "l0_abstract", "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(params.db, "files", "l0_embedding", "TEXT NOT NULL DEFAULT '[]'");
-
-  // New 3-layer architecture columns
+  // 3-layer architecture columns
   // L0: factor projection tags { factorId: score, ... }
   ensureColumn(params.db, "chunks", "l0_tags", "TEXT NOT NULL DEFAULT '{}'");
   // L1: extractive key sentences [{ text, startChar, endChar }]
@@ -114,17 +107,32 @@ export function ensureMemoryIndexSchema(params: {
   params.db.exec(`CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(path);`);
   params.db.exec(`CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source);`);
 
-  // files_fts was used for hierarchical search (removed). Drop if exists.
-  let filesFtsAvailable = false;
+  // Drop legacy tables no longer used
   try {
     params.db.exec(`DROP TABLE IF EXISTS files_fts`);
   } catch {
     /* ignore */
   }
 
+  // Chunk utilization tracking (feedback loop)
+  params.db.exec(`
+    CREATE TABLE IF NOT EXISTS chunk_utilization (
+      chunk_id    TEXT NOT NULL,
+      session_id  TEXT NOT NULL,
+      event       TEXT NOT NULL,
+      factor_ids  TEXT NOT NULL DEFAULT '[]',
+      query_hash  TEXT,
+      score       REAL,
+      timestamp   INTEGER NOT NULL
+    );
+  `);
+  params.db.exec(`CREATE INDEX IF NOT EXISTS idx_chunk_util_chunk ON chunk_utilization(chunk_id);`);
+  params.db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_chunk_util_session ON chunk_utilization(session_id, timestamp);`,
+  );
+
   return {
     ftsAvailable,
-    filesFtsAvailable,
     ...(ftsError ? { ftsError } : {}),
   };
 }

@@ -13,7 +13,17 @@ export const OPPORTUNITY_SIGNALS: string[] = [
   "evolution_stagnation_detected",
   "repair_loop_detected",
   "force_innovation_after_repair_loop",
+  // Memory utilization signals
+  "memory_low_utilization",
+  "memory_noise_dominant",
+  "memory_retrieval_gap",
 ];
+
+// Memory utilization signals (stability category, not opportunity)
+export const MEMORY_STABILITY_SIGNALS: string[] = ["memory_high_utilization"];
+
+// Memory utilization signals (repair category)
+export const MEMORY_REPAIR_SIGNALS: string[] = ["memory_high_l1_miss"];
 
 export function hasOpportunitySignal(signals: unknown): boolean {
   const list: string[] = Array.isArray(signals) ? signals : [];
@@ -104,12 +114,25 @@ export function analyzeRecentHistory(recentEvents: EvolutionEvent[]): RecentHist
   };
 }
 
+interface FeedbackEntry {
+  signal?: string;
+  details?: {
+    utilization_rate?: number;
+    l1_miss_rate?: number;
+    ignored_ratio?: number;
+    retrieval_gaps?: number;
+    injected_count?: number;
+  } | null;
+  [key: string]: unknown;
+}
+
 interface ExtractSignalsInput {
   recentSessionTranscript?: string;
   todayLog?: string;
   memorySnippet?: string;
   userSnippet?: string;
   recentEvents?: EvolutionEvent[];
+  recentFeedback?: FeedbackEntry[];
 }
 
 export function extractSignals({
@@ -118,6 +141,7 @@ export function extractSignals({
   memorySnippet,
   userSnippet,
   recentEvents,
+  recentFeedback,
 }: ExtractSignalsInput): string[] {
   let signals: string[] = [];
   const corpus = [
@@ -396,6 +420,29 @@ export function extractSignals({
     }
     // Append a directive signal that the prompt can pick up
     signals.push("force_innovation_after_repair_loop");
+  }
+
+  // --- Memory utilization signals (from feedback.jsonl entries) ---
+  if (Array.isArray(recentFeedback) && recentFeedback.length > 0) {
+    const memFeedback = recentFeedback.filter(
+      (f) => f.signal === "memory_session_utilization" && f.details,
+    );
+    if (memFeedback.length >= 3) {
+      const avgUtil =
+        memFeedback.reduce((s, f) => s + (f.details!.utilization_rate ?? 0), 0) /
+        memFeedback.length;
+      const avgL1Miss =
+        memFeedback.reduce((s, f) => s + (f.details!.l1_miss_rate ?? 0), 0) / memFeedback.length;
+      const avgIgnored =
+        memFeedback.reduce((s, f) => s + (f.details!.ignored_ratio ?? 0), 0) / memFeedback.length;
+      const totalGaps = memFeedback.reduce((s, f) => s + (f.details!.retrieval_gaps ?? 0), 0);
+
+      if (avgUtil < 0.3) signals.push("memory_low_utilization");
+      if (avgUtil > 0.8) signals.push("memory_high_utilization");
+      if (avgL1Miss > 0.4) signals.push("memory_high_l1_miss");
+      if (avgIgnored > 0.7) signals.push("memory_noise_dominant");
+      if (totalGaps > 3) signals.push("memory_retrieval_gap");
+    }
   }
 
   // If no signals at all, add a default innovation signal

@@ -134,13 +134,13 @@ describe("timeDecayFactor", () => {
 
 describe("progressiveLoadChunks", () => {
   it("returns empty for empty input", () => {
-    const { chunks, tokensUsed } = progressiveLoadChunks([], DEFAULT_CONTEXT_PARAMS, 1000);
+    const { chunks, tokensUsed } = progressiveLoadChunks([], 1000);
     expect(chunks).toEqual([]);
     expect(tokensUsed).toBe(0);
   });
 
   it("returns empty for zero budget", () => {
-    const { chunks } = progressiveLoadChunks([makeChunk()], DEFAULT_CONTEXT_PARAMS, 0);
+    const { chunks } = progressiveLoadChunks([makeChunk()], 0);
     expect(chunks).toEqual([]);
   });
 
@@ -150,11 +150,7 @@ describe("progressiveLoadChunks", () => {
       makeChunk({ id: "2", snippet: "also short" }),
       makeChunk({ id: "3", snippet: "x".repeat(10000) }), // Large — may not fit
     ];
-    const { chunks: selected, tokensUsed } = progressiveLoadChunks(
-      chunks,
-      DEFAULT_CONTEXT_PARAMS,
-      100,
-    );
+    const { chunks: selected, tokensUsed } = progressiveLoadChunks(chunks, 100);
     expect(selected.length).toBeGreaterThanOrEqual(2);
     expect(tokensUsed).toBeLessThanOrEqual(100);
   });
@@ -164,7 +160,7 @@ describe("progressiveLoadChunks", () => {
       l0Tags: { topic_a: 0.9 },
       l1Sentences: [{ text: "key point", startChar: 0, endChar: 9 }],
     });
-    const { chunks: selected } = progressiveLoadChunks([chunk], DEFAULT_CONTEXT_PARAMS, 10000);
+    const { chunks: selected } = progressiveLoadChunks([chunk], 10000);
     expect(selected[0].l0Tags).toEqual({ topic_a: 0.9 });
     expect(selected[0].l1Sentences).toEqual([{ text: "key point", startChar: 0, endChar: 9 }]);
   });
@@ -175,7 +171,7 @@ describe("progressiveLoadChunks", () => {
       makeChunk({ id: "2", snippet: "x".repeat(2000) }), // ~500 tokens
       makeChunk({ id: "3", snippet: "also small" }),
     ];
-    const { chunks: selected } = progressiveLoadChunks(chunks, DEFAULT_CONTEXT_PARAMS, 20);
+    const { chunks: selected } = progressiveLoadChunks(chunks, 20);
     const ids = selected.map((c) => c.id);
     expect(ids).toContain("1");
     expect(ids).toContain("3");
@@ -212,6 +208,75 @@ describe("filterRetrievedChunks", () => {
     const { chunks: selected } = filterRetrievedChunks(chunks, DEFAULT_CONTEXT_PARAMS, 10000);
     expect(selected.length).toBe(1);
     expect(selected[0].id).toBe("mid");
+  });
+
+  it("applies per-source time decay: sessions decay faster than memory", () => {
+    const oneHourAgo = Date.now() - 3_600_000;
+    const sessionChunk = makeChunk({
+      id: "session",
+      score: 0.9,
+      source: "sessions",
+      timestamp: oneHourAgo,
+      path: "s.md",
+      startLine: 1,
+    });
+    const memoryChunk = makeChunk({
+      id: "memory",
+      score: 0.9,
+      source: "memory",
+      timestamp: oneHourAgo,
+      path: "m.md",
+      startLine: 1,
+    });
+
+    const params = {
+      ...DEFAULT_CONTEXT_PARAMS,
+      sessionTimeDecayLambda: 0.1, // fast decay
+      memoryTimeDecayLambda: 0.001, // slow decay
+    };
+
+    const { chunks: selected } = filterRetrievedChunks([sessionChunk, memoryChunk], params, 100000);
+
+    // Both should be present but memory chunk should have higher score
+    const sessionResult = selected.find((c) => c.id === "session");
+    const memoryResult = selected.find((c) => c.id === "memory");
+    if (sessionResult && memoryResult) {
+      expect(memoryResult.score).toBeGreaterThan(sessionResult.score);
+    }
+  });
+
+  it("uses global timeDecayLambda when per-source lambdas are not set", () => {
+    const oneHourAgo = Date.now() - 3_600_000;
+    const sessionChunk = makeChunk({
+      id: "session",
+      score: 0.9,
+      source: "sessions",
+      timestamp: oneHourAgo,
+      path: "s.md",
+      startLine: 1,
+    });
+    const memoryChunk = makeChunk({
+      id: "memory",
+      score: 0.9,
+      source: "memory",
+      timestamp: oneHourAgo,
+      path: "m.md",
+      startLine: 1,
+    });
+
+    // No per-source lambdas — both should use the global timeDecayLambda
+    const { chunks: selected } = filterRetrievedChunks(
+      [sessionChunk, memoryChunk],
+      DEFAULT_CONTEXT_PARAMS,
+      100000,
+    );
+
+    const sessionResult = selected.find((c) => c.id === "session");
+    const memoryResult = selected.find((c) => c.id === "memory");
+    if (sessionResult && memoryResult) {
+      // Same decay rate → same score (within floating point tolerance)
+      expect(sessionResult.score).toBeCloseTo(memoryResult.score, 5);
+    }
   });
 });
 

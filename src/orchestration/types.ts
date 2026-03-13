@@ -38,6 +38,20 @@ export type Subtask = {
   completedAtMs?: number;
 };
 
+export type FactCheckDetail = {
+  claim: string;
+  status: "verified" | "contradicted" | "unverifiable";
+  source?: string;
+};
+
+export type FactCheckResult = {
+  checked: number;
+  verified: number;
+  contradicted: number;
+  unverifiable: number;
+  details?: FactCheckDetail[];
+};
+
 export type AcceptanceVerdict = {
   subtaskId: string;
   passed: boolean;
@@ -50,6 +64,7 @@ export type AcceptanceVerdict = {
     file?: string;
     line?: number;
   }>;
+  factCheck?: FactCheckResult;
 };
 
 export type AcceptanceResult = {

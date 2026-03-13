@@ -78,7 +78,7 @@ export function dropVectorTable(db: DatabaseSync): void {
   }
 }
 
-// ---------- File-level vector table (for hierarchical search) ----------
+// ---------- File-level vector table (used by novel-writer skill) ----------
 
 export const FILES_VECTOR_TABLE = "files_vec";
 
@@ -95,14 +95,5 @@ export function ensureFileVectorTable(db: DatabaseSync, dimensions: number): boo
     const message = err instanceof Error ? err.message : String(err);
     log.debug(`Failed to create ${FILES_VECTOR_TABLE}: ${message}`);
     return false;
-  }
-}
-
-export function dropFileVectorTable(db: DatabaseSync): void {
-  try {
-    db.exec(`DROP TABLE IF EXISTS ${FILES_VECTOR_TABLE}`);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.debug(`Failed to drop ${FILES_VECTOR_TABLE}: ${message}`);
   }
 }

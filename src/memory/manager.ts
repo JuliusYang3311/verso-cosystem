@@ -81,15 +81,14 @@ import {
 import {
   type VectorState,
   VECTOR_TABLE,
-  FILES_VECTOR_TABLE,
   vectorToBlob,
   loadVectorExtension,
   ensureVectorTable,
   dropVectorTable,
-  ensureFileVectorTable,
 } from "./manager-vectors.js";
 import { ensureMemoryIndexSchema } from "./memory-schema.js";
 import { requireNodeSqlite } from "./sqlite.js";
+import * as utilizationModule from "./utilization.js";
 
 type MemoryIndexMeta = {
   model: string;
@@ -159,10 +158,6 @@ export class MemoryIndexManager implements MemorySearchManager {
     available: boolean;
     loadError?: string;
   };
-  private readonly filesFts: {
-    available: boolean;
-  };
-  private fileVectorTableReady = false;
   private vectorReady: Promise<boolean> | null = null;
   private watcher: FSWatcher | null = null;
   private watchTimer: NodeJS.Timeout | null = null;
@@ -322,7 +317,6 @@ export class MemoryIndexManager implements MemorySearchManager {
       maxEntries: params.settings.cache.maxEntries,
     };
     this.fts = { enabled: params.settings.query.hybrid.enabled, available: false };
-    this.filesFts = { available: false };
     this.ensureSchema();
     this.vector = {
       enabled: params.settings.store.vector.enabled,
@@ -544,13 +538,19 @@ export class MemoryIndexManager implements MemorySearchManager {
               vectorWeight: hybridVectorWeight,
               textWeight: hybridTextWeight,
             });
-            return merged.filter((entry) => entry.score >= minScore);
+            return this.applyUtilizationPrior(
+              merged.filter((entry) => entry.score >= minScore),
+              contextParams,
+            );
           }
         }
 
-        return results
-          .map((r) => this.toMemorySearchResult(r))
-          .filter((entry) => entry.score >= minScore);
+        return this.applyUtilizationPrior(
+          results
+            .map((r) => this.toMemorySearchResult(r))
+            .filter((entry) => entry.score >= minScore),
+          contextParams,
+        );
       } catch (err) {
         log.debug(`L0 tag search failed, falling back: ${String(err)}`);
         // Fall through to flat search on error
@@ -563,7 +563,10 @@ export class MemoryIndexManager implements MemorySearchManager {
       : [];
 
     if (!hybrid.enabled) {
-      return vectorResults.filter((entry: MemorySearchResult) => entry.score >= minScore);
+      return this.applyUtilizationPrior(
+        vectorResults.filter((entry: MemorySearchResult) => entry.score >= minScore),
+        contextParams,
+      );
     }
 
     const keywordResults = hybrid.enabled
@@ -577,7 +580,10 @@ export class MemoryIndexManager implements MemorySearchManager {
       textWeight: hybridTextWeight,
     });
 
-    return merged.filter((entry) => entry.score >= minScore);
+    return this.applyUtilizationPrior(
+      merged.filter((entry) => entry.score >= minScore),
+      contextParams,
+    );
   }
 
   private async searchVector(
@@ -598,6 +604,30 @@ export class MemoryIndexManager implements MemorySearchManager {
     return results.map(
       (entry) => this.toMemorySearchResult(entry) as MemorySearchResult & { id: string },
     );
+  }
+
+  /**
+   * Apply utilization-based ranking prior: adjust scores based on historical
+   * chunk utilization. Frequently-utilized chunks get a soft boost; frequently-
+   * ignored chunks get softly penalized.
+   */
+  private applyUtilizationPrior(
+    results: MemorySearchResult[],
+    contextParams: Partial<ContextParams>,
+  ): MemorySearchResult[] {
+    if (!(contextParams.utilizationPriorEnabled ?? true)) return results;
+    const strength = contextParams.utilizationPriorStrength ?? 0.3;
+    const minSamples = contextParams.utilizationMinSamples ?? 3;
+    if (strength === 0) return results;
+
+    return results.map((r) => {
+      if (!r.id) return r;
+      const stats = this.getChunkUtilizationStats(r.id);
+      if (!stats || stats.injectCount < minSamples) return r;
+      // multiplier ∈ [1 - strength/2, 1 + strength/2]
+      const multiplier = 1.0 + strength * (stats.utilizationRate - 0.5);
+      return { ...r, score: r.score * multiplier };
+    });
   }
 
   private buildFtsQuery(raw: string): string | null {
@@ -1006,6 +1036,20 @@ export class MemoryIndexManager implements MemorySearchManager {
     await this.indexContent({ path: `sessions/${sessionId}`, content, source: "sessions" });
   }
 
+  // ---------- Utilization tracking (delegates to utilization.ts) ----------
+
+  recordUtilization(events: import("./types.js").UtilizationEvent[]): void {
+    utilizationModule.recordUtilization(this.db, events);
+  }
+
+  getChunkUtilizationStats(chunkId: string): import("./types.js").ChunkUtilizationStats | null {
+    return utilizationModule.getChunkUtilizationStats(this.db, chunkId);
+  }
+
+  getSessionUtilizationRate(sessionId: string, windowMs?: number): number | null {
+    return utilizationModule.getSessionUtilizationRate(this.db, sessionId, windowMs);
+  }
+
   async close(): Promise<void> {
     if (this.closed) {
       return;
@@ -1131,7 +1175,6 @@ export class MemoryIndexManager implements MemorySearchManager {
       ftsEnabled: this.fts.enabled,
     });
     this.fts.available = result.ftsAvailable;
-    this.filesFts.available = result.filesFtsAvailable;
     if (result.ftsError) {
       this.fts.loadError = result.ftsError;
       log.warn(`fts unavailable: ${result.ftsError}`);
@@ -1826,69 +1869,15 @@ export class MemoryIndexManager implements MemorySearchManager {
       }
     }
 
-    // Generate file-level L0 abstract from L1 sentences (for hierarchical search compatibility)
-    const fileL0 = igL1Sentences
-      .flatMap((sents) => sents.map((s) => s.text))
-      .join("; ")
-      .slice(0, 600);
-
-    // Embed file-level L0 and write to files_vec
-    let fileL0Embedding: number[] = [];
-    if (fileL0 && vectorReady && sample) {
-      try {
-        fileL0Embedding = await embedQueryWithTimeout(ctx, fileL0);
-      } catch {
-        // Non-fatal: file-level embedding failure doesn't block indexing
-      }
-      if (fileL0Embedding.length > 0) {
-        // Ensure file vector table exists
-        if (!this.fileVectorTableReady) {
-          this.fileVectorTableReady = ensureFileVectorTable(this.db, fileL0Embedding.length);
-        }
-        if (this.fileVectorTableReady) {
-          try {
-            this.db.prepare(`DELETE FROM ${FILES_VECTOR_TABLE} WHERE path = ?`).run(entry.path);
-          } catch {}
-          try {
-            this.db
-              .prepare(`INSERT INTO ${FILES_VECTOR_TABLE} (path, embedding) VALUES (?, ?)`)
-              .run(entry.path, vectorToBlob(fileL0Embedding));
-          } catch {}
-        }
-      }
-    }
-
-    // Write to files_fts
-    if (fileL0 && this.filesFts.available) {
-      try {
-        this.db.prepare(`DELETE FROM files_fts WHERE path = ?`).run(entry.path);
-      } catch {}
-      try {
-        this.db
-          .prepare(`INSERT INTO files_fts (l0_abstract, path, source) VALUES (?, ?, ?)`)
-          .run(fileL0, entry.path, options.source);
-      } catch {}
-    }
-
     this.db
       .prepare(
-        `INSERT INTO files (path, source, hash, mtime, size, l0_abstract, l0_embedding) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO files (path, source, hash, mtime, size) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(path) DO UPDATE SET
            source=excluded.source,
            hash=excluded.hash,
            mtime=excluded.mtime,
-           size=excluded.size,
-           l0_abstract=excluded.l0_abstract,
-           l0_embedding=excluded.l0_embedding`,
+           size=excluded.size`,
       )
-      .run(
-        entry.path,
-        options.source,
-        entry.hash,
-        entry.mtimeMs,
-        entry.size,
-        fileL0,
-        JSON.stringify(fileL0Embedding),
-      );
+      .run(entry.path, options.source, entry.hash, entry.mtimeMs, entry.size);
   }
 }

@@ -408,6 +408,16 @@ A. context_params.json — search & retrieval parameters:
 - \`baseThreshold\` (float, 0.0–1.0, default: 0.72) — minimum score for a memory chunk to be returned
 - \`hybridVectorWeight\` (float, 0.0–1.0, default: 0.7) — vector weight; textWeight = 1 - vectorWeight
 - \`hybridMinScore\` (float, ≥0, default: 0.01) — minimum hybrid score threshold for filtering
+- \`utilizationPriorEnabled\` (bool, default: true) — enable utilization-based ranking adjustment
+- \`utilizationPriorStrength\` (float, 0.0–1.0, default: 0.3) — ranking adjustment magnitude
+- \`utilizationMinSamples\` (int, ≥1, default: 3) — min observations before applying prior
+- \`utilizationThresholdBoost\` (float, 0.0–0.3, default: 0.1) — max threshold increase under low utilization
+- \`l1MissRateThreshold\` (float, 0.0–1.0, default: 0.5) — L1 miss rate above which chunk served as L2
+- \`l2BudgetRatio\` (float, 0.0–0.5, default: 0.3) — max fraction of retrieval budget for L2 text
+- \`sessionTimeDecayLambda\` (float, >0, default: 0.02) — time decay for session source chunks
+- \`memoryTimeDecayLambda\` (float, >0, default: 0.005) — time decay for memory source chunks
+- \`queryMaxChars\` (int, >0, default: 500) — search query extraction length
+- \`querySourceMessages\` (int, ≥1, default: 1) — number of recent user messages for query derivation
 
 B. factor-space.json — latent factor space:
 - Each factor has: id, description, subqueryTemplate, vectors (auto-populated), weights (auto-learned)
