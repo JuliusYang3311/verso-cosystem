@@ -335,17 +335,30 @@ export class MemoryIndexManager implements MemorySearchManager {
   }
 
   private async loadContextParams(): Promise<Partial<ContextParams>> {
+    // 3-layer: bundled < workspace (evolver). Hardcoded defaults handled by callers.
+    let base: Partial<ContextParams> = {};
+    try {
+      const { getBundledContextParamsPath } = await import("../evolver/gep/paths.js");
+      const bundledPath = getBundledContextParamsPath();
+      if (bundledPath && fsSync.existsSync(bundledPath)) {
+        base = JSON.parse(await fs.readFile(bundledPath, "utf-8"));
+      }
+    } catch {
+      // bundled not available
+    }
+
+    let workspace: Partial<ContextParams> = {};
     try {
       const { getContextParamsPath } = await import("../evolver/gep/paths.js");
       const filePath = getContextParamsPath();
       if (fsSync.existsSync(filePath)) {
-        const content = await fs.readFile(filePath, "utf-8");
-        return JSON.parse(content) as Partial<ContextParams>;
+        workspace = JSON.parse(await fs.readFile(filePath, "utf-8"));
       }
-      return {};
     } catch {
-      return {};
+      // workspace not available
     }
+
+    return { ...base, ...workspace };
   }
 
   async warmSession(_sessionKey?: string): Promise<void> {

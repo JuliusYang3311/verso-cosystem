@@ -151,11 +151,21 @@ export function getGepAssetsDir(): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Path to context_params.json in workspace.
+ * Path to context_params.json in workspace (evolver writes here).
  * Triggers seed from bundled assets on first call if missing.
  */
 export function getContextParamsPath(): string {
   return path.join(getEvolverAssetsDir(), "context_params.json");
+}
+
+/**
+ * Path to the bundled (read-only) context_params.json shipped with the app.
+ * Returns undefined if the bundled asset is not found.
+ * Used as the defaults layer: `{ ...bundled, ...workspace }`.
+ */
+export function getBundledContextParamsPath(): string | undefined {
+  const dir = findBundledAssetsDir("context_params.json");
+  return dir ? path.join(dir, "context_params.json") : undefined;
 }
 
 /**

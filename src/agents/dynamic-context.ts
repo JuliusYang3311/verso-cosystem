@@ -109,21 +109,35 @@ export const DEFAULT_CONTEXT_PARAMS: ContextParams = {
 // ---------- Load params from evolver assets ----------
 
 /**
- * Load context params from evolver assets.
- * Falls back to DEFAULT_CONTEXT_PARAMS if file doesn't exist or fails to load.
+ * Load context params with 3-layer priority: workspace (evolver) > bundled > hardcoded defaults.
+ * - Bundled: shipped with the app, updated on each release.
+ * - Workspace: written by evolver at runtime (adaptive tuning).
+ * - Hardcoded: ultimate fallback if neither file exists.
  */
 export async function loadContextParams(): Promise<ContextParams> {
+  let base: Partial<ContextParams> = {};
+  try {
+    const { getBundledContextParamsPath } = await import("../evolver/gep/paths.js");
+    const bundledPath = getBundledContextParamsPath();
+    if (bundledPath && fsSync.existsSync(bundledPath)) {
+      base = JSON.parse(await fs.readFile(bundledPath, "utf-8")) as Partial<ContextParams>;
+    }
+  } catch {
+    // bundled not available
+  }
+
+  let workspace: Partial<ContextParams> = {};
   try {
     const { getContextParamsPath } = await import("../evolver/gep/paths.js");
     const filePath = getContextParamsPath();
     if (fsSync.existsSync(filePath)) {
-      const content = await fs.readFile(filePath, "utf-8");
-      return { ...DEFAULT_CONTEXT_PARAMS, ...(JSON.parse(content) as Partial<ContextParams>) };
+      workspace = JSON.parse(await fs.readFile(filePath, "utf-8")) as Partial<ContextParams>;
     }
   } catch {
-    // fall through to defaults
+    // workspace not available
   }
-  return DEFAULT_CONTEXT_PARAMS;
+
+  return { ...DEFAULT_CONTEXT_PARAMS, ...base, ...workspace };
 }
 
 // ---------- Dynamic recentRatio calculation ----------

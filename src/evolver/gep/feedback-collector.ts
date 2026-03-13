@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { getEvolverAssetsDir, getGepAssetsDir } from "./paths.js";
+import { getBundledContextParamsPath, getEvolverAssetsDir, getGepAssetsDir } from "./paths.js";
 
 // ---------- Types ----------
 
@@ -82,14 +82,28 @@ function getContextParamsPath(): string {
 }
 
 export function loadContextParams(): ContextParams {
-  const filePath = getContextParamsPath();
+  // 3-layer: hardcoded defaults < bundled < workspace (evolver)
+  let base: Partial<ContextParams> = {};
   try {
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, "utf8");
-      return { ...DEFAULT_CONTEXT_PARAMS, ...JSON.parse(raw) };
+    const bundledPath = getBundledContextParamsPath();
+    if (bundledPath && fs.existsSync(bundledPath)) {
+      base = JSON.parse(fs.readFileSync(bundledPath, "utf8"));
     }
-  } catch {}
-  return { ...DEFAULT_CONTEXT_PARAMS };
+  } catch {
+    // bundled not available
+  }
+
+  let workspace: Partial<ContextParams> = {};
+  try {
+    const filePath = getContextParamsPath();
+    if (fs.existsSync(filePath)) {
+      workspace = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    }
+  } catch {
+    // workspace not available
+  }
+
+  return { ...DEFAULT_CONTEXT_PARAMS, ...base, ...workspace };
 }
 
 export function saveContextParams(params: ContextParams): void {

@@ -6,9 +6,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 let tmpGepDir: string;
 let tmpEvolverDir: string;
 
+let tmpBundledDir: string;
+
 vi.mock("./paths.js", () => ({
   getGepAssetsDir: () => tmpGepDir,
   getEvolverAssetsDir: () => tmpEvolverDir,
+  getBundledContextParamsPath: () => {
+    const p = path.join(tmpBundledDir, "context_params.json");
+    return fs.existsSync(p) ? p : undefined;
+  },
   getWorkspaceRoot: () => "/tmp/fake-workspace",
   getRepoRoot: () => process.cwd(),
 }));
@@ -29,11 +35,13 @@ import {
 beforeEach(() => {
   tmpGepDir = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-gep-"));
   tmpEvolverDir = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-evolver-"));
+  tmpBundledDir = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-bundled-"));
 });
 
 afterEach(() => {
   fs.rmSync(tmpGepDir, { recursive: true, force: true });
   fs.rmSync(tmpEvolverDir, { recursive: true, force: true });
+  fs.rmSync(tmpBundledDir, { recursive: true, force: true });
 });
 
 describe("detectRepeatQuestion", () => {
@@ -149,6 +157,59 @@ describe("loadContextParams / saveContextParams", () => {
     expect(loaded.baseThreshold).toBe(0.99);
     // Other fields come from defaults
     expect(loaded.hybridVectorWeight).toBe(DEFAULT_CONTEXT_PARAMS.hybridVectorWeight);
+  });
+
+  it("bundled overrides hardcoded defaults", () => {
+    // Bundled ships mmrLambda=0.8 (different from hardcoded 0.6)
+    fs.writeFileSync(
+      path.join(tmpBundledDir, "context_params.json"),
+      JSON.stringify({ mmrLambda: 0.8 }),
+      "utf8",
+    );
+    const loaded = loadContextParams();
+    expect(loaded.mmrLambda).toBe(0.8);
+    // Other fields still come from hardcoded defaults
+    expect(loaded.baseThreshold).toBe(DEFAULT_CONTEXT_PARAMS.baseThreshold);
+  });
+
+  it("workspace (evolver) overrides bundled", () => {
+    // Bundled: mmrLambda=0.8, baseThreshold=0.5
+    fs.writeFileSync(
+      path.join(tmpBundledDir, "context_params.json"),
+      JSON.stringify({ mmrLambda: 0.8, baseThreshold: 0.5 }),
+      "utf8",
+    );
+    // Workspace: evolver tuned baseThreshold to 0.9
+    fs.writeFileSync(
+      path.join(tmpEvolverDir, "context_params.json"),
+      JSON.stringify({ baseThreshold: 0.9 }),
+      "utf8",
+    );
+    const loaded = loadContextParams();
+    // workspace wins for baseThreshold
+    expect(loaded.baseThreshold).toBe(0.9);
+    // bundled wins for mmrLambda (not in workspace)
+    expect(loaded.mmrLambda).toBe(0.8);
+    // hardcoded default for fields not in either
+    expect(loaded.hybridVectorWeight).toBe(DEFAULT_CONTEXT_PARAMS.hybridVectorWeight);
+  });
+
+  it("3-layer priority: workspace > bundled > hardcoded", () => {
+    fs.writeFileSync(
+      path.join(tmpBundledDir, "context_params.json"),
+      JSON.stringify({ baseThreshold: 0.6, mmrLambda: 0.8, hybridVectorWeight: 0.5 }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(tmpEvolverDir, "context_params.json"),
+      JSON.stringify({ baseThreshold: 0.95 }),
+      "utf8",
+    );
+    const loaded = loadContextParams();
+    expect(loaded.baseThreshold).toBe(0.95); // workspace
+    expect(loaded.mmrLambda).toBe(0.8); // bundled
+    expect(loaded.hybridVectorWeight).toBe(0.5); // bundled
+    expect(loaded.redundancyThreshold).toBe(DEFAULT_CONTEXT_PARAMS.redundancyThreshold); // hardcoded
   });
 });
 
