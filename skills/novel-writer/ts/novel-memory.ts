@@ -29,13 +29,13 @@ import type { EmbeddingProvider, EmbeddingProviderResult } from "../../../src/me
 import type { EmbeddingContext } from "../../../src/memory/manager-embeddings.js";
 import type { SearchRowResult } from "../../../src/memory/manager-search.js";
 import type { VectorState } from "../../../src/memory/manager-vectors.js";
-import type { L1Sentence } from "../../../src/memory/types.js";
+import type {
+  ChunkUtilizationStats,
+  L1Sentence,
+  UtilizationEvent,
+} from "../../../src/memory/types.js";
 import { resolveAgentDir } from "../../../src/agents/agent-scope.js";
-import {
-  DEFAULT_CONTEXT_PARAMS,
-  type ContextParams,
-  loadContextParams,
-} from "../../../src/agents/dynamic-context.js";
+import { loadContextParams } from "../../../src/agents/dynamic-context.js";
 import { loadConfig } from "../../../src/config/io.js";
 import { applyDiversityPipeline, type DiverseChunk } from "../../../src/memory/chunk-diversity.js";
 import { createEmbeddingProvider } from "../../../src/memory/embeddings.js";
@@ -75,6 +75,12 @@ import {
 } from "../../../src/memory/manager-vectors.js";
 import { ensureMemoryIndexSchema } from "../../../src/memory/memory-schema.js";
 import { requireNodeSqlite } from "../../../src/memory/sqlite.js";
+import {
+  recordUtilization as recordUtilizationSQL,
+  getChunkUtilizationStats as getChunkUtilizationStatsSQL,
+  getSessionUtilizationRate as getSessionUtilizationRateSQL,
+  computeAdaptiveThreshold,
+} from "../../../src/memory/utilization.js";
 
 const FTS_TABLE = "chunks_fts";
 const EMBEDDING_CACHE_TABLE = "embedding_cache";
@@ -461,8 +467,25 @@ export class NovelMemoryStore {
 
     const ctxParams = await loadContextParams();
     const mmrLambda = ctxParams.mmrLambda ?? 0.6;
-    const threshold = ctxParams.baseThreshold;
     const thresholdFloor = ctxParams.thresholdFloor;
+
+    // Adaptive threshold: raise when utilization is low
+    let threshold = ctxParams.baseThreshold;
+    if (ctxParams.utilizationThresholdBoost) {
+      try {
+        // Use a generic session rate across all novel-writer sessions
+        const utilRate = this.getSessionUtilizationRate("");
+        if (utilRate !== null) {
+          threshold = computeAdaptiveThreshold(
+            ctxParams.baseThreshold,
+            utilRate,
+            ctxParams.utilizationThresholdBoost,
+          );
+        }
+      } catch {
+        // Non-fatal — use base threshold
+      }
+    }
 
     let queries: Array<{ query: string; queryVec: number[]; factorId?: string }> = [
       { query, queryVec },
@@ -503,13 +526,7 @@ export class NovelMemoryStore {
     const allCandidates: DiverseChunk[] = [];
     await Promise.all(
       queries.map(async (q) => {
-        const results = await this.runSingleSearch(
-          q.query,
-          q.queryVec,
-          candidates,
-          q.factorId,
-          ctxParams,
-        );
+        const results = await this.runSingleSearch(q.query, q.queryVec, candidates, q.factorId);
         for (const r of results) {
           allCandidates.push({
             key: `${r.path}:${r.startLine}`,
@@ -537,7 +554,24 @@ export class NovelMemoryStore {
       mmrLambda,
     });
 
-    return diverseResults.slice(0, qs.maxResults).map((c) => ({
+    // Apply utilization prior: boost well-utilized chunks, penalize ignored ones
+    let finalResults = diverseResults;
+    if (ctxParams.utilizationPriorEnabled !== false) {
+      const strength = ctxParams.utilizationPriorStrength ?? 0.3;
+      const minSamples = ctxParams.utilizationMinSamples ?? 3;
+      if (strength > 0) {
+        finalResults = diverseResults.map((c) => {
+          const chunkId = c.id ?? `${c.path}:${c.startLine}`;
+          const stats = this.getChunkUtilizationStats(chunkId);
+          if (!stats || stats.injectCount < minSamples) return c;
+          const multiplier = 1.0 + strength * (stats.utilizationRate - 0.5);
+          return { ...c, score: c.score * multiplier };
+        });
+        finalResults.sort((a, b) => b.score - a.score);
+      }
+    }
+
+    return finalResults.slice(0, qs.maxResults).map((c) => ({
       id: c.id ?? `${c.path}:${c.startLine}`,
       path: c.path,
       startLine: c.startLine,
@@ -593,6 +627,23 @@ export class NovelMemoryStore {
     } catch {}
   }
 
+  // --- Utilization tracking (feedback loop integration) ---
+
+  /** Record utilization events for injected chunks. */
+  recordUtilization(events: UtilizationEvent[]): void {
+    recordUtilizationSQL(this.db, events);
+  }
+
+  /** Get aggregate utilization stats for a chunk. */
+  getChunkUtilizationStats(chunkId: string): ChunkUtilizationStats | null {
+    return getChunkUtilizationStatsSQL(this.db, chunkId);
+  }
+
+  /** Get session-level utilization rate. */
+  getSessionUtilizationRate(sessionId: string, windowMs?: number): number | null {
+    return getSessionUtilizationRateSQL(this.db, sessionId, windowMs);
+  }
+
   close(): void {
     this.db.close();
   }
@@ -611,7 +662,6 @@ export class NovelMemoryStore {
     queryVec: number[],
     limit: number,
     factorId: string | undefined,
-    _ctxParams: ContextParams = DEFAULT_CONTEXT_PARAMS,
   ): Promise<SearchRowResult[]> {
     const hasVector = queryVec.some((v) => v !== 0);
     const sourceFilter = this.buildSourceFilter();

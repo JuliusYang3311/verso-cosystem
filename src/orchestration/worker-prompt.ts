@@ -114,17 +114,3 @@ function formatTaskBlock(subtask: Subtask): string {
     "Begin. Output TASK_COMPLETE or TASK_FAILED when done.",
   ].join("\n");
 }
-
-// ---------------------------------------------------------------------------
-// Legacy compat (used by existing runWorkerTask — delegates to first-task builder)
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use buildWorkerFirstTaskPrompt or buildWorkerSubsequentTaskPrompt */
-export function buildWorkerSystemPrompt(params: {
-  subtask: Subtask;
-  orchestrationId: string;
-  missionWorkspaceDir: string;
-  hasExistingProject?: boolean;
-}): string {
-  return buildWorkerFirstTaskPrompt(params);
-}

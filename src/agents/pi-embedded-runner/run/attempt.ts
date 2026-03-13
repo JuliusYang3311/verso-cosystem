@@ -9,7 +9,7 @@ import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
-import { getMemorySearchManager } from "../../../memory/search-manager.js";
+import { resolveMemoryForContext } from "../../../memory/resolve-memory-for-context.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { isSubagentSessionKey, normalizeAgentId } from "../../../routing/session-key.js";
 import { resolveTelegramInlineButtonsScope } from "../../../telegram/inline-buttons.js";
@@ -473,23 +473,13 @@ export async function runEmbeddedAttempt(
       const allCustomTools = [...customTools, ...clientToolDefs];
 
       // Resolve memory manager for dynamic context (Layer 1)
-      let memoryManagerForContext: import("../../../memory/types.js").MemorySearchManager | null =
-        null;
-      if (params.config?.agents?.defaults?.dynamicContext !== false) {
-        if (params.memoryManager) {
-          memoryManagerForContext = params.memoryManager;
-        } else {
-          try {
-            const { manager } = await getMemorySearchManager({
-              cfg: params.config ?? {},
-              agentId: sessionAgentId,
-            });
-            memoryManagerForContext = manager ?? null;
-          } catch {
-            // non-fatal — dynamic context proceeds without memory
-          }
-        }
-      }
+      const memoryResolved = await resolveMemoryForContext({
+        explicitManager: params.memoryManager ?? undefined,
+        dynamicContextEnabled: params.config?.agents?.defaults?.dynamicContext !== false,
+        cfg: params.config ?? {},
+        agentId: sessionAgentId,
+      });
+      const memoryManagerForContext = memoryResolved.manager;
 
       const settingsManager = SettingsManager.create(effectiveWorkspace, agentDir);
 
@@ -1013,113 +1003,17 @@ export async function runEmbeddedAttempt(
       }
 
       // Post-turn attribution: record how injected chunks were used by the LLM.
-      // All required data is already available at this point.
-      if (!aborted && !promptError && sessionManager) {
+      if (!aborted && !promptError && sessionManager && memoryManagerForContext) {
         try {
-          const { getDynamicContextRuntime } =
-            await import("../../pi-extensions/dynamic-context/runtime.js");
-          const dcRuntime = getDynamicContextRuntime(sessionManager);
-          const injected = dcRuntime?.lastInjectedChunks ?? [];
-          if (injected.length > 0 && memoryManagerForContext?.recordUtilization) {
-            const { detectUtilization } = await import("../../../memory/utilization.js");
-            const assistantOutput = assistantTexts.join("");
-            const memoryGetChunkIds = new Set(
-              toolMetasNormalized
-                .filter((t) => t.toolName === "memory_get" && t.meta)
-                .map((t) => {
-                  try {
-                    return JSON.parse(t.meta!).chunkId as string | undefined;
-                  } catch {
-                    return undefined;
-                  }
-                })
-                .filter(Boolean) as string[],
-            );
-            const sid = sessionIdUsed ?? params.sessionId;
-            const now = Date.now();
-            const events: import("../../../memory/types.js").UtilizationEvent[] = [];
-
-            for (const chunk of injected) {
-              // Always record the injection event
-              events.push({
-                chunkId: chunk.id,
-                sessionId: sid,
-                event: "injected",
-                factorIds: chunk.factorIds,
-                score: chunk.score,
-                timestamp: now,
-              });
-
-              // Determine attribution (priority order)
-              let attribution: import("../../../memory/types.js").UtilizationEventType;
-              if (chunk.id && memoryGetChunkIds.has(chunk.id)) {
-                attribution = "l1_miss";
-              } else if (detectUtilization(chunk.snippet, assistantOutput)) {
-                attribution = "utilized";
-              } else {
-                attribution = "ignored";
-              }
-
-              events.push({
-                chunkId: chunk.id,
-                sessionId: sid,
-                event: attribution,
-                factorIds: chunk.factorIds,
-                score: chunk.score,
-                timestamp: now,
-              });
-            }
-
-            memoryManagerForContext.recordUtilization(events);
-            dcRuntime!.lastInjectedChunks = [];
-
-            // Emit session-level aggregation to feedback.jsonl for evolver
-            try {
-              const utilizedCount = events.filter((e) => e.event === "utilized").length;
-              const ignoredCount = events.filter((e) => e.event === "ignored").length;
-              const l1MissCount = events.filter((e) => e.event === "l1_miss").length;
-              const misleadingCount = events.filter((e) => e.event === "misleading").length;
-              const injectedCount = injected.length;
-              const memorySearchCalls = toolMetasNormalized.filter(
-                (t) => t.toolName === "memory_search",
-              ).length;
-
-              if (injectedCount > 0) {
-                const { recordFeedback } =
-                  await import("../../../evolver/gep/feedback-collector.js");
-                recordFeedback({
-                  type: "implicit",
-                  signal: "memory_session_utilization",
-                  sessionId: sid,
-                  details: {
-                    injected_count: injectedCount,
-                    utilized_count: utilizedCount,
-                    ignored_count: ignoredCount,
-                    l1_miss_count: l1MissCount,
-                    misleading_count: misleadingCount,
-                    utilization_rate: utilizedCount / injectedCount,
-                    l1_miss_rate: l1MissCount / injectedCount,
-                    ignored_ratio: ignoredCount / injectedCount,
-                    retrieval_gaps: memorySearchCalls,
-                    avg_score_utilized:
-                      utilizedCount > 0
-                        ? events
-                            .filter((e) => e.event === "utilized")
-                            .reduce((s, e) => s + (e.score ?? 0), 0) / utilizedCount
-                        : 0,
-                    avg_score_ignored:
-                      ignoredCount > 0
-                        ? events
-                            .filter((e) => e.event === "ignored")
-                            .reduce((s, e) => s + (e.score ?? 0), 0) / ignoredCount
-                        : 0,
-                  },
-                });
-              }
-            } catch {
-              // Feedback recording is non-critical
-            }
-          }
+          const { performPostTurnAttribution } =
+            await import("../../../memory/post-turn-attribution.js");
+          await performPostTurnAttribution({
+            sessionManager,
+            memoryManager: memoryManagerForContext,
+            assistantOutput: assistantTexts.join(""),
+            toolMetas: toolMetasNormalized,
+            sessionId: sessionIdUsed ?? params.sessionId,
+          });
         } catch {
           // Utilization tracking is non-critical
         }

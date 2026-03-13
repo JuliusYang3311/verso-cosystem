@@ -51,6 +51,8 @@ export type PoolWorker = {
   id: string;
   specialization: WorkerSpecialization;
   session: AgentSession;
+  /** SessionManager for accessing dynamic context runtime (utilization attribution). */
+  sessionManager: unknown;
   state: WorkerState;
   /** Number of tasks this worker has executed. */
   taskCount: number;
@@ -185,10 +187,11 @@ export class WorkerPool {
             customTools: config.customTools,
             provider: config.model.provider,
             modelId: config.model.id,
-          }).then(({ session }) => ({
+          }).then(({ session, sessionManager }) => ({
             id,
             specialization,
             session,
+            sessionManager,
             state: "idle" as WorkerState,
             taskCount: 0,
             completedTaskIds: [],

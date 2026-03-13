@@ -26,6 +26,8 @@ export type AcceptanceTestParams = {
   /** Persistent acceptance session — carries context across evaluations. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   session: any;
+  /** SessionManager for acceptance session (utilization attribution). */
+  sessionManager?: unknown;
   /** Number of evaluations already completed on this session (0 = first). */
   evaluationCount: number;
   /** Isolated memory manager shared across orchestrator, workers, and acceptance. */
@@ -167,6 +169,23 @@ export async function runAcceptanceTests(params: AcceptanceTestParams): Promise<
 
     // Extract response text
     const lastText = session.getLastAssistantText?.() ?? "";
+
+    // Post-turn attribution: record utilization of injected memory chunks
+    if (params.memoryManager && params.sessionManager) {
+      try {
+        const { performPostTurnAttribution } = await import("../memory/post-turn-attribution.js");
+        const { extractToolMetas } = await import("./worker-runner.js");
+        await performPostTurnAttribution({
+          sessionManager: params.sessionManager,
+          memoryManager: params.memoryManager,
+          assistantOutput: lastText,
+          toolMetas: extractToolMetas(session),
+          sessionId: `orch:${orchestration.id}:acceptance:${evaluationCount}`,
+        });
+      } catch {
+        // Utilization tracking is non-critical
+      }
+    }
 
     // Index evaluation result into shared memory
     if (params.memoryManager && lastText) {

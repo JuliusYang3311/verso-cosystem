@@ -211,6 +211,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       memoryManager: memoryManager ?? null,
     });
     acceptanceSession = acceptanceCreated.session;
+    const acceptanceSessionManager = acceptanceCreated.sessionManager;
     logger.info("Acceptance session created", { orchId });
 
     // 3. Orchestrate tool (holds references to pool + acceptance session)
@@ -220,6 +221,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
       workspaceDir: sandboxDir,
       pool,
       acceptanceSession,
+      acceptanceSessionManager,
       maxFixCycles: opts.maxFixCycles ?? ORCHESTRATION_DEFAULTS.maxFixCycles,
       maxOrchestrations: 1,
       verifyCmd: opts.verifyCmd ?? ORCHESTRATION_DEFAULTS.verifyCmd,
@@ -246,7 +248,7 @@ async function runOrchestrationTask(opts: OrchestratorDaemonOptions): Promise<vo
     });
 
     // Create orchestrator session via unified factory (3-layer context pipeline)
-    let created;
+    let created: Awaited<ReturnType<typeof createVersoSession>>;
     try {
       created = await createVersoSession({
         cwd: sandboxDir,
@@ -452,6 +454,24 @@ ${buildOrchestratorTaskMessage({
       // Debug: Check if agent actually did anything
       const messages = session.messages;
       const toolCalls = messages.filter((msg: any) => msg.role === "assistant" && msg.toolUse);
+
+      // Post-turn attribution: record utilization of injected memory chunks
+      if (memoryManager && created.sessionManager) {
+        try {
+          const { performPostTurnAttribution } = await import("../memory/post-turn-attribution.js");
+          const { extractToolMetas } = await import("./worker-runner.js");
+          const lastText = session.getLastAssistantText?.() ?? "";
+          await performPostTurnAttribution({
+            sessionManager: created.sessionManager,
+            memoryManager,
+            assistantOutput: lastText,
+            toolMetas: extractToolMetas(session),
+            sessionId: `orch:${orchId}`,
+          });
+        } catch {
+          // Utilization tracking is non-critical
+        }
+      }
 
       // Index orchestrator's summary into shared memory
       if (memoryManager) {

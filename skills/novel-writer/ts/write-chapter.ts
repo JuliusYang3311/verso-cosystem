@@ -18,6 +18,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { computeAttribution } from "../../../src/memory/post-turn-attribution.js";
 import {
   applyPatch,
   PROJECTS_DIR,
@@ -26,7 +27,8 @@ import {
   projectDir,
   memPath,
 } from "./apply-patch.js";
-import { assembleContext } from "./context.js";
+import { STYLE_DB_PATH } from "./apply-patch.js";
+import { assembleContext, type ContextResult } from "./context.js";
 import {
   extractUpdates,
   novelComplete,
@@ -34,6 +36,7 @@ import {
   safeParseJson,
   type ResolvedLlm,
 } from "./extract-updates.js";
+import { NovelMemoryStore } from "./novel-memory.js";
 import { revertChapterMemory } from "./revert-memory.js";
 import { validatePatchOrThrow } from "./validate-patch.js";
 
@@ -397,6 +400,11 @@ export async function writeChapter(opts: WriteChapterOpts): Promise<WriteResult>
   // 3. Call LLM to write chapter
   const chapterText = await generateChapter(llm, systemPrompt);
 
+  // 3b. Record utilization: which search snippets were used in the generated chapter
+  recordContextUtilization(context, chapterText, project).catch((err) =>
+    console.error(`[writeChapter] utilization recording failed (non-fatal): ${String(err)}`),
+  );
+
   // 4. Save chapter as .txt
   const chapterPath = saveChapterFile(project, chapter, chapterText);
 
@@ -442,6 +450,11 @@ export async function rewriteChapter(opts: RewriteChapterOpts): Promise<WriteRes
   const llm = await resolveLlmModel();
   const newText = await generateChapter(llm, systemPrompt);
 
+  // 5b. Record utilization
+  recordContextUtilization(context, newText, project).catch((err) =>
+    console.error(`[rewriteChapter] utilization recording failed (non-fatal): ${String(err)}`),
+  );
+
   // 6. Overwrite chapter file
   const chapterPath = saveChapterFile(project, chapter, newText);
 
@@ -461,6 +474,68 @@ export async function rewriteChapter(opts: RewriteChapterOpts): Promise<WriteRes
     memoryUpdated: summarizeMemoryChanges(patch as AnyObj),
     rewritten: true,
   };
+}
+
+/**
+ * Record utilization of search snippets used during chapter generation.
+ * Converts style/timeline search results into attribution events and
+ * writes them to the novel-writer's memory DB.
+ */
+async function recordContextUtilization(
+  context: ContextResult,
+  chapterText: string,
+  project: string,
+): Promise<void> {
+  // Collect all injected snippets from style + timeline search
+  type SnippetEntry = { text: string; score: number; path: string };
+  const styleSnippets = (context.style_snippets ?? []) as SnippetEntry[];
+  const timelineSnippets = (context.timeline_hits ?? []) as SnippetEntry[];
+  const allSnippets = [
+    ...styleSnippets.map((s) => ({ ...s, source: "style" as const })),
+    ...timelineSnippets.map((s) => ({ ...s, source: "timeline" as const })),
+  ];
+  if (allSnippets.length === 0) return;
+
+  // Build injected chunk records for attribution
+  const injectedChunks = allSnippets.map((s, i) => ({
+    id: `novel:${s.source}:${s.path}:${i}`,
+    path: s.path,
+    startLine: 0,
+    endLine: 0,
+    snippet: s.text,
+    score: s.score,
+    factorIds: [] as string[],
+  }));
+
+  // Compute attribution (which snippets were reflected in the chapter)
+  const result = computeAttribution({
+    injectedChunks,
+    assistantOutput: chapterText,
+    toolMetas: [],
+    sessionId: `novel:${project}:${Date.now()}`,
+  });
+
+  if (result.events.length === 0) return;
+
+  // Write events to both style and timeline DBs
+  const dbPaths = new Map<string, string>();
+  if (styleSnippets.length > 0) dbPaths.set("style", STYLE_DB_PATH);
+  const tlDbPath = path.join(PROJECTS_DIR, project, "timeline_memory.sqlite");
+  if (timelineSnippets.length > 0) dbPaths.set("timeline", tlDbPath);
+
+  for (const [source, dbPath] of dbPaths) {
+    if (!fsSync.existsSync(dbPath)) continue;
+    try {
+      const store = await NovelMemoryStore.open({ dbPath, source });
+      const sourceEvents = result.events.filter((e) => e.chunkId.startsWith(`novel:${source}:`));
+      if (sourceEvents.length > 0) {
+        store.recordUtilization(sourceEvents);
+      }
+      store.close();
+    } catch {
+      // Non-fatal
+    }
+  }
 }
 
 // CLI entry point

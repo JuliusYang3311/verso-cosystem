@@ -668,3 +668,60 @@ describe("NovelMemoryStore — L0-filtered search path", () => {
     store.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Utilization tracking
+// ---------------------------------------------------------------------------
+
+describe("NovelMemoryStore — utilization tracking", () => {
+  let store: NovelMemoryStore;
+
+  beforeEach(async () => {
+    store = await openStore();
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  it("records and retrieves chunk utilization stats", () => {
+    store.recordUtilization([
+      { chunkId: "c1", sessionId: "s1", event: "injected", factorIds: [], timestamp: Date.now() },
+      { chunkId: "c1", sessionId: "s1", event: "utilized", factorIds: [], timestamp: Date.now() },
+      { chunkId: "c1", sessionId: "s1", event: "injected", factorIds: [], timestamp: Date.now() },
+      { chunkId: "c1", sessionId: "s1", event: "ignored", factorIds: [], timestamp: Date.now() },
+    ]);
+
+    const stats = store.getChunkUtilizationStats("c1");
+    expect(stats).not.toBeNull();
+    expect(stats!.injectCount).toBe(2);
+    expect(stats!.utilizeCount).toBe(1);
+    expect(stats!.ignoredCount).toBe(1);
+    expect(stats!.utilizationRate).toBeCloseTo(0.5, 5);
+  });
+
+  it("returns null for unknown chunk", () => {
+    expect(store.getChunkUtilizationStats("nonexistent")).toBeNull();
+  });
+
+  it("computes session utilization rate", () => {
+    store.recordUtilization([
+      { chunkId: "c1", sessionId: "s1", event: "injected", factorIds: [], timestamp: Date.now() },
+      { chunkId: "c1", sessionId: "s1", event: "utilized", factorIds: [], timestamp: Date.now() },
+      { chunkId: "c2", sessionId: "s1", event: "injected", factorIds: [], timestamp: Date.now() },
+      { chunkId: "c2", sessionId: "s1", event: "ignored", factorIds: [], timestamp: Date.now() },
+    ]);
+
+    const rate = store.getSessionUtilizationRate("s1");
+    expect(rate).toBeCloseTo(0.5, 5);
+  });
+
+  it("returns null session rate for unknown session", () => {
+    expect(store.getSessionUtilizationRate("unknown")).toBeNull();
+  });
+
+  it("empty events are no-ops", () => {
+    store.recordUtilization([]);
+    expect(store.getChunkUtilizationStats("any")).toBeNull();
+  });
+});

@@ -7,6 +7,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import type { ToolMeta } from "../memory/post-turn-attribution.js";
 import type { Orchestration, Subtask } from "./types.js";
 import type { PoolWorker, WorkerPool } from "./worker-pool.js";
 import { broadcastOrchestrationEvent } from "./events.js";
@@ -18,6 +19,52 @@ const logger = {
   warn: (...args: unknown[]) => console.warn("[orchestration-worker]", ...args),
   error: (...args: unknown[]) => console.error("[orchestration-worker]", ...args),
 };
+
+/**
+ * Extract memory_get tool call metadata from session messages for l1_miss detection.
+ * Scans assistant messages for tool_use blocks where name === "memory_get",
+ * returning ToolMeta[] with the JSON-stringified input as `meta`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractToolMetas(session: any): ToolMeta[] {
+  const metas: ToolMeta[] = [];
+  try {
+    const messages = session?.messages;
+    if (!Array.isArray(messages)) return metas;
+
+    for (const msg of messages) {
+      if (msg?.role !== "assistant") continue;
+      const content = msg.content;
+      if (!Array.isArray(content)) continue;
+
+      for (const block of content) {
+        if (!block || typeof block !== "object") continue;
+        const b = block as Record<string, unknown>;
+        if (b.type !== "tool_use") continue;
+
+        const toolName = typeof b.name === "string" ? b.name : "";
+        if (!toolName) continue;
+
+        // Only collect memory_get and memory_search — these are the ones
+        // post-turn attribution actually uses for l1_miss and retrieval_gaps.
+        if (toolName === "memory_get" || toolName === "memory_search") {
+          let meta: string | undefined;
+          if (b.input != null) {
+            try {
+              meta = typeof b.input === "string" ? b.input : JSON.stringify(b.input);
+            } catch {
+              // non-critical
+            }
+          }
+          metas.push({ toolName, meta });
+        }
+      }
+    }
+  } catch {
+    // Extraction is non-critical — return what we have
+  }
+  return metas;
+}
 
 const DEFAULT_WORKER_TIMEOUT_MS = 600_000; // 10 minutes of inactivity per task
 const MAX_SESSION_RETRIES = 2; // retries on "already processing" before giving up
@@ -237,6 +284,24 @@ async function executeTaskOnWorker(params: {
     const ok =
       lastText.includes("TASK_COMPLETE") ||
       (!lastText.includes("TASK_FAILED") && lastText.length > 0);
+
+    // Post-turn attribution: record utilization of injected memory chunks
+    if (memoryManager && worker.sessionManager) {
+      try {
+        const { performPostTurnAttribution } = await import("../memory/post-turn-attribution.js");
+        // Extract tool metas from session messages for l1_miss detection
+        const toolMetas = extractToolMetas(session);
+        await performPostTurnAttribution({
+          sessionManager: worker.sessionManager,
+          memoryManager,
+          assistantOutput: lastText,
+          toolMetas,
+          sessionId: `orch:${orchestrationId}:${subtask.id}`,
+        });
+      } catch {
+        // Utilization tracking is non-critical
+      }
+    }
 
     const filesChanged = getChangedFilesAfter(missionWorkspaceDir);
 

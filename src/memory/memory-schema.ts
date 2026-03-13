@@ -97,6 +97,7 @@ export function ensureMemoryIndexSchema(params: {
   }
 
   ensureColumn(params.db, "files", "source", "TEXT NOT NULL DEFAULT 'memory'");
+  ensureColumn(params.db, "files", "l0_embedding", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(params.db, "chunks", "source", "TEXT NOT NULL DEFAULT 'memory'");
 
   // 3-layer architecture columns

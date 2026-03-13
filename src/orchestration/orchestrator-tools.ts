@@ -100,6 +100,8 @@ export type OrchestrateToolOptions = {
   /** Persistent acceptance session — carries context across evaluations. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   acceptanceSession: any;
+  /** SessionManager for acceptance session (utilization attribution). */
+  acceptanceSessionManager?: unknown;
   maxFixCycles?: number;
   maxOrchestrations?: number;
   verifyCmd?: string;
@@ -461,6 +463,7 @@ async function handleRunAcceptance(params: Record<string, unknown>, opts: Orches
     workspaceDir: orch.workspaceDir,
     verifyCmd,
     session: opts.acceptanceSession,
+    sessionManager: opts.acceptanceSessionManager,
     evaluationCount: orch.acceptanceResults.length,
     memoryManager: opts.memoryManager,
   });

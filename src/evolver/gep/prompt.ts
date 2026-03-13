@@ -426,9 +426,31 @@ B. factor-space.json — latent factor space:
 - You MAY edit factor descriptions/templates to improve sub-query quality
 - Factor weights are learned online via hit/miss signals from memory and web search
 
+C. Parameter bounds & execution:
+- All parameter bounds are defined in \`genes.json > parameter_bounds\` — NEVER set values outside [min, max].
+- Severity-to-delta mapping is in \`genes.json > severity_delta_map\`:
+  critical (metric >2× from target): full step, moderate (1.5×): 0.6× step, mild (<1.5×): 0.3× step
+- To update parameters, use the saveContextParams function:
+  \`\`\`
+  const { loadContextParams, saveContextParams } = require('./src/evolver/gep/feedback-collector');
+  const params = loadContextParams();
+  params.baseThreshold = Math.min(params.baseThreshold + delta, 0.95); // clamp to bounds
+  saveContextParams(params);
+  \`\`\`
+- File path: \`evolver/assets/context_params.json\` (auto-resolved by getEvolverAssetsDir())
+
+D. Memory utilization feedback metrics (from feedback.jsonl):
+- \`utilization_rate\` — fraction of injected chunks actually used by LLM (target: 0.5–0.8)
+- \`l1_miss_rate\` — fraction where LLM called memory_get for L2 text (target: <0.3)
+- \`ignored_ratio\` — fraction of chunks neither used nor L2-fetched (target: <0.4)
+- \`retrieval_gaps\` — count of explicit memory_search tool calls (indicates context gaps)
+- \`avg_score_utilized\` — mean retrieval score of utilized chunks
+- \`avg_score_ignored\` — mean retrieval score of ignored chunks (high → threshold too low)
+
 Rules for tuning:
 - Change at most 2–3 parameters or factors per cycle
 - Record before/after values and expected effect in the EvolutionEvent
+- Always clamp to parameter_bounds defined in genes.json
 - Validate by running: \`pnpm test --run src/memory\`
 
 Final Directive
