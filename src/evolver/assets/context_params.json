@@ -15,5 +15,15 @@
   "factorMmrLambda": 0.7,
   "webSearchMmrLambda": 0.7,
   "webSearchMmrMinGain": 0.05,
-  "webSearchBudgetTokens": 8000
+  "webSearchBudgetTokens": 8000,
+  "utilizationPriorEnabled": true,
+  "utilizationPriorStrength": 0.3,
+  "utilizationMinSamples": 3,
+  "utilizationThresholdBoost": 0.05,
+  "l1MissRateThreshold": 0.5,
+  "l2BudgetRatio": 0.3,
+  "sessionTimeDecayLambda": 0.02,
+  "memoryTimeDecayLambda": 0.005,
+  "queryMaxChars": 500,
+  "querySourceMessages": 1
 }
