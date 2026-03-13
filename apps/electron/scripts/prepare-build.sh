@@ -102,11 +102,14 @@ STAGING="$VERSO_ROOT/build-node-modules"
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
 
-# Patterns for dev-only packages in .pnpm/ store
+# Patterns for dev-only packages.
+# NOTE: With --config.node-linker=hoisted, top-level dirs are real copies
+# (not symlinks into .pnpm), so we must exclude BOTH .pnpm/ AND top-level paths.
 EXCLUDE_ARGS=(
   # Electron shell (provided by electron-builder itself) — ~234MB
   --exclude='.pnpm/electron@*'
   --exclude='.pnpm/@electron*'
+  --exclude='electron'
   # Build tools (electron-builder, app-builder-bin) — ~328MB
   --exclude='.pnpm/electron-builder@*'
   --exclude='.pnpm/app-builder-bin@*'
@@ -114,41 +117,70 @@ EXCLUDE_ARGS=(
   --exclude='.pnpm/dmg-builder@*'
   --exclude='.pnpm/builder-util@*'
   --exclude='.pnpm/builder-util-runtime@*'
+  --exclude='electron-builder'
+  --exclude='app-builder-bin'
+  --exclude='app-builder-lib'
+  --exclude='dmg-builder'
+  --exclude='builder-util'
+  --exclude='builder-util-runtime'
   # TypeScript compiler + native preview — ~47MB
   --exclude='.pnpm/typescript@*'
   --exclude='.pnpm/@typescript+native-preview*'
+  --exclude='typescript'
+  --exclude='@typescript'
   # Bundler (tsdown + rolldown) — ~18MB
   --exclude='.pnpm/tsdown@*'
   --exclude='.pnpm/@rolldown*'
   --exclude='.pnpm/rolldown@*'
+  --exclude='tsdown'
+  --exclude='@rolldown'
+  --exclude='rolldown'
   # Test framework (vitest) — ~4MB
   --exclude='.pnpm/vitest@*'
   --exclude='.pnpm/@vitest*'
+  --exclude='vitest'
+  --exclude='@vitest'
   # Linter + formatter (oxlint, oxfmt) — ~50MB
   --exclude='.pnpm/oxlint*'
   --exclude='.pnpm/@oxlint*'
   --exclude='.pnpm/oxfmt*'
+  --exclude='oxlint'
+  --exclude='@oxlint-tsgolint'
+  --exclude='oxfmt'
   # Local LLM (optional, large) — ~57MB
   --exclude='.pnpm/node-llama-cpp@*'
   --exclude='.pnpm/@node-llama-cpp*'
+  --exclude='node-llama-cpp'
+  --exclude='@node-llama-cpp'
   # Self-reference copies — ~95MB
   --exclude='.pnpm/openclaw@*'
+  --exclude='openclaw'
   # TSX dev runner
   --exclude='.pnpm/tsx@*'
+  --exclude='tsx'
   # Lit (devDependency only)
   --exclude='.pnpm/lit@*'
   --exclude='.pnpm/@lit*'
+  --exclude='lit'
+  --exclude='@lit'
   # Ollama (devDependency)
   --exclude='.pnpm/ollama@*'
+  --exclude='ollama'
   # Type declarations (not needed at runtime)
   --exclude='.pnpm/@types+*'
+  --exclude='@types'
   # Build tool transitive deps still in .pnpm
   --exclude='.pnpm/7zip-bin@*'
   --exclude='.pnpm/esbuild@*'
   --exclude='.pnpm/@esbuild*'
   --exclude='.pnpm/@cloudflare+workers-types@*'
+  --exclude='7zip-bin'
+  --exclude='esbuild'
+  --exclude='@esbuild'
   # .bin scripts (gateway uses direct imports)
   --exclude='.bin'
+  # .ignored_ prefixed dirs (pnpm hoisted dedupes)
+  --exclude='.ignored_*'
 )
 
 # Exclude wrong-arch native binaries
