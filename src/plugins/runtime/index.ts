@@ -118,7 +118,7 @@ import {
   readWebSelfId,
   webAuthExists,
 } from "../../web/auth-store.js";
-import { startWebLoginWithQr, waitForWebLogin } from "../../web/login-qr.js";
+import { getLatestLoginQr, startWebLoginWithQr, waitForWebLogin } from "../../web/login-qr.js";
 import { loginWeb } from "../../web/login.js";
 import { loadWebMedia } from "../../web/media.js";
 import { sendMessageWhatsApp, sendPollWhatsApp } from "../../web/outbound.js";
@@ -285,6 +285,7 @@ export function createPluginRuntime(): PluginRuntime {
         sendPollWhatsApp,
         loginWeb,
         startWebLoginWithQr,
+        getLatestLoginQr,
         waitForWebLogin,
         monitorWebChannel,
         handleWhatsAppAction,

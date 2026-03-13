@@ -20,6 +20,19 @@ const CHANNEL_CONFIG_FIELDS = {
         { value: 'disabled', label: 'Disabled (ignore groups)' },
       ], help: 'Controls which groups the bot responds in' },
       { key: 'allowFrom', label: 'Allow From (user IDs/usernames)', type: 'text', placeholder: '123456789, @username, *', help: 'Comma-separated list of Telegram user IDs or @usernames. Use * to allow all.' },
+      { key: 'historyLimit', label: 'History Limit', type: 'number', placeholder: '50', help: 'Max group messages to keep as history context (0 disables)' },
+      { key: 'textChunkLimit', label: 'Text Chunk Limit', type: 'number', placeholder: '4000', help: 'Outbound text chunk size in chars (default: 4000)' },
+      { key: 'replyToMode', label: 'Reply Threading', type: 'select', options: [
+        { value: 'off', label: 'Off' },
+        { value: 'first', label: 'First (reply to first message only)' },
+        { value: 'all', label: 'All (reply to every message)' },
+      ], help: 'Control reply threading when reply tags are present' },
+      { key: 'streamMode', label: 'Stream Mode', type: 'select', options: [
+        { value: 'partial', label: 'Partial (default - edit message as it streams)' },
+        { value: 'block', label: 'Block (send full blocks)' },
+        { value: 'off', label: 'Off (send only when complete)' },
+      ], help: 'Draft streaming mode for Telegram' },
+      { key: 'proxy', label: 'Proxy (optional)', type: 'text', placeholder: 'socks5://127.0.0.1:1080', help: 'SOCKS5/HTTP proxy for Telegram API (useful in restricted regions)' },
       { key: 'webhookUrl', label: 'Webhook URL (optional)', type: 'text', placeholder: 'https://yourdomain.com/telegram/webhook', help: 'Leave empty for polling mode' },
       { key: 'webhookSecret', label: 'Webhook Secret (required if URL set)', type: 'password', placeholder: 'Random secret string', help: 'Required when using webhook mode. Use a random string.' },
     ],
@@ -37,8 +50,19 @@ const CHANNEL_CONFIG_FIELDS = {
         { value: 'disabled', label: 'Disabled (no DMs)' },
       ], help: 'Controls who can send DMs' },
       { key: 'allowFrom', label: 'Allow From', type: 'text', placeholder: '8613800138000, *', help: 'Comma-separated phone numbers (with country code). Use * to allow all.' },
+      { key: 'groupPolicy', label: 'Group Access', type: 'select', options: [
+        { value: 'open', label: 'Open (respond in any group when mentioned)' },
+        { value: 'allowlist', label: 'Allowlist (only allowed senders in groups)' },
+        { value: 'disabled', label: 'Disabled (no group messages)' },
+      ], help: 'Controls whether the bot responds in group chats' },
       { key: 'selfChatMode', label: 'Self-Chat Mode', type: 'checkbox', help: 'Enable if bot uses your personal WhatsApp number' },
-      { key: 'debounceMs', label: 'Debounce (ms)', type: 'number', placeholder: '1500' },
+      { key: 'historyLimit', label: 'History Limit', type: 'number', placeholder: '50', help: 'Max group messages to keep as history context (0 disables)' },
+      { key: 'textChunkLimit', label: 'Text Chunk Limit', type: 'number', placeholder: '4000', help: 'Outbound text chunk size in chars (default: 4000)' },
+      { key: 'debounceMs', label: 'Debounce (ms)', type: 'number', placeholder: '1500', help: 'Batching window for rapid consecutive messages (0 to disable)' },
+      { key: 'sendReadReceipts', label: 'Send Read Receipts', type: 'checkbox', help: 'Send read receipts for incoming messages (default: true)' },
+      { key: 'blockStreaming', label: 'Disable Streaming', type: 'checkbox', help: 'Disable block streaming for this account' },
+      { key: 'messagePrefix', label: 'Message Prefix', type: 'text', placeholder: '[verso]', help: 'Inbound message prefix (empty to disable)' },
+      { key: 'responsePrefix', label: 'Response Prefix', type: 'text', placeholder: 'auto', help: 'Outbound response prefix ("auto" or custom, empty to disable)' },
     ],
     pairing: 'qr',
     pairingHelp: 'To pair WhatsApp:\n1. Click "Start QR Pairing" below\n2. Open WhatsApp on your phone\n3. Go to Settings → Linked Devices → Link a Device\n4. Scan the QR code shown here',
@@ -48,11 +72,32 @@ const CHANNEL_CONFIG_FIELDS = {
     description: 'Discord Bot API - create an application at discord.com/developers',
     fields: [
       { key: 'token', label: 'Bot Token', type: 'password', placeholder: 'MTIzNDU2Nzg5...', required: true, help: 'From Discord Developer Portal → Bot → Token' },
+      { key: 'groupPolicy', label: 'Server Access', type: 'select', options: [
+        { value: 'open', label: 'Open (respond in any server when @mentioned)' },
+        { value: 'allowlist', label: 'Allowlist (only configured servers)' },
+        { value: 'disabled', label: 'Disabled (DM only, no server messages)' },
+      ], help: 'Controls whether the bot responds in server channels' },
+      { key: 'requireMention', label: 'Require @mention', type: 'checkbox', help: 'Require @mention to trigger replies in servers (default: true via guilds config)' },
+      { key: 'allowBots', label: 'Allow Bot Messages', type: 'checkbox', help: 'Allow bot-authored messages to trigger replies (default: false)' },
+      { key: 'historyLimit', label: 'History Limit', type: 'number', placeholder: '50', help: 'Max messages to keep as history context (0 disables)' },
+      { key: 'textChunkLimit', label: 'Text Chunk Limit', type: 'number', placeholder: '2000', help: 'Outbound text chunk size in chars (default: 2000)' },
+      { key: 'replyToMode', label: 'Reply Threading', type: 'select', options: [
+        { value: 'off', label: 'Off' },
+        { value: 'first', label: 'First (reply to first message only)' },
+        { value: 'all', label: 'All (reply to every message)' },
+      ], help: 'Control reply threading when reply tags are present' },
+      { key: 'blockStreaming', label: 'Disable Streaming', type: 'checkbox', help: 'Disable block streaming for this account' },
       { key: 'enabled', label: 'Enabled', type: 'checkbox' },
     ],
     // Discord allowFrom lives in dm.allowFrom, handled specially in saveChannelConfig
     dmFields: [
       { key: 'allowFrom', label: 'Allow From (DM user IDs)', type: 'text', placeholder: '123456789012345678, *', help: 'Comma-separated Discord user IDs. Use * to allow all.' },
+      { key: 'policy', label: 'DM Policy', type: 'select', options: [
+        { value: 'pairing', label: 'Pairing (default - users must pair first)' },
+        { value: 'allowlist', label: 'Allowlist (only allowFrom users)' },
+        { value: 'open', label: 'Open (anyone can DM)' },
+        { value: 'disabled', label: 'Disabled (no DMs)' },
+      ], help: 'Controls who can send DMs to the bot' },
     ],
     pairing: 'token',
     pairingHelp: 'To set up Discord:\n1. Go to discord.com/developers/applications\n2. Create a New Application\n3. Go to Bot section, click Reset Token\n4. Copy the token and paste it above\n5. Enable the bot: Go to OAuth2 → URL Generator\n6. Select bot scope, then add permissions\n7. Use the generated URL to invite the bot to your server',
@@ -63,11 +108,34 @@ const CHANNEL_CONFIG_FIELDS = {
     fields: [
       { key: 'botToken', label: 'Bot Token (xoxb-...)', type: 'password', placeholder: 'xoxb-...', required: true, help: 'OAuth Bot Token from api.slack.com' },
       { key: 'appToken', label: 'App Token (xapp-...)', type: 'password', placeholder: 'xapp-...', required: true, help: 'Socket Mode App-Level Token' },
+      { key: 'groupPolicy', label: 'Channel Access', type: 'select', options: [
+        { value: 'open', label: 'Open (respond in any channel when @mentioned)' },
+        { value: 'allowlist', label: 'Allowlist (only configured channels)' },
+        { value: 'disabled', label: 'Disabled (DM only, no channel messages)' },
+      ], help: 'Controls whether the bot responds in Slack channels' },
+      { key: 'requireMention', label: 'Require @mention', type: 'checkbox', help: 'Require @mention to trigger replies in channels (default: true)' },
+      { key: 'allowBots', label: 'Allow Bot Messages', type: 'checkbox', help: 'Allow bot-authored messages to trigger replies (default: false)' },
+      { key: 'historyLimit', label: 'History Limit', type: 'number', placeholder: '50', help: 'Max channel messages to keep as history context (0 disables)' },
+      { key: 'textChunkLimit', label: 'Text Chunk Limit', type: 'number', placeholder: '2000', help: 'Outbound text chunk size in chars' },
+      { key: 'replyToMode', label: 'Reply Threading', type: 'select', options: [
+        { value: 'off', label: 'Off' },
+        { value: 'first', label: 'First (reply to first message only)' },
+        { value: 'all', label: 'All (reply to every message)' },
+      ], help: 'Control reply threading when reply tags are present' },
+      { key: 'blockStreaming', label: 'Disable Streaming', type: 'checkbox', help: 'Disable block streaming for this account' },
       { key: 'enabled', label: 'Enabled', type: 'checkbox' },
     ],
     // Slack allowFrom lives in dm.allowFrom, handled specially in saveChannelConfig
     dmFields: [
       { key: 'allowFrom', label: 'Allow From (Slack user IDs)', type: 'text', placeholder: 'U01ABC123, *', help: 'Comma-separated Slack user IDs. Use * to allow all.' },
+      { key: 'policy', label: 'DM Policy', type: 'select', options: [
+        { value: 'pairing', label: 'Pairing (default - users must pair first)' },
+        { value: 'allowlist', label: 'Allowlist (only allowFrom users)' },
+        { value: 'open', label: 'Open (anyone can DM)' },
+        { value: 'disabled', label: 'Disabled (no DMs)' },
+      ], help: 'Controls who can send DMs to the bot' },
+      { key: 'enabled', label: 'DM Enabled', type: 'checkbox', help: 'Enable/disable DM handling (default: true)' },
+      { key: 'groupEnabled', label: 'Group DM Enabled', type: 'checkbox', help: 'Allow group DMs (default: false)' },
     ],
     pairing: 'token',
     pairingHelp: 'To set up Slack:\n1. Go to api.slack.com/apps and create a new app\n2. Enable Socket Mode and generate an app-level token (xapp-...)\n3. Go to OAuth & Permissions, install the app, copy the Bot Token (xoxb-...)\n4. Paste both tokens above\n5. Add required bot scopes: chat:write, channels:read, channels:history, etc.',
@@ -271,6 +339,7 @@ function saveChannelField(target, channelName, field, targetKey) {
   } else if (field.type === 'number') {
     const val = el.value.trim();
     if (val) target[key] = parseInt(val);
+    else delete target[key];
   } else if (key === 'allowFrom') {
     const val = el.value.trim();
     if (val) {
@@ -284,6 +353,8 @@ function saveChannelField(target, channelName, field, targetKey) {
     const val = el.value.trim();
     if (val) {
       target[key] = val;
+    } else {
+      delete target[key];
     }
   }
 }
@@ -300,6 +371,13 @@ window.saveChannelConfig = async function(channelName) {
       // Collect values from top-level form fields
       for (const field of meta.fields) {
         saveChannelField(config.channels[channelName], channelName, field);
+      }
+
+      // Auto-configure Discord guilds wildcard when groupPolicy is "open"
+      if (channelName === 'discord' && config.channels[channelName].groupPolicy === 'open') {
+        if (!config.channels[channelName].guilds || Object.keys(config.channels[channelName].guilds).length === 0) {
+          config.channels[channelName].guilds = { '*': { requireMention: true } };
+        }
       }
 
       // Collect dm sub-fields (Discord/Slack use dm.allowFrom instead of top-level allowFrom)
@@ -360,7 +438,9 @@ window.startWhatsAppPairing = async function(accountId) {
     const result = await window.gatewayClient.call('web.login.start', {
       accountId: accountId || undefined,
       timeoutMs: 45000,
+      force: !!startWhatsAppPairing._force,
     });
+    startWhatsAppPairing._force = false;
 
     const qrDataUrl = result?.qrDataUrl || result?.qr;
     const message = result?.message || '';
@@ -369,7 +449,7 @@ window.startWhatsAppPairing = async function(accountId) {
       container.innerHTML = `
         <div style="text-align:center;">
           <div style="background:white;padding:16px;border-radius:8px;display:inline-block;">
-            <img src="${qrDataUrl}" style="width:256px;height:256px;image-rendering:pixelated;" alt="WhatsApp QR Code">
+            <img id="wa-qr-img" src="${qrDataUrl}" style="width:256px;height:256px;image-rendering:pixelated;" alt="WhatsApp QR Code">
           </div>
           <div style="color:#888;font-size:12px;margin-top:8px;">Scan this QR code with WhatsApp on your phone</div>
           <div style="color:#666;font-size:11px;margin-top:4px;">Settings → Linked Devices → Link a Device</div>
@@ -377,14 +457,24 @@ window.startWhatsAppPairing = async function(accountId) {
         </div>
       `;
 
+      // Auto-refresh QR every 15s (Baileys rotates QR every ~20s)
+      startWhatsAppPairing._qrRefreshTimer = setInterval(async () => {
+        try {
+          const fresh = await window.gatewayClient.call('web.login.qr', { accountId: accountId || undefined });
+          const img = document.getElementById('wa-qr-img');
+          if (img && fresh?.qrDataUrl) img.src = fresh.qrDataUrl;
+        } catch { /* ignore */ }
+      }, 15000);
+
       // Now wait for the scan
       void waitForWhatsAppPairing(accountId);
     } else {
+      const isAlreadyLinked = message.includes('already linked');
       container.innerHTML = `
         <div style="color:#ff9800;padding:12px;">
           ${escapeHtml(message || 'Could not generate QR code. The WhatsApp service may not be ready.')}
         </div>
-        <button class="btn btn-small" onclick="startWhatsAppPairing()" style="margin-top:8px;">Retry</button>
+        <button class="btn btn-small" onclick="startWhatsAppPairing._force=${isAlreadyLinked};startWhatsAppPairing()" style="margin-top:8px;">${isAlreadyLinked ? 'Relink' : 'Retry'}</button>
       `;
     }
   } catch (err) {
@@ -398,6 +488,13 @@ window.startWhatsAppPairing = async function(accountId) {
   }
 }
 
+function stopQrRefresh() {
+  if (startWhatsAppPairing._qrRefreshTimer) {
+    clearInterval(startWhatsAppPairing._qrRefreshTimer);
+    startWhatsAppPairing._qrRefreshTimer = null;
+  }
+}
+
 async function waitForWhatsAppPairing(accountId) {
   const statusEl = document.getElementById('wa-pair-status');
 
@@ -407,6 +504,7 @@ async function waitForWhatsAppPairing(accountId) {
       timeoutMs: 120000,
     });
 
+    stopQrRefresh();
     if (result?.connected) {
       if (statusEl) {
         statusEl.innerHTML = '<span style="color:#4caf50;font-weight:600;">Paired successfully!</span>';
@@ -425,6 +523,7 @@ async function waitForWhatsAppPairing(accountId) {
       }
     }
   } catch (err) {
+    stopQrRefresh();
     if (statusEl) {
       statusEl.innerHTML = `
         <span style="color:#f44336;">Error: ${escapeHtml(err.message)}</span>

@@ -9,7 +9,7 @@ import {
 } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
 
-const WEB_LOGIN_METHODS = new Set(["web.login.start", "web.login.wait"]);
+const WEB_LOGIN_METHODS = new Set(["web.login.start", "web.login.wait", "web.login.qr"]);
 
 const resolveWebLoginProvider = () =>
   listChannelPlugins().find((plugin) =>
@@ -64,6 +64,27 @@ export const webHandlers: GatewayRequestHandlers = {
         verbose: Boolean((params as { verbose?: boolean }).verbose),
         accountId,
       });
+      respond(true, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
+    }
+  },
+  "web.login.qr": async ({ params, respond }) => {
+    try {
+      const accountId =
+        typeof (params as { accountId?: unknown }).accountId === "string"
+          ? (params as { accountId?: string }).accountId
+          : undefined;
+      const provider = resolveWebLoginProvider();
+      if (!provider?.gateway?.loginWithQrRefresh) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "web login QR refresh is not available"),
+        );
+        return;
+      }
+      const result = await provider.gateway.loginWithQrRefresh({ accountId });
       respond(true, result, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));

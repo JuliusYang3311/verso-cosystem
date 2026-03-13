@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CONFIG_PATH, resolveConfigSnapshotHash } from "../config/config.js";
+import { resolveConfigPath, resolveConfigSnapshotHash } from "../config/config.js";
 import {
   connectOk,
   installGatewayTestHooks,
@@ -117,7 +117,7 @@ describe("gateway config.patch", () => {
     expect(get2Res.payload?.config?.gateway?.mode).toBe("local");
     expect(get2Res.payload?.config?.channels?.telegram?.botToken).toBe("__VERSO_REDACTED__");
 
-    const storedRaw = await fs.readFile(CONFIG_PATH, "utf-8");
+    const storedRaw = await fs.readFile(resolveConfigPath(), "utf-8");
     const stored = JSON.parse(storedRaw) as {
       channels?: { telegram?: { botToken?: string } };
     };
@@ -186,7 +186,7 @@ describe("gateway config.patch", () => {
     );
     expect(set2Res.ok).toBe(true);
 
-    const storedRaw = await fs.readFile(CONFIG_PATH, "utf-8");
+    const storedRaw = await fs.readFile(resolveConfigPath(), "utf-8");
     const stored = JSON.parse(storedRaw) as {
       channels?: { telegram?: { botToken?: string } };
     };

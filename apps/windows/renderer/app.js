@@ -279,7 +279,8 @@ window.saveAllSettings = async function() {
     const we = document.getElementById('web-enabled');
     if (we) config.tools.web.search.enabled = we.checked;
     const ba = document.getElementById('brave-api-key');
-    if (ba) config.tools.web.search.apiKey = ba.value;
+    if (ba && ba.value.trim()) config.tools.web.search.apiKey = ba.value.trim();
+    else delete config.tools.web.search.apiKey;
 
     // --- Save once ---
     await window.verso.saveConfig(config);
@@ -465,7 +466,8 @@ window.saveWebTools = async function() {
   const we = document.getElementById('web-enabled');
   if (we) config.tools.web.search.enabled = we.checked;
   const ba = document.getElementById('brave-api-key');
-  if (ba) config.tools.web.search.apiKey = ba.value;
+  if (ba && ba.value.trim()) config.tools.web.search.apiKey = ba.value.trim();
+  else delete config.tools.web.search.apiKey;
 
   await window.verso.saveConfig(config);
   showNotification('Web tools settings saved');

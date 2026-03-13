@@ -493,6 +493,8 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> = {
         timeoutMs,
         verbose,
       }),
+    loginWithQrRefresh: async ({ accountId }) =>
+      await getWhatsAppRuntime().channel.whatsapp.getLatestLoginQr({ accountId }),
     loginWithQrWait: async ({ accountId, timeoutMs }) =>
       await getWhatsAppRuntime().channel.whatsapp.waitForWebLogin({ accountId, timeoutMs }),
     logoutAccount: async ({ account, runtime }) => {

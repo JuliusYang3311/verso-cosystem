@@ -200,6 +200,7 @@ export type ChannelGatewayAdapter<ResolvedAccount = unknown> = {
     timeoutMs?: number;
     verbose?: boolean;
   }) => Promise<ChannelLoginWithQrStartResult>;
+  loginWithQrRefresh?: (params: { accountId?: string }) => Promise<ChannelLoginWithQrStartResult>;
   loginWithQrWait?: (params: {
     accountId?: string;
     timeoutMs?: number;

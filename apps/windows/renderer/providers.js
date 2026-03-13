@@ -550,15 +550,15 @@ async function updateProvider(name) {
   const apiTypeEl = document.getElementById(`apiType-${name}`);
   const apiKeyEl = document.getElementById(`apiKey-${name}`);
 
-  const updates = {};
-  if (baseUrlEl) updates.baseUrl = baseUrlEl.value;
-  if (apiTypeEl) updates.apiType = apiTypeEl.value;
-  if (apiKeyEl) updates.apiKey = apiKeyEl.value;
+  const existing = providers[name] || {};
+  if (baseUrlEl && baseUrlEl.value.trim()) existing.baseUrl = baseUrlEl.value.trim();
+  else delete existing.baseUrl;
+  if (apiTypeEl && apiTypeEl.value.trim()) existing.apiType = apiTypeEl.value.trim();
+  else delete existing.apiType;
+  if (apiKeyEl && apiKeyEl.value.trim()) existing.apiKey = apiKeyEl.value.trim();
+  else delete existing.apiKey;
 
-  providers[name] = {
-    ...providers[name],
-    ...updates
-  };
+  providers[name] = existing;
 
   await saveProviders();
 }
