@@ -11,7 +11,13 @@ import {
   copyMissionToOutput,
   cleanupMissionWorkspace,
 } from "./store.js";
-import { type Subtask, createSubtask, isSubtaskReady, ORCHESTRATION_DEFAULTS } from "./types.js";
+import {
+  type Subtask,
+  createSubtask,
+  isSubtaskReady,
+  validateDependencyIds,
+  ORCHESTRATION_DEFAULTS,
+} from "./types.js";
 import { runWorkerPool } from "./worker-runner.js";
 
 const logger = {
@@ -226,6 +232,14 @@ async function handleCreatePlan(params: Record<string, unknown>, opts: Orchestra
       dependsOn: Array.isArray(raw.dependsOn) ? raw.dependsOn.map(String) : undefined,
     });
   });
+
+  // Validate all dependency references before saving
+  const depErrors = validateDependencyIds(subtasks);
+  if (depErrors.length > 0) {
+    return jsonResult({
+      error: `Invalid dependency references in plan:\n${depErrors.join("\n")}`,
+    });
+  }
 
   orch.plan = { summary: planSummary, subtasks, verifyCmd };
   orch.status = "dispatching";
@@ -677,6 +691,18 @@ async function handleRevisePlan(params: Record<string, unknown>, opts: Orchestra
         rewiredCount++;
       }
     }
+  }
+
+  // Validate dependency references after all mutations (cancel + add + rewire)
+  // Only check non-terminal tasks — cancelled/completed tasks are irrelevant
+  const activeTasks = allSubtasks.filter((s) => s.status === "pending" || s.status === "running");
+  const depErrors = validateDependencyIds(allSubtasks).filter((err) =>
+    activeTasks.some((t) => err.startsWith(`Subtask "${t.id}"`)),
+  );
+  if (depErrors.length > 0) {
+    return jsonResult({
+      error: `Invalid dependency references after revision:\n${depErrors.join("\n")}`,
+    });
   }
 
   orch.status = "dispatching";

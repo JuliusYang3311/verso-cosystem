@@ -423,6 +423,85 @@ describe("TaskDispatcher", () => {
       expect(end).toBeNull();
     });
 
+    it("cancels tasks with non-existent dependency IDs at construction", async () => {
+      // t2 depends on "ghost" which doesn't exist → should be cancelled immediately
+      const tasks = [makeTask("t1"), makeTask("t2", { dependsOn: ["ghost"] })];
+      const dispatcher = new TaskDispatcher(tasks);
+
+      expect(tasks[1].status).toBe("cancelled");
+      expect(tasks[1].error).toContain("ghost");
+
+      // t1 is still dispatchable
+      const t1 = await dispatcher.next();
+      expect(t1!.id).toBe("t1");
+
+      t1!.status = "completed";
+      dispatcher.onTaskDone();
+
+      // No more tasks
+      const end = await dispatcher.next();
+      expect(end).toBeNull();
+    });
+
+    it("cascade-cancels dependents of orphaned tasks", async () => {
+      // t2 depends on "ghost" (invalid) → cancelled
+      // t3 depends on t2 → cascade cancelled
+      const tasks = [
+        makeTask("t1"),
+        makeTask("t2", { dependsOn: ["ghost"] }),
+        makeTask("t3", { dependsOn: ["t2"] }),
+      ];
+      const dispatcher = new TaskDispatcher(tasks);
+
+      expect(tasks[1].status).toBe("cancelled");
+      expect(tasks[2].status).toBe("cancelled");
+
+      // t1 still works
+      const t1 = await dispatcher.next();
+      expect(t1!.id).toBe("t1");
+      t1!.status = "completed";
+      dispatcher.onTaskDone();
+
+      const end = await dispatcher.next();
+      expect(end).toBeNull();
+    });
+
+    it("handles mix of valid and orphaned deps", async () => {
+      // t1 → t3 (valid), t2 has ghost dep → cancelled
+      // t3 depends only on t1, should still work
+      const tasks = [
+        makeTask("t1"),
+        makeTask("t2", { dependsOn: ["ghost"] }),
+        makeTask("t3", { dependsOn: ["t1"] }),
+      ];
+      const dispatcher = new TaskDispatcher(tasks);
+
+      expect(tasks[1].status).toBe("cancelled");
+      expect(tasks[2].status).toBe("pending"); // t3 depends on t1, not ghost
+
+      const t1 = await dispatcher.next();
+      expect(t1!.id).toBe("t1");
+      t1!.status = "completed";
+      dispatcher.onTaskDone();
+
+      const t3 = await dispatcher.next();
+      expect(t3!.id).toBe("t3");
+    });
+
+    it("finishes immediately when all tasks have orphaned deps", async () => {
+      const tasks = [
+        makeTask("t1", { dependsOn: ["ghost1"] }),
+        makeTask("t2", { dependsOn: ["ghost2"] }),
+      ];
+      const dispatcher = new TaskDispatcher(tasks);
+
+      expect(tasks[0].status).toBe("cancelled");
+      expect(tasks[1].status).toBe("cancelled");
+
+      const end = await dispatcher.next();
+      expect(end).toBeNull();
+    });
+
     it("already-completed dependency does not block", async () => {
       const tasks = [makeTask("t1"), makeTask("t2", { dependsOn: ["t1"] })];
       // Manually complete t1 before creating dispatcher

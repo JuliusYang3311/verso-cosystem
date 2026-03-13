@@ -5,7 +5,14 @@
 // These are pure unit tests — no I/O, no sessions.
 
 import { describe, it, expect } from "vitest";
-import { createSubtask, isSubtaskReady, createOrchestration, type Subtask } from "../types.js";
+import {
+  createSubtask,
+  isSubtaskReady,
+  createOrchestration,
+  validateDependencyIds,
+  findOrphanedTasks,
+  type Subtask,
+} from "../types.js";
 
 function makeTask(
   id: string,
@@ -394,6 +401,92 @@ describe("revise-plan operations", () => {
       const allDone = tasks.every((t) => t.status === "completed" || t.status === "cancelled");
       expect(allDone).toBe(true);
     });
+  });
+});
+
+// -----------------------------------------------------------------------
+// validateDependencyIds
+// -----------------------------------------------------------------------
+
+describe("validateDependencyIds", () => {
+  it("returns empty array for valid dependencies", () => {
+    const tasks = [
+      makeTask("t1"),
+      makeTask("t2", "code-implementer", ["t1"]),
+      makeTask("t3", "code-implementer", ["t1", "t2"]),
+    ];
+    expect(validateDependencyIds(tasks)).toEqual([]);
+  });
+
+  it("returns empty array for tasks with no dependencies", () => {
+    const tasks = [makeTask("t1"), makeTask("t2")];
+    expect(validateDependencyIds(tasks)).toEqual([]);
+  });
+
+  it("detects single invalid dependency", () => {
+    const tasks = [makeTask("t1", "code-implementer", ["nonexistent"])];
+    const errors = validateDependencyIds(tasks);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("t1");
+    expect(errors[0]).toContain("nonexistent");
+  });
+
+  it("detects multiple invalid dependencies across tasks", () => {
+    const tasks = [
+      makeTask("t1"),
+      makeTask("t2", "code-implementer", ["t1", "ghost1"]),
+      makeTask("t3", "code-implementer", ["ghost2"]),
+    ];
+    const errors = validateDependencyIds(tasks);
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toContain("ghost1");
+    expect(errors[1]).toContain("ghost2");
+  });
+
+  it("allows mixed valid and revision IDs", () => {
+    const tasks = [
+      makeTask("t1"),
+      createSubtask({
+        id: "r1",
+        title: "Revision",
+        description: "",
+        acceptanceCriteria: [],
+        specialization: "code-implementer",
+        dependsOn: ["t1"],
+      }),
+    ];
+    expect(validateDependencyIds(tasks)).toEqual([]);
+  });
+});
+
+// -----------------------------------------------------------------------
+// findOrphanedTasks
+// -----------------------------------------------------------------------
+
+describe("findOrphanedTasks", () => {
+  it("returns empty array when all deps are valid", () => {
+    const tasks = [makeTask("t1"), makeTask("t2", "code-implementer", ["t1"])];
+    expect(findOrphanedTasks(tasks)).toEqual([]);
+  });
+
+  it("finds tasks with non-existent dependencies", () => {
+    const tasks = [makeTask("t1"), makeTask("t2", "code-implementer", ["nonexistent"])];
+    const orphaned = findOrphanedTasks(tasks);
+    expect(orphaned).toHaveLength(1);
+    expect(orphaned[0].id).toBe("t2");
+  });
+
+  it("ignores non-pending tasks with invalid deps", () => {
+    const tasks = [makeTask("t1", "code-implementer", ["nonexistent"])];
+    tasks[0].status = "completed";
+    expect(findOrphanedTasks(tasks)).toEqual([]);
+  });
+
+  it("detects partial orphan (one valid dep, one invalid)", () => {
+    const tasks = [makeTask("t1"), makeTask("t2", "code-implementer", ["t1", "nonexistent"])];
+    const orphaned = findOrphanedTasks(tasks);
+    expect(orphaned).toHaveLength(1);
+    expect(orphaned[0].id).toBe("t2");
   });
 });
 

@@ -25,7 +25,7 @@
  */
 
 import type { Subtask, FixTask } from "./types.js";
-import { isSubtaskReady } from "./types.js";
+import { isSubtaskReady, findOrphanedTasks } from "./types.js";
 
 const MAX_AUTO_RETRIES = 2;
 
@@ -45,6 +45,10 @@ export class TaskDispatcher {
   }
 
   constructor(private subtasks: Subtask[]) {
+    // Cancel tasks with orphaned (non-existent) dependency IDs before scheduling.
+    // Without this, such tasks stay pending forever and deadlock the dispatcher.
+    this.resolveOrphanedTasks();
+
     for (const s of subtasks) {
       if (isSubtaskReady(s, subtasks)) this.ready.push(s);
     }
@@ -81,6 +85,9 @@ export class TaskDispatcher {
 
     // 2. Handle deadlocks: pending tasks whose dependencies failed
     this.resolveBlockedTasks();
+
+    // 3. Cancel tasks with orphaned deps (e.g., introduced by auto-fix rewiring)
+    this.resolveOrphanedTasks();
 
     this.refreshFinished();
     this.wakeWaiters();
@@ -202,6 +209,44 @@ export class TaskDispatcher {
           })
         ) {
           s.status = "cancelled";
+          cascadeChanged = true;
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Orphaned dependency detection — prevent permanent deadlock
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Cancel pending tasks that reference non-existent dependency IDs.
+   * These can never become ready and would deadlock the dispatcher.
+   * Also cascades: if cancelling an orphaned task blocks others, cancel them too.
+   */
+  private resolveOrphanedTasks(): void {
+    const orphaned = findOrphanedTasks(this.subtasks);
+    if (orphaned.length === 0) return;
+
+    for (const task of orphaned) {
+      task.status = "cancelled";
+      task.error = `Cancelled: depends on non-existent task ID(s): ${task.dependsOn!.filter((depId) => !this.subtasks.some((s) => s.id === depId)).join(", ")}`;
+    }
+
+    // Cascade: cancel pending tasks whose deps were just cancelled
+    let cascadeChanged = true;
+    while (cascadeChanged) {
+      cascadeChanged = false;
+      for (const s of this.subtasks) {
+        if (
+          s.status === "pending" &&
+          s.dependsOn?.some((depId) => {
+            const dep = this.subtasks.find((d) => d.id === depId);
+            return dep?.status === "cancelled";
+          })
+        ) {
+          s.status = "cancelled";
+          s.error = s.error ?? "Cancelled: dependency was cancelled";
           cascadeChanged = true;
         }
       }

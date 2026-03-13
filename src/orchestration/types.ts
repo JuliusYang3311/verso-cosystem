@@ -187,6 +187,35 @@ export function createSubtask(params: {
   };
 }
 
+/**
+ * Validate that all dependsOn references point to existing task IDs.
+ * Returns an array of error messages (empty = valid).
+ */
+export function validateDependencyIds(subtasks: Subtask[]): string[] {
+  const validIds = new Set(subtasks.map((s) => s.id));
+  const errors: string[] = [];
+  for (const s of subtasks) {
+    if (!s.dependsOn) continue;
+    for (const depId of s.dependsOn) {
+      if (!validIds.has(depId)) {
+        errors.push(`Subtask "${s.id}" (${s.title}) depends on non-existent task "${depId}"`);
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * Find pending tasks that are permanently blocked because they reference
+ * non-existent dependency IDs (orphaned deps). These can never become ready.
+ */
+export function findOrphanedTasks(subtasks: Subtask[]): Subtask[] {
+  const allIds = new Set(subtasks.map((s) => s.id));
+  return subtasks.filter(
+    (s) => s.status === "pending" && s.dependsOn?.some((depId) => !allIds.has(depId)),
+  );
+}
+
 export function isSubtaskReady(subtask: Subtask, allSubtasks: Subtask[]): boolean {
   if (subtask.status !== "pending") {
     return false;
