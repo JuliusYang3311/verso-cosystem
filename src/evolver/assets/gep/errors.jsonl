@@ -26332,3 +26332,9 @@
 {"type":"ErrorRecord","timestamp":"2026-03-12T21:29:41.354Z","error_type":"acceptance_failed","details":{"confidence":30,"reasoning":"bad"}}
 {"type":"ErrorRecord","timestamp":"2026-03-13T00:09:34.522Z","error_type":"sandbox_failed","details":{"error":"timeout"}}
 {"type":"ErrorRecord","timestamp":"2026-03-13T00:09:34.776Z","error_type":"acceptance_failed","details":{"confidence":30,"reasoning":"bad"}}
+{"type":"ErrorRecord","timestamp":"2026-03-13T01:28:37.489Z","error_type":"sandbox_failed","details":{"error":"timeout"}}
+{"type":"ErrorRecord","timestamp":"2026-03-13T01:28:37.566Z","error_type":"acceptance_failed","details":{"confidence":30,"reasoning":"bad"}}
+{"type":"ErrorRecord","timestamp":"2026-03-13T01:49:22.968Z","error_type":"sandbox_failed","details":{"error":"timeout"}}
+{"type":"ErrorRecord","timestamp":"2026-03-13T01:49:23.060Z","error_type":"acceptance_failed","details":{"confidence":30,"reasoning":"bad"}}
+{"type":"ErrorRecord","timestamp":"2026-03-13T03:31:56.072Z","error_type":"sandbox_failed","details":{"error":"timeout"}}
+{"type":"ErrorRecord","timestamp":"2026-03-13T03:31:56.199Z","error_type":"acceptance_failed","details":{"confidence":30,"reasoning":"bad"}}

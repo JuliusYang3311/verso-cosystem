@@ -43,11 +43,25 @@ export default function dynamicContextExtension(api: ExtensionAPI): void {
             m &&
             typeof m === "object" &&
             (m as { role?: string }).role === "user" &&
-            typeof (m as { content?: unknown }).content === "string",
+            (m as { content?: unknown }).content != null,
         )
         .slice(-querySourceMessages);
       const searchQuery = userMessages
-        .map((m) => (m as { content: string }).content)
+        .map((m) => {
+          const content = (m as { content: unknown }).content;
+          if (typeof content === "string") return content;
+          // SDK stores user messages as array of content blocks: [{ type: "text", text: "..." }]
+          if (Array.isArray(content)) {
+            return content
+              .filter(
+                (b: unknown) =>
+                  b && typeof b === "object" && (b as { type?: string }).type === "text",
+              )
+              .map((b: unknown) => (b as { text: string }).text ?? "")
+              .join("\n");
+          }
+          return "";
+        })
         .join("\n")
         .slice(0, queryMaxChars);
 
