@@ -36,6 +36,11 @@ const CHANNEL_CONFIG_FIELDS = {
       { key: 'webhookUrl', label: 'Webhook URL (optional)', type: 'text', placeholder: 'https://yourdomain.com/telegram/webhook', help: 'Leave empty for polling mode' },
       { key: 'webhookSecret', label: 'Webhook Secret (required if URL set)', type: 'password', placeholder: 'Random secret string', help: 'Required when using webhook mode. Use a random string.' },
     ],
+    // Group-level defaults written to groups["*"]
+    groupFields: [
+      { key: 'requireMention', label: 'Require @mention in Groups', type: 'checkbox', help: 'Require @mention to trigger replies in group chats (default for all groups)' },
+    ],
+    groupKey: 'groups',
     pairing: 'token',
     pairingHelp: 'To set up Telegram:\n1. Open Telegram and find @BotFather\n2. Send /newbot and follow the steps\n3. Copy the bot token and paste it above\n4. Set DM Policy and Allow From as needed\n5. Save and the gateway will connect automatically',
   },
@@ -64,6 +69,11 @@ const CHANNEL_CONFIG_FIELDS = {
       { key: 'messagePrefix', label: 'Message Prefix', type: 'text', placeholder: '[verso]', help: 'Inbound message prefix (empty to disable)' },
       { key: 'responsePrefix', label: 'Response Prefix', type: 'text', placeholder: 'auto', help: 'Outbound response prefix ("auto" or custom, empty to disable)' },
     ],
+    // Group-level defaults written to groups["*"]
+    groupFields: [
+      { key: 'requireMention', label: 'Require @mention in Groups', type: 'checkbox', help: 'Require @mention to trigger replies in group chats (default for all groups)' },
+    ],
+    groupKey: 'groups',
     pairing: 'qr',
     pairingHelp: 'To pair WhatsApp:\n1. Click "Start QR Pairing" below\n2. Open WhatsApp on your phone\n3. Go to Settings → Linked Devices → Link a Device\n4. Scan the QR code shown here',
   },
@@ -77,7 +87,6 @@ const CHANNEL_CONFIG_FIELDS = {
         { value: 'allowlist', label: 'Allowlist (only configured servers)' },
         { value: 'disabled', label: 'Disabled (DM only, no server messages)' },
       ], help: 'Controls whether the bot responds in server channels' },
-      { key: 'requireMention', label: 'Require @mention', type: 'checkbox', help: 'Require @mention to trigger replies in servers (default: true via guilds config)' },
       { key: 'allowBots', label: 'Allow Bot Messages', type: 'checkbox', help: 'Allow bot-authored messages to trigger replies (default: false)' },
       { key: 'historyLimit', label: 'History Limit', type: 'number', placeholder: '50', help: 'Max messages to keep as history context (0 disables)' },
       { key: 'textChunkLimit', label: 'Text Chunk Limit', type: 'number', placeholder: '2000', help: 'Outbound text chunk size in chars (default: 2000)' },
@@ -89,6 +98,11 @@ const CHANNEL_CONFIG_FIELDS = {
       { key: 'blockStreaming', label: 'Disable Streaming', type: 'checkbox', help: 'Disable block streaming for this account' },
       { key: 'enabled', label: 'Enabled', type: 'checkbox' },
     ],
+    // Guild-level defaults written to guilds["*"]
+    groupFields: [
+      { key: 'requireMention', label: 'Require @mention in Servers', type: 'checkbox', help: 'Require @mention to trigger replies in servers (applies to all guilds by default)' },
+    ],
+    groupKey: 'guilds',
     // Discord allowFrom lives in dm.allowFrom, handled specially in saveChannelConfig
     dmFields: [
       { key: 'allowFrom', label: 'Allow From (DM user IDs)', type: 'text', placeholder: '123456789012345678, *', help: 'Comma-separated Discord user IDs. Use * to allow all.' },
@@ -267,6 +281,14 @@ function renderChannelStatusSection(channelName, accounts) {
 function renderChannelConfigFields(channelName, meta, channelConfig) {
   let html = meta.fields.map(field => renderChannelField(channelName, field, channelConfig[field.key])).join('');
 
+  // Render group/guild sub-fields (e.g. Discord guilds["*"], Telegram/WhatsApp groups["*"])
+  if (meta.groupFields) {
+    const gk = meta.groupKey || 'groups';
+    html += '<h5 style="margin:12px 0 8px;color:#aaa;">Group / Server Defaults</h5>';
+    const groupConfig = (channelConfig[gk] || {})['*'] || {};
+    html += meta.groupFields.map(field => renderChannelField(channelName, { ...field, key: `${gk}.${field.key}` }, groupConfig[field.key])).join('');
+  }
+
   // Render dm sub-fields (e.g. Discord/Slack dm.allowFrom)
   if (meta.dmFields) {
     html += '<h5 style="margin:12px 0 8px;color:#aaa;">DM Settings</h5>';
@@ -373,10 +395,13 @@ window.saveChannelConfig = async function(channelName) {
         saveChannelField(config.channels[channelName], channelName, field);
       }
 
-      // Auto-configure Discord guilds wildcard when groupPolicy is "open"
-      if (channelName === 'discord' && config.channels[channelName].groupPolicy === 'open') {
-        if (!config.channels[channelName].guilds || Object.keys(config.channels[channelName].guilds).length === 0) {
-          config.channels[channelName].guilds = { '*': { requireMention: true } };
+      // Collect group/guild sub-fields → written to guilds["*"] or groups["*"]
+      if (meta.groupFields) {
+        const gk = meta.groupKey || 'groups';
+        if (!config.channels[channelName][gk]) config.channels[channelName][gk] = {};
+        if (!config.channels[channelName][gk]['*']) config.channels[channelName][gk]['*'] = {};
+        for (const field of meta.groupFields) {
+          saveChannelField(config.channels[channelName][gk]['*'], channelName, { ...field, key: `${gk}.${field.key}` }, field.key);
         }
       }
 

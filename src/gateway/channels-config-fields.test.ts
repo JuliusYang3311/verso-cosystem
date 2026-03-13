@@ -262,10 +262,246 @@ describe("saveChannelField", () => {
     }
   });
 
+  // ── Group/guild sub-fields (written to guilds["*"] or groups["*"]) ───
+  describe("group fields (guilds/groups wildcard)", () => {
+    it("saves Discord requireMention to guilds['*'] via targetKey", () => {
+      addCheckbox("channel-discord-guilds-requireMention", true);
+      const target: Record<string, unknown> = {};
+      saveChannelField(
+        target,
+        "discord",
+        { key: "guilds.requireMention", type: "checkbox" },
+        "requireMention",
+      );
+      expect(target.requireMention).toBe(true);
+    });
+
+    it("saves Telegram requireMention to groups['*'] via targetKey", () => {
+      addCheckbox("channel-telegram-groups-requireMention", true);
+      const target: Record<string, unknown> = {};
+      saveChannelField(
+        target,
+        "telegram",
+        { key: "groups.requireMention", type: "checkbox" },
+        "requireMention",
+      );
+      expect(target.requireMention).toBe(true);
+    });
+
+    it("saves WhatsApp requireMention to groups['*'] via targetKey", () => {
+      addCheckbox("channel-whatsapp-groups-requireMention", false);
+      const target: Record<string, unknown> = {};
+      saveChannelField(
+        target,
+        "whatsapp",
+        { key: "groups.requireMention", type: "checkbox" },
+        "requireMention",
+      );
+      expect(target.requireMention).toBe(false);
+    });
+  });
+
   // ── Missing element is a no-op ────────────────────────────────────────
   it("does nothing when element is missing", () => {
     const target: Record<string, unknown> = { proxy: "existing" };
     saveChannelField(target, "telegram", { key: "proxy", type: "text" });
     expect(target.proxy).toBe("existing");
   });
+});
+
+// ── Schema consistency: every frontend field key must be valid in Zod schema ──
+
+import type { ZodObject, ZodRawShape } from "zod";
+import {
+  TelegramConfigSchema,
+  DiscordConfigSchema,
+  SlackConfigSchema,
+  DiscordDmSchema,
+  DiscordGuildSchema,
+  SlackDmSchema,
+  TelegramGroupSchema,
+} from "../config/zod-schema.providers-core.js";
+import { WhatsAppConfigSchema } from "../config/zod-schema.providers-whatsapp.js";
+
+/**
+ * Extract the set of top-level keys from a Zod .object().strict() schema.
+ * Works with ZodObject, ZodEffects (from .superRefine / .refine), and
+ * .extend() results.
+ */
+function zodKeys(schema: unknown): Set<string> {
+  // Unwrap ZodEffects (.superRefine, .refine, .transform)
+  let s = schema as { _def?: { schema?: unknown; typeName?: string }; shape?: ZodRawShape };
+  while (s?._def?.typeName === "ZodEffects" && s._def.schema) {
+    s = s._def.schema as typeof s;
+  }
+  // ZodObject — has .shape or ._def.shape()
+  if (typeof s?.shape === "object") {
+    return new Set(Object.keys(s.shape as Record<string, unknown>));
+  }
+  if (
+    typeof (s as { _def?: { shape?: () => Record<string, unknown> } })?._def?.shape === "function"
+  ) {
+    return new Set(
+      Object.keys((s as { _def: { shape: () => Record<string, unknown> } })._def.shape()),
+    );
+  }
+  throw new Error("Cannot extract keys from schema");
+}
+
+/**
+ * Frontend field definitions — must stay in sync with
+ * apps/electron/renderer/channels-config.js CHANNEL_CONFIG_FIELDS.
+ *
+ * This is the authoritative snapshot the test compares against the Zod schemas.
+ * When you add/remove a frontend field, update this list AND the schema.
+ */
+const FRONTEND_FIELDS: Record<
+  string,
+  {
+    fields: string[];
+    dmFields?: string[];
+    groupFields?: string[];
+    groupKey?: string;
+  }
+> = {
+  telegram: {
+    fields: [
+      "botToken",
+      "enabled",
+      "dmPolicy",
+      "groupPolicy",
+      "allowFrom",
+      "historyLimit",
+      "textChunkLimit",
+      "replyToMode",
+      "streamMode",
+      "proxy",
+      "webhookUrl",
+      "webhookSecret",
+    ],
+    groupFields: ["requireMention"],
+    groupKey: "groups",
+  },
+  whatsapp: {
+    fields: [
+      "dmPolicy",
+      "allowFrom",
+      "groupPolicy",
+      "selfChatMode",
+      "historyLimit",
+      "textChunkLimit",
+      "debounceMs",
+      "sendReadReceipts",
+      "blockStreaming",
+      "messagePrefix",
+      "responsePrefix",
+    ],
+    groupFields: ["requireMention"],
+    groupKey: "groups",
+  },
+  discord: {
+    fields: [
+      "token",
+      "groupPolicy",
+      "allowBots",
+      "historyLimit",
+      "textChunkLimit",
+      "replyToMode",
+      "blockStreaming",
+      "enabled",
+    ],
+    dmFields: ["allowFrom", "policy"],
+    groupFields: ["requireMention"],
+    groupKey: "guilds",
+  },
+  slack: {
+    fields: [
+      "botToken",
+      "appToken",
+      "groupPolicy",
+      "requireMention",
+      "allowBots",
+      "historyLimit",
+      "textChunkLimit",
+      "replyToMode",
+      "blockStreaming",
+      "enabled",
+    ],
+    dmFields: ["allowFrom", "policy", "enabled", "groupEnabled"],
+  },
+};
+
+const CHANNEL_SCHEMAS: Record<string, unknown> = {
+  telegram: TelegramConfigSchema,
+  whatsapp: WhatsAppConfigSchema,
+  discord: DiscordConfigSchema,
+  slack: SlackConfigSchema,
+};
+
+const DM_SCHEMAS: Record<string, unknown> = {
+  discord: DiscordDmSchema,
+  slack: SlackDmSchema,
+};
+
+const GROUP_SCHEMAS: Record<string, unknown> = {
+  telegram: TelegramGroupSchema,
+  discord: DiscordGuildSchema,
+  // WhatsApp group schema is inline — extract from WhatsAppConfigSchema
+};
+
+describe("frontend fields vs Zod schema consistency", () => {
+  for (const [channel, def] of Object.entries(FRONTEND_FIELDS)) {
+    describe(channel, () => {
+      it("all top-level field keys exist in the channel Zod schema", () => {
+        const keys = zodKeys(CHANNEL_SCHEMAS[channel]);
+        const missing = def.fields.filter((k) => !keys.has(k));
+        expect(missing, `fields not in ${channel} schema: ${missing.join(", ")}`).toEqual([]);
+      });
+
+      if (def.dmFields) {
+        it("all DM field keys exist in the DM Zod schema", () => {
+          const keys = zodKeys(DM_SCHEMAS[channel]);
+          const missing = def.dmFields!.filter((k) => !keys.has(k));
+          expect(missing, `DM fields not in ${channel} DM schema: ${missing.join(", ")}`).toEqual(
+            [],
+          );
+        });
+      }
+
+      if (def.groupFields) {
+        it(`all group field keys exist in the ${def.groupKey || "groups"} Zod schema`, () => {
+          let schema = GROUP_SCHEMAS[channel];
+          if (!schema) {
+            // Extract inline group schema from the config schema
+            const configKeys = zodKeys(CHANNEL_SCHEMAS[channel]);
+            expect(configKeys.has(def.groupKey || "groups")).toBe(true);
+            // For WhatsApp, parse a valid value and check the key is accepted
+            // Fallback: just verify the field is accepted by the full config schema
+            const testObj: Record<string, unknown> = {};
+            for (const f of def.fields) testObj[f] = undefined;
+            testObj[def.groupKey || "groups"] = {
+              "*": Object.fromEntries(def.groupFields!.map((k) => [k, true])),
+            };
+            const result = (CHANNEL_SCHEMAS[channel] as ZodObject<ZodRawShape>).safeParse(testObj);
+            if (!result.success) {
+              const groupErrors = result.error.issues.filter(
+                (i) => i.path.length >= 2 && String(i.path[0]) === (def.groupKey || "groups"),
+              );
+              expect(
+                groupErrors,
+                `group field validation errors: ${JSON.stringify(groupErrors)}`,
+              ).toEqual([]);
+            }
+            return;
+          }
+          const keys = zodKeys(schema);
+          const missing = def.groupFields!.filter((k) => !keys.has(k));
+          expect(
+            missing,
+            `group fields not in ${channel} group schema: ${missing.join(", ")}`,
+          ).toEqual([]);
+        });
+      }
+    });
+  }
 });
