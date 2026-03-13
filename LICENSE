@@ -7,6 +7,10 @@ This project is derived from openclaw (https://github.com/moltbot/moltbot),
 originally created by Peter Steinberger. It has been extensively customized
 and modified by Julius Yang.
 
+The evolver subsystem is inspired by and incorporates ideas from
+EvoMap/evolver (https://github.com/EvoMap/evolver), licensed under the
+MIT License. Copyright (c) 2026 OpenClaw.
+
 ================================================================================
 
 VERSO CUSTOM LICENSE
