@@ -1,7 +1,7 @@
 import type { VersoConfig } from "../config/config.js";
 import type { AgentModelListConfig } from "../config/types.js";
 
-export const OPENAI_CODEX_DEFAULT_MODEL = "openai-codex/gpt-5.3-codex";
+export const OPENAI_CODEX_DEFAULT_MODEL = "openai-codex/gpt-5.4";
 
 function shouldSetOpenAICodexModel(model?: string): boolean {
   const trimmed = model?.trim();
@@ -41,7 +41,7 @@ export function applyOpenAICodexModelDefault(cfg: VersoConfig): {
     providers["openai-codex"] = {
       baseUrl: "https://api.openai.com/v1",
       auth: "oauth",
-      api: "openai-completions",
+      api: "openai-responses",
       models: [],
     };
     providerChanged = true;

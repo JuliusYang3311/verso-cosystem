@@ -7,7 +7,7 @@
  */
 
 export var API_TYPE_MAP = {
-  'openai': 'openai-completions',
+  'openai': 'openai-responses',
   'anthropic': 'anthropic-messages',
   'google': 'google-generative-ai',
 };

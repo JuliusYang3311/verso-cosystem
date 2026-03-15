@@ -4,8 +4,40 @@ import { DEFAULT_CONTEXT_TOKENS } from "./defaults.js";
 import { normalizeModelCompat } from "./model-compat.js";
 import { normalizeProviderId } from "./model-selection.js";
 
-const OPENAI_CODEX_GPT_53_MODEL_ID = "gpt-5.3-codex";
-const OPENAI_CODEX_TEMPLATE_MODEL_IDS = ["gpt-5.2-codex"] as const;
+// ── OpenAI model specs table ────────────────────────────────────────
+// Add new models here; the resolver walks the list top-down and falls
+// back to the first available template in the registry.
+const OPENAI_CODEX_MODELS: {
+  id: string;
+  templates: string[];
+  api: string;
+  contextWindow: number;
+  maxTokens: number;
+}[] = [
+  // GPT-5.4 has no "-codex" variant; coding merged into base model.
+  // Uses Responses API (Completions deprecated for 5.4+).
+  {
+    id: "gpt-5.4",
+    templates: ["gpt-5.3-codex", "gpt-5.3", "gpt-5.2-codex"],
+    api: "openai-responses",
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
+  },
+  {
+    id: "gpt-5.3-codex",
+    templates: ["gpt-5.2-codex"],
+    api: "openai-codex-responses",
+    contextWindow: 1_048_576,
+    maxTokens: 100_000,
+  },
+  {
+    id: "gpt-5.3",
+    templates: ["gpt-5.2"],
+    api: "openai-responses",
+    contextWindow: 1_048_576,
+    maxTokens: 100_000,
+  },
+];
 
 const ANTHROPIC_OPUS_46_MODEL_ID = "claude-opus-4-6";
 const ANTHROPIC_OPUS_46_DOT_MODEL_ID = "claude-opus-4.6";
@@ -89,21 +121,25 @@ export function resolveGemini3ForwardCompatModel(
   return undefined;
 }
 
-function resolveOpenAICodexGpt53FallbackModel(
+function resolveOpenAICodexFallbackModel(
   provider: string,
   modelId: string,
   modelRegistry: ModelRegistry,
 ): Model<Api> | undefined {
   const normalizedProvider = normalizeProviderId(provider);
-  const trimmedModelId = modelId.trim();
-  if (normalizedProvider !== "openai-codex") {
-    return undefined;
-  }
-  if (trimmedModelId.toLowerCase() !== OPENAI_CODEX_GPT_53_MODEL_ID) {
+  if (normalizedProvider !== "openai-codex" && normalizedProvider !== "openai") {
     return undefined;
   }
 
-  for (const templateId of OPENAI_CODEX_TEMPLATE_MODEL_IDS) {
+  const trimmedModelId = modelId.trim();
+  const lower = trimmedModelId.toLowerCase();
+  const spec = OPENAI_CODEX_MODELS.find((s) => s.id === lower);
+  if (!spec) {
+    return undefined;
+  }
+
+  // Try each template in order; first registry hit wins.
+  for (const templateId of spec.templates) {
     const template = modelRegistry.find(normalizedProvider, templateId) as Model<Api> | null;
     if (!template) {
       continue;
@@ -112,20 +148,24 @@ function resolveOpenAICodexGpt53FallbackModel(
       ...template,
       id: trimmedModelId,
       name: trimmedModelId,
+      api: spec.api as Api,
+      contextWindow: spec.contextWindow,
+      maxTokens: spec.maxTokens,
     } as Model<Api>);
   }
 
+  // No template in registry — synthesize from spec table.
   return normalizeModelCompat({
     id: trimmedModelId,
     name: trimmedModelId,
-    api: "openai-codex-responses",
+    api: spec.api as Api,
     provider: normalizedProvider,
-    baseUrl: "https://chatgpt.com/backend-api",
+    baseUrl: normalizedProvider === "openai-codex" ? "https://api.openai.com/v1" : undefined,
     reasoning: true,
     input: ["text", "image"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: DEFAULT_CONTEXT_TOKENS,
-    maxTokens: DEFAULT_CONTEXT_TOKENS,
+    contextWindow: spec.contextWindow,
+    maxTokens: spec.maxTokens,
   } as Model<Api>);
 }
 
@@ -301,7 +341,7 @@ export function resolveForwardCompatModel(
 ): Model<Api> | undefined {
   return (
     resolveGemini3ForwardCompatModel(provider, modelId, modelRegistry) ??
-    resolveOpenAICodexGpt53FallbackModel(provider, modelId, modelRegistry) ??
+    resolveOpenAICodexFallbackModel(provider, modelId, modelRegistry) ??
     resolveAnthropicOpus46ForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveZaiGlm5ForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveAntigravityOpus46ForwardCompatModel(provider, modelId, modelRegistry)

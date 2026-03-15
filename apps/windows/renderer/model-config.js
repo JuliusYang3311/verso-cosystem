@@ -75,8 +75,7 @@ const MODEL_CATALOG = {
     { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', reasoning: true, ctx: '200K', input: ['text', 'image'] }
   ],
   openai: [
-    { id: 'gpt-5.4', name: 'GPT-5.4', reasoning: true, ctx: '2M', input: ['text', 'image'] },
-    { id: 'gpt-5.4-codex', name: 'GPT-5.4 Codex', reasoning: true, ctx: '2M', input: ['text', 'image'] },
+    { id: 'gpt-5.4', name: 'GPT-5.4', reasoning: true, ctx: '1M', input: ['text', 'image'] },
     { id: 'gpt-5.3', name: 'GPT-5.3', reasoning: true, ctx: '1M', input: ['text', 'image'] },
     { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', reasoning: true, ctx: '1M', input: ['text', 'image'] },
     { id: 'gpt-5.2', name: 'GPT-5.2', reasoning: true, ctx: '1M', input: ['text', 'image'] },

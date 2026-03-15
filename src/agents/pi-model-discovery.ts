@@ -93,8 +93,11 @@ export function discoverModels(authStorage: AuthStorage, agentDir: string): Mode
       if (modelId === "gemini-3.1-pro-preview") {
         return { ...original, contextWindow: 1048576, reasoning: true };
       }
+      if (modelId === "gpt-5.4") {
+        return { ...original, contextWindow: 1_050_000, maxTokens: 128_000 };
+      }
       if (modelId === "gpt-5.3" || modelId === "gpt-5.3-codex") {
-        return { ...original, contextWindow: 1048576 };
+        return { ...original, contextWindow: 1_048_576 };
       }
       if (modelId === "claude-opus-4-6" || modelId.startsWith("claude-opus-4-6-")) {
         return { ...original, contextWindow: 1048576, maxTokens: 128000 };
