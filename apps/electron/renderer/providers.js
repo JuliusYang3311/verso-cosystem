@@ -297,6 +297,12 @@ function showModelSelectionModal(providerName) {
     catalogKey = 'anthropic';
   } else if (providerType === 'custom-openai') {
     catalogKey = 'openai';
+  } else if (providerType === 'custom' || providerType === 'custom-api-key') {
+    // Infer catalog from the provider's API protocol selection
+    const apiType = provider.apiType || provider.api || '';
+    if (apiType.includes('anthropic')) catalogKey = 'anthropic';
+    else if (apiType.includes('google')) catalogKey = 'google';
+    else catalogKey = 'openai';
   }
 
   const models = window.MODEL_CATALOG[catalogKey] || [];
@@ -369,6 +375,12 @@ async function confirmModelSelection() {
   let catalogKey = providerType;
   if (providerType === 'custom-anthropic') catalogKey = 'anthropic';
   else if (providerType === 'custom-openai') catalogKey = 'openai';
+  else if (providerType === 'custom' || providerType === 'custom-api-key') {
+    const apiType = provider.apiType || provider.api || '';
+    if (apiType.includes('anthropic')) catalogKey = 'anthropic';
+    else if (apiType.includes('google')) catalogKey = 'google';
+    else catalogKey = 'openai';
+  }
   const catalog = window.MODEL_CATALOG[catalogKey] || [];
 
   // Add selected models with full metadata from catalog
