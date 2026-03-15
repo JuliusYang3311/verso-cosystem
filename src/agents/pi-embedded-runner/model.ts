@@ -139,6 +139,19 @@ export function resolveModel(
   }
 
   if (rawModel) {
+    // Apply forward-compat overrides: if a specs table entry exists for this model,
+    // ensure api/contextWindow/maxTokens are authoritative (user's stale verso.json
+    // may have outdated values from an older catalog).
+    const forwardCompat = resolveForwardCompatModel(provider, modelId, modelRegistry);
+    if (forwardCompat) {
+      rawModel = {
+        ...rawModel,
+        api: forwardCompat.api,
+        contextWindow: forwardCompat.contextWindow,
+        maxTokens: forwardCompat.maxTokens,
+      };
+    }
+
     // Apply effective context window logic: min(model.contextWindow, global.contextTokens)
     // Clone to avoid mutating shared registry objects if they are cached
     const finalModel = { ...rawModel };

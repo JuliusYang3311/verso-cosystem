@@ -5,8 +5,8 @@ import { resolveApi, convertModel, toGatewayProvider, inferProviderType } from '
 
 describe('resolveApi', () => {
   describe('UI apiType → gateway api mapping', () => {
-    it('openai → openai-completions', () => {
-      expect(resolveApi({ apiType: 'openai' })).toBe('openai-completions');
+    it('openai → openai-responses', () => {
+      expect(resolveApi({ apiType: 'openai' })).toBe('openai-responses');
     });
     it('anthropic → anthropic-messages', () => {
       expect(resolveApi({ apiType: 'anthropic' })).toBe('anthropic-messages');
@@ -14,8 +14,8 @@ describe('resolveApi', () => {
     it('google → google-generative-ai', () => {
       expect(resolveApi({ apiType: 'google' })).toBe('google-generative-ai');
     });
-    it('unknown apiType → openai-completions', () => {
-      expect(resolveApi({ apiType: 'azure' })).toBe('openai-completions');
+    it('unknown apiType → openai-responses', () => {
+      expect(resolveApi({ apiType: 'azure' })).toBe('openai-responses');
     });
   });
 
@@ -39,8 +39,8 @@ describe('resolveApi', () => {
     it('falls back to api when apiType absent', () => {
       expect(resolveApi({ api: 'anthropic-messages' })).toBe('anthropic-messages');
     });
-    it('defaults to openai-completions when empty', () => {
-      expect(resolveApi({})).toBe('openai-completions');
+    it('defaults to openai-responses when empty', () => {
+      expect(resolveApi({})).toBe('openai-responses');
     });
   });
 
@@ -122,7 +122,7 @@ describe('toGatewayProvider', () => {
   });
 
   it('maps openai apiType', () => {
-    expect(toGatewayProvider({ baseUrl: 'http://x', apiType: 'openai', models: [] }).api).toBe('openai-completions');
+    expect(toGatewayProvider({ baseUrl: 'http://x', apiType: 'openai', models: [] }).api).toBe('openai-responses');
   });
 
   it('preserves gateway api on round-trip', () => {

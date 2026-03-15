@@ -6,7 +6,7 @@
 /* eslint-disable no-var */
 window.ProviderUtils = (function () {
   var API_TYPE_MAP = {
-    'openai': 'openai-completions',
+    'openai': 'openai-responses',
     'anthropic': 'anthropic-messages',
     'google': 'google-generative-ai',
   };
@@ -20,7 +20,7 @@ window.ProviderUtils = (function () {
   function resolveApi(provider) {
     var apiType = provider.apiType || provider.api || 'openai';
     if (VALID_APIS.indexOf(apiType) !== -1) return apiType;
-    return API_TYPE_MAP[apiType] || 'openai-completions';
+    return API_TYPE_MAP[apiType] || 'openai-responses';
   }
 
   function convertModel(m) {

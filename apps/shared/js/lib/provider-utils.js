@@ -22,7 +22,7 @@ export var VALID_APIS = [
 export function resolveApi(provider) {
   var apiType = provider.apiType || provider.api || 'openai';
   if (VALID_APIS.indexOf(apiType) !== -1) return apiType;
-  return API_TYPE_MAP[apiType] || 'openai-completions';
+  return API_TYPE_MAP[apiType] || 'openai-responses';
 }
 
 /** Convert a model entry to gateway-clean format (strip UI-only fields). */

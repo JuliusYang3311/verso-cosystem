@@ -44,7 +44,7 @@ describe('provider pipeline: UI → gateway format', () => {
 
   it('openai is the default when no apiType', () => {
     const gateway = toGatewayProvider({ baseUrl: 'http://localhost:8080', models: [] });
-    expect(gateway.api).toBe('openai-completions');
+    expect(gateway.api).toBe('openai-responses');
   });
 
   it('preserves model input types through pipeline', () => {
@@ -182,7 +182,7 @@ describe('provider save/load round-trip', () => {
     const loaded = await loadProviders(verso);
 
     expect(loaded['anthropic-proxy'].api).toBe('anthropic-messages');
-    expect(loaded['openai-main'].api).toBe('openai-completions');
+    expect(loaded['openai-main'].api).toBe('openai-responses');
     expect(Object.keys(loaded)).toHaveLength(2);
   });
 
