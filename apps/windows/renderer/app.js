@@ -253,7 +253,14 @@ window.saveAllSettings = async function() {
     const ep = document.getElementById('embedding-provider');
     if (ep) config.agents.defaults.memorySearch.provider = ep.value;
     const em = document.getElementById('embedding-model');
-    if (em) config.agents.defaults.memorySearch.model = em.value;
+    if (em) {
+      if (ep && ep.value === 'local') {
+        if (!config.agents.defaults.memorySearch.local) config.agents.defaults.memorySearch.local = {};
+        config.agents.defaults.memorySearch.local.modelPath = em.value;
+      } else {
+        config.agents.defaults.memorySearch.model = em.value;
+      }
+    }
     const memApiKey = document.getElementById('embedding-api-key');
     if (memApiKey && memApiKey.value.trim()) {
       if (!config.agents.defaults.memorySearch.remote) config.agents.defaults.memorySearch.remote = {};
@@ -353,7 +360,8 @@ function loadConfig(config) {
     }
     // Set model after provider change updated the options
     const emSel = document.getElementById('embedding-model');
-    if (emSel && ms.model) emSel.value = ms.model;
+    const loadedModel = (ms.provider === 'local' && ms.local?.modelPath) ? ms.local.modelPath : ms.model;
+    if (emSel && loadedModel) emSel.value = loadedModel;
     // Restore API key
     const ak = document.getElementById('embedding-api-key');
     if (ak && ms.remote?.apiKey) ak.value = ms.remote.apiKey;
@@ -434,7 +442,14 @@ window.saveMemory = async function() {
   if (ep) config.agents.defaults.memorySearch.provider = ep.value;
 
   const em = document.getElementById('embedding-model');
-  if (em) config.agents.defaults.memorySearch.model = em.value;
+  if (em) {
+    if (ep && ep.value === 'local') {
+      if (!config.agents.defaults.memorySearch.local) config.agents.defaults.memorySearch.local = {};
+      config.agents.defaults.memorySearch.local.modelPath = em.value;
+    } else {
+      config.agents.defaults.memorySearch.model = em.value;
+    }
+  }
 
   const ak = document.getElementById('embedding-api-key');
   if (ak && ak.value.trim()) {
@@ -569,7 +584,7 @@ window.onEmbeddingProviderChange = function() {
     openai: [['text-embedding-3-small', 'text-embedding-3-small'], ['text-embedding-3-large', 'text-embedding-3-large']],
     voyage: [['voyage-3', 'voyage-3'], ['voyage-3-lite', 'voyage-3-lite']],
     gemini: [['gemini-embedding-001', 'gemini-embedding-001']],
-    local: [['nomic-embed-text', 'nomic-embed-text'], ['mxbai-embed-large', 'mxbai-embed-large']],
+    local: [['hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf', 'Embedding Gemma 300M (default)']],
   };
 
   modelSelect.innerHTML = (options[provider] || []).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');

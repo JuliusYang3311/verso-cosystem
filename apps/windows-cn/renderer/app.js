@@ -115,18 +115,18 @@ document.getElementById('config-reload-btn').addEventListener('click', () => loa
 
 window.verso.onGatewayConnected(() => {
   document.getElementById('status-dot').classList.add('connected');
-  document.getElementById('status-text').textContent = 'Gateway: Connected';
+  document.getElementById('status-text').textContent = '网关：已连接';
   document.getElementById('status-text').style.color = '';
 });
 
 window.verso.onGatewayDisconnected(() => {
   document.getElementById('status-dot').classList.remove('connected');
-  document.getElementById('status-text').textContent = 'Gateway: Disconnected';
+  document.getElementById('status-text').textContent = '网关：已断开';
 });
 
 window.verso.onGatewayError((msg) => {
   document.getElementById('status-dot').classList.remove('connected');
-  document.getElementById('status-text').textContent = 'Gateway Error: ' + msg.slice(0, 120);
+  document.getElementById('status-text').textContent = '网关错误：' + msg.slice(0, 120);
   document.getElementById('status-text').style.color = '#ff9800';
   console.error('[Gateway Error]', msg);
 });
@@ -170,7 +170,7 @@ async function applyConfigToGateway(config) {
 
 window.saveAllSettings = async function() {
   const btn = document.getElementById('save-all-settings-btn');
-  if (btn) { btn.textContent = 'Saving...'; btn.disabled = true; }
+  if (btn) { btn.textContent = '保存中...'; btn.disabled = true; }
 
   try {
     const config = await window.verso.getConfig();
@@ -297,12 +297,12 @@ window.saveAllSettings = async function() {
     const latestConfig = await window.verso.getConfig();
     await applyConfigToGateway(latestConfig);
 
-    showNotification('All settings saved');
+    showNotification('全部设置已保存');
   } catch (err) {
     console.error('saveAllSettings error:', err);
-    showNotification('Failed to save: ' + err.message, 'error');
+    showNotification('保存失败：' + err.message, 'error');
   } finally {
-    if (btn) { btn.textContent = 'Save All Settings'; btn.disabled = false; }
+    if (btn) { btn.textContent = '保存全部设置'; btn.disabled = false; }
   }
 }
 
@@ -321,7 +321,7 @@ async function loadChannelsConfig() {
   const channelTypes = ['telegram', 'whatsapp', 'discord', 'slack'];
   const channelLabels = { telegram: 'Telegram', whatsapp: 'WhatsApp', discord: 'Discord', slack: 'Slack' };
 
-  // Only show supported channels (telegram, whatsapp, discord, slack)
+  // Only show supported channels
   const allChannels = channelTypes;
 
   container.innerHTML = allChannels.map(ch => {
@@ -334,12 +334,12 @@ async function loadChannelsConfig() {
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <h4>${escapeHtml(label)}</h4>
           <div style="display:flex;gap:6px;align-items:center;">
-            ${isConfigured ? '<span style="color:#4caf50;font-size:11px;">Configured</span>' : '<span style="color:#888;font-size:11px;">Not configured</span>'}
-            <button class="btn btn-small btn-secondary" onclick="configureChannel('${escapeHtml(ch)}')">Configure & Pair</button>
+            ${isConfigured ? '<span style="color:#4caf50;font-size:11px;">已配置</span>' : '<span style="color:#888;font-size:11px;">未配置</span>'}
+            <button class="btn btn-small btn-secondary" onclick="configureChannel('${escapeHtml(ch)}')">配置与配对</button>
           </div>
         </div>
         <div style="font-size:12px;color:#888;">
-          ${ch === 'whatsapp' ? 'QR code pairing' : ch === 'telegram' ? 'Bot token from @BotFather' : ch === 'discord' ? 'Bot token from Developer Portal' : ch === 'slack' ? 'Bot + App tokens' : 'Custom channel'}
+          ${ch === 'whatsapp' ? '二维码配对' : ch === 'telegram' ? '从 @BotFather 获取 Bot Token' : ch === 'discord' ? '从开发者门户获取 Bot Token' : ch === 'slack' ? 'Bot + App 令牌' : '自定义频道'}
         </div>
       </div>
     `;
@@ -426,7 +426,7 @@ window.saveChannels = async function() {
   // WhatsApp is enabled by having valid config; no explicit enabled flag needed
 
   await window.verso.saveConfig(config);
-  showNotification('Channel settings saved');
+  showNotification('频道设置已保存');
 }
 
 window.saveMemory = async function() {
@@ -458,7 +458,7 @@ window.saveMemory = async function() {
   }
 
   await window.verso.saveConfig(config);
-  showNotification('Memory settings saved');
+  showNotification('记忆设置已保存');
 }
 
 window.saveBrowser = async function() {
@@ -469,7 +469,7 @@ window.saveBrowser = async function() {
   const bh = document.getElementById('browser-headless');
   if (bh) config.browser.headless = bh.checked;
   await window.verso.saveConfig(config);
-  showNotification('Browser settings saved');
+  showNotification('浏览器设置已保存');
 }
 
 window.saveWebTools = async function() {
@@ -485,7 +485,7 @@ window.saveWebTools = async function() {
   else delete config.tools.web.search.apiKey;
 
   await window.verso.saveConfig(config);
-  showNotification('Web tools settings saved');
+  showNotification('网络工具设置已保存');
 }
 
 // ==================== GENERAL SETTINGS ====================
@@ -502,7 +502,7 @@ window.loadGeneralSettings = loadGeneralSettings;
 
 window.saveGeneral = async function() {
   // Now handled by saveAllSettings — kept as no-op for backwards compat
-  showNotification('Use "Save All Settings" to save');
+  showNotification('请使用"保存全部设置"来保存');
 }
 
 // ==================== EVOLVER SETTINGS ====================
@@ -516,7 +516,7 @@ async function loadEvolverSettings() {
   // Check evolver running status via chat command
   const statusEl = document.getElementById('evolver-status');
   const toggleEl = document.getElementById('evolver-enabled');
-  if (statusEl) statusEl.textContent = 'Checking...';
+  if (statusEl) statusEl.textContent = '检查中...';
   try {
     const result = await window.gatewayClient.chatSend({
       sessionKey: 'agent:main:main',
@@ -525,11 +525,11 @@ async function loadEvolverSettings() {
     });
     const text = result?.text || result?.reply?.text || '';
     const running = text.includes('running');
-    if (statusEl) statusEl.textContent = running ? 'Running' : 'Stopped';
+    if (statusEl) statusEl.textContent = running ? '运行中' : '已停止';
     if (statusEl) statusEl.style.color = running ? '#4caf50' : '#888';
     if (toggleEl) toggleEl.checked = running;
   } catch {
-    if (statusEl) statusEl.textContent = 'Unknown';
+    if (statusEl) statusEl.textContent = '未知';
     if (statusEl) statusEl.style.color = '#888';
   }
 }
@@ -544,7 +544,7 @@ window.toggleEvolver = async function() {
   const command = enable ? '/evolve on' : '/evolve off';
 
   if (statusEl) {
-    statusEl.textContent = enable ? 'Starting...' : 'Stopping...';
+    statusEl.textContent = enable ? '启动中...' : '停止中...';
     statusEl.style.color = '#ff9800';
   }
 
@@ -558,20 +558,20 @@ window.toggleEvolver = async function() {
     const started = text.includes('started') || text.includes('running');
     const stopped = text.includes('stopped') || text.includes('not running');
     if (statusEl) {
-      statusEl.textContent = started ? 'Running' : stopped ? 'Stopped' : text.slice(0, 60);
+      statusEl.textContent = started ? '运行中' : stopped ? '已停止' : text.slice(0, 60);
       statusEl.style.color = started ? '#4caf50' : '#888';
     }
-    showNotification(enable ? 'Evolver started' : 'Evolver stopped');
+    showNotification(enable ? '进化器已启动' : '进化器已停止');
   } catch (err) {
-    if (statusEl) { statusEl.textContent = 'Error'; statusEl.style.color = '#f44336'; }
-    showNotification('Failed to toggle evolver: ' + err.message, 'error');
+    if (statusEl) { statusEl.textContent = '错误'; statusEl.style.color = '#f44336'; }
+    showNotification('切换进化器失败：' + err.message, 'error');
     toggleEl.checked = !enable; // revert
   }
 }
 
 window.saveEvolver = async function() {
   // Now handled by saveAllSettings — kept as no-op for backwards compat
-  showNotification('Use "Save All Settings" to save');
+  showNotification('请使用"保存全部设置"来保存');
 }
 
 window.onEmbeddingProviderChange = function() {
@@ -598,7 +598,7 @@ window.loadModelSection = async function() {
   if (!list || !select) return;
 
   list.innerHTML = '';
-  select.innerHTML = '<option value="">Select a primary model</option>';
+  select.innerHTML = '<option value="">选择主模型</option>';
 
   const providers = config.models?.providers || {};
   const currentPrimary = config.agents?.defaults?.model?.primary || '';
@@ -615,7 +615,7 @@ window.loadModelSection = async function() {
   });
 
   if (allModels.length === 0) {
-    list.innerHTML = '<p style="color:#888;font-size:13px;">No models configured. Add a provider and models first.</p>';
+    list.innerHTML = '<p style="color:#888;font-size:13px;">尚未配置模型。请先添加提供商和模型。</p>';
     return;
   }
 
@@ -630,14 +630,14 @@ window.loadModelSection = async function() {
     // Also show in the list for reference
     const item = document.createElement('div');
     item.style.cssText = 'padding:8px 12px;background:#1a1a1a;border-radius:6px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;';
-    item.innerHTML = `<span style="font-size:13px;">${escapeHtml(full)}</span>${currentPrimary === full ? '<span style="color:#4caf50;font-size:11px;font-weight:600;">Primary</span>' : ''}`;
+    item.innerHTML = `<span style="font-size:13px;">${escapeHtml(full)}</span>${currentPrimary === full ? '<span style="color:#4caf50;font-size:11px;font-weight:600;">主模型</span>' : ''}`;
     list.appendChild(item);
   });
 }
 
 window.saveModelSelection = async function() {
   const primary = document.getElementById('primary-model-select').value;
-  if (!primary) { showNotification('Select a primary model', 'error'); return; }
+  if (!primary) { showNotification('请选择一个主模型', 'error'); return; }
 
   const config = await window.verso.getConfig();
   if (!config.agents) config.agents = {};
@@ -648,7 +648,7 @@ window.saveModelSelection = async function() {
   await window.verso.saveConfig(config);
   void applyConfigToGateway(config);
 
-  showNotification('Primary model saved: ' + primary);
+  showNotification('主模型已保存：' + primary);
   void loadModelSection();
 }
 
